@@ -17,7 +17,7 @@ int main(int argc, char** argv)
     std::string error;
 
     if (!parseCommandLine(argc, argv, commandLine, error)) {
-        std::cerr << "Fehler: " << error << "\n\n";
+        std::cerr << "Error: " << error << "\n\n";
         std::cerr << buildHelpText(argv[0]);
         return ExitUsageError;
     }

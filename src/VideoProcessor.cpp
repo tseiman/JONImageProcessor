@@ -79,7 +79,7 @@ int VideoProcessor::run()
     }
 
     if (!capture.isOpened()) {
-        std::cerr << "Fehler: Videoquelle konnte nicht geoeffnet werden: "
+        std::cerr << "Error: Could not open video source: "
                   << (!config_.inputPath.empty() ? config_.inputPath : config_.devicePath) << '\n';
         return ExitRuntimeError;
     }
@@ -98,7 +98,7 @@ int VideoProcessor::run()
         const int fourcc = cv::VideoWriter::fourcc('m', 'p', '4', 'v');
         writer.open(config_.outputFile, fourcc, fps, outputSize, true);
         if (!writer.isOpened()) {
-            std::cerr << "Fehler: Ausgabedatei konnte nicht geoeffnet werden: "
+            std::cerr << "Error: Could not open output file: "
                       << config_.outputFile << '\n';
             return ExitRuntimeError;
         }
@@ -146,7 +146,7 @@ int VideoProcessor::run()
     }
 
     if (frameIndex == 0) {
-        std::cerr << "Fehler: Es konnten keine Frames gelesen werden.\n";
+        std::cerr << "Error: No frames could be read.\n";
         return ExitRuntimeError;
     }
 

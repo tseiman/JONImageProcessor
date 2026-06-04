@@ -1,29 +1,29 @@
 # JONImageProcessor
 
-JONImageProcessor ist ein C++ Grundprojekt fuer einen Jetson Orin Nano Image Processor. Das Programm liest spaeter ein Kamerabild, verarbeitet es und gibt das Ergebnis fullscreen ueber HDMI oder DisplayPort aus.
+JONImageProcessor is a C++ base project for a Jetson Orin Nano image processor. The application is intended to read a camera image, process it, and display the processed output fullscreen over HDMI or DisplayPort.
 
-Dieser erste Stand stellt die Projektbasis bereit: CMake, OpenCV, Kommandozeilenoptionen, Datei- oder Kamera-Input, eine einfache Dummy-Maske als sichtbares Overlay und Ausgabe in ein Fenster oder eine MP4-Datei.
+This initial version provides the project foundation: CMake, OpenCV, command-line options, file or camera input, a simple dummy mask as a visible overlay, and output to either an OpenCV window or an MP4 file.
 
 ## Build
 
-Voraussetzungen auf Linux:
+Linux requirements:
 
 - CMake
-- C++17 Compiler
-- OpenCV mit CMake-Paketdateien
+- C++17 compiler
+- OpenCV with CMake package files
 
 ```bash
 cmake -B build -S .
 cmake --build build
 ```
 
-Das Executable liegt danach unter:
+The executable is created at:
 
 ```bash
 ./build/JONImageProcessor
 ```
 
-## Beispielaufrufe
+## Example Commands
 
 ```bash
 ./build/JONImageProcessor --help
@@ -51,49 +51,49 @@ Das Executable liegt danach unter:
   --mask-height 144
 ```
 
-## Kommandozeilenoptionen
+## Command-Line Options
 
-Die Hilfe wird aus derselben zentralen Options-Tabelle erzeugt, die auch fuer `getopt_long` verwendet wird:
+The help output is generated from the same central option table that is used for `getopt_long`:
 
 ```bash
 ./build/JONImageProcessor --help
 ```
 
-Wichtige Optionen:
+Important options:
 
-- `--input <path>` liest ein Video aus einer Datei.
-- `--device <path>` liest von einem Kamera-Device, Default ist `/dev/video0`.
-- `--output window` zeigt ein OpenCV-Fenster.
-- `--output file` schreibt eine MP4-Datei.
-- `--fullscreen` schaltet das Fenster in fullscreen, wenn `--output window` genutzt wird.
-- `--width`, `--height`, `--mask-width` und `--mask-height` konfigurieren Verarbeitungs- und Maskengroessen.
+- `--input <path>` reads video from a file.
+- `--device <path>` reads from a camera device. The default is `/dev/video0`.
+- `--output window` shows an OpenCV window.
+- `--output file` writes an MP4 file.
+- `--fullscreen` switches the window to fullscreen when `--output window` is used.
+- `--width`, `--height`, `--mask-width`, and `--mask-height` configure processing and mask dimensions.
 
-Im Fenstermodus beendet `ESC` oder `q` das Programm sauber.
+In window mode, `ESC` or `q` exits the program cleanly.
 
-## Jetson Orin Nano Hinweise
+## Jetson Orin Nano Notes
 
-Der aktuelle Stand verwendet bewusst nur CMake, C++17 und OpenCV, damit er auf einer normalen Linux VM und spaeter auf dem Jetson Orin Nano baubar bleibt.
+This version intentionally uses only CMake, C++17, and OpenCV so it can build on a normal Linux VM and later on the Jetson Orin Nano.
 
-Auf dem Jetson sollten OpenCV und Kamera-Zugriff vor dem Service-Betrieb separat verifiziert werden. Fuer USB-Kameras ist `/dev/video0` der Default. Je nach Kamera, Treiber und Performance-Ziel kann spaeter eine GStreamer-basierte OpenCV-Pipeline sinnvoll sein.
+On the Jetson, OpenCV and camera access should be verified separately before service operation. `/dev/video0` is the default for USB cameras. Depending on the camera, driver, and performance target, a GStreamer-based OpenCV pipeline may be useful later.
 
-## Geplanter Service-Betrieb
+## Planned Service Operation
 
-Spaetere Versionen sollen als Linux Service/Daemon per systemd automatisch starten und das verarbeitete Kamerabild fullscreen auf HDMI oder DisplayPort ausgeben.
+Future versions should run automatically as a Linux service/daemon through systemd and display the processed camera image fullscreen on HDMI or DisplayPort.
 
-In diesem ersten Schritt sind noch keine systemd Unit, kein Daemon-Modus und keine Display-spezifische Initialisierung enthalten.
+This initial step does not include a systemd unit, daemon mode, or display-specific initialization.
 
 ## Planned runtime control
 
-Die Verarbeitungseinstellungen liegen bereits in einer zentralen `ProcessorConfig`-Struktur. Diese Struktur ist bewusst so angelegt, dass sie spaeter zur Laufzeit aktualisiert werden kann.
+Processing settings already live in a central `ProcessorConfig` structure. This structure is intentionally prepared so it can be updated at runtime later.
 
-Geplant ist ein lokaler Unix Domain Socket, der JSON-Kommandos annimmt. Darueber sollen spaeter Einstellungen wie Background Image, Blur Strength, Transparency, Fullscreen und Mask Debug Overlay geaendert werden koennen.
+The planned approach is a local Unix domain socket that accepts JSON commands. Future commands should allow settings such as background image, blur strength, transparency, fullscreen, and mask debug overlay to be changed at runtime.
 
-Noch nicht implementiert:
+Not implemented yet:
 
-- keine Unix Domain Socket Steuerung
-- keine WebAPI
-- kein JSON Runtime Protocol
+- no Unix domain socket control
+- no WebAPI
+- no JSON runtime protocol
 
-## Testdaten
+## Test Data
 
-Das Verzeichnis `testdata/` ist fuer lokale Testvideos vorgesehen und wird nicht pauschal ignoriert.
+The `testdata/` directory is intended for local test videos and is not ignored globally.

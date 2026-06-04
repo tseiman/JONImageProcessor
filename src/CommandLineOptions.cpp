@@ -38,18 +38,18 @@ struct OptionDefinition {
 const std::vector<OptionDefinition>& optionDefinitions()
 {
     static const std::vector<OptionDefinition> definitions = {
-        {OptionHelp, 'h', "help", no_argument, "", "Hilfe anzeigen", ""},
-        {OptionInput, 'i', "input", required_argument, "path", "Videodatei als Input verwenden", ""},
-        {OptionDevice, 'd', "device", required_argument, "path", "Kamera-Device verwenden", "/dev/video0"},
-        {OptionOutput, 'o', "output", required_argument, "mode", "Output-Modus: window oder file", "window"},
-        {OptionOutputFile, 0, "output-file", required_argument, "path", "Zieldatei bei --output file", "output.mp4"},
-        {OptionWidth, 0, "width", required_argument, "pixels", "Verarbeitungsbreite", "1920"},
-        {OptionHeight, 0, "height", required_argument, "pixels", "Verarbeitungshoehe", "1080"},
-        {OptionMaskWidth, 0, "mask-width", required_argument, "pixels", "Breite der spaeteren Masken-Inferenz", "256"},
-        {OptionMaskHeight, 0, "mask-height", required_argument, "pixels", "Hoehe der spaeteren Masken-Inferenz", "144"},
-        {OptionFullscreen, 0, "fullscreen", no_argument, "", "Fenster fullscreen anzeigen, falls Output window benutzt wird", ""},
-        {OptionVerbose, 'v', "verbose", no_argument, "", "Ausfuehrlichere Logs ausgeben", ""},
-        {OptionVersion, 0, "version", no_argument, "", "Versionsinformation anzeigen", ""},
+        {OptionHelp, 'h', "help", no_argument, "", "Show help", ""},
+        {OptionInput, 'i', "input", required_argument, "path", "Use a video file as input", ""},
+        {OptionDevice, 'd', "device", required_argument, "path", "Use a camera device", "/dev/video0"},
+        {OptionOutput, 'o', "output", required_argument, "mode", "Output mode: window or file", "window"},
+        {OptionOutputFile, 0, "output-file", required_argument, "path", "Target file for --output file", "output.mp4"},
+        {OptionWidth, 0, "width", required_argument, "pixels", "Processing width", "1920"},
+        {OptionHeight, 0, "height", required_argument, "pixels", "Processing height", "1080"},
+        {OptionMaskWidth, 0, "mask-width", required_argument, "pixels", "Width for later mask inference", "256"},
+        {OptionMaskHeight, 0, "mask-height", required_argument, "pixels", "Height for later mask inference", "144"},
+        {OptionFullscreen, 0, "fullscreen", no_argument, "", "Show the window fullscreen when using window output", ""},
+        {OptionVerbose, 'v', "verbose", no_argument, "", "Enable more detailed logs", ""},
+        {OptionVersion, 0, "version", no_argument, "", "Show version information", ""},
     };
     return definitions;
 }
@@ -98,7 +98,7 @@ bool parsePositiveInteger(const char* value, const std::string& optionName, int&
     const long parsed = std::strtol(value, &end, 10);
 
     if (end == value || *end != '\0' || parsed <= 0 || parsed > 16384) {
-        error = "Ungueltiger Wert fuer " + optionName + ": " + value;
+        error = "Invalid value for " + optionName + ": " + value;
         return false;
     }
 
@@ -118,7 +118,7 @@ bool parseOutputMode(const char* value, OutputMode& mode, std::string& error)
         return true;
     }
 
-    error = "Ungueltiger Output-Modus: " + parsed + " (erlaubt: window, file)";
+    error = "Invalid output mode: " + parsed + " (allowed: window, file)";
     return false;
 }
 
@@ -207,31 +207,31 @@ bool parseCommandLine(int argc, char** argv, CommandLineResult& result, std::str
             break;
         case '?':
             if (optopt != 0) {
-                error = std::string("Unbekannte oder unvollstaendige Option: -") + static_cast<char>(optopt);
+                error = std::string("Unknown or incomplete option: -") + static_cast<char>(optopt);
             } else if (optind > 0 && optind <= argc) {
-                error = "Unbekannte oder unvollstaendige Option: " + std::string(argv[optind - 1]);
+                error = "Unknown or incomplete option: " + std::string(argv[optind - 1]);
             } else {
-                error = "Unbekannte oder unvollstaendige Option";
+                error = "Unknown or incomplete option";
             }
             return false;
         default:
-            error = "Unerwarteter Parser-Zustand";
+            error = "Unexpected parser state";
             return false;
         }
     }
 
     if (optind < argc) {
-        error = "Unerwartetes Argument: " + std::string(argv[optind]);
+        error = "Unexpected argument: " + std::string(argv[optind]);
         return false;
     }
 
     if (result.config.inputPath.empty() && result.config.devicePath.empty()) {
-        error = "Es wurde weder --input noch --device angegeben.";
+        error = "Neither --input nor --device was specified.";
         return false;
     }
 
     if (result.config.outputMode == OutputMode::File && result.config.outputFile.empty()) {
-        error = "--output-file darf bei --output file nicht leer sein.";
+        error = "--output-file must not be empty when using --output file.";
         return false;
     }
 
@@ -242,7 +242,7 @@ std::string buildHelpText(const std::string& programName)
 {
     std::ostringstream stream;
     stream << "Usage: " << programName << " [options]\n\n";
-    stream << "Optionen:\n";
+    stream << "Options:\n";
 
     for (const auto& definition : optionDefinitions()) {
         stream << "  " << std::left << std::setw(32) << formatOptionName(definition)
