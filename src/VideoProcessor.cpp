@@ -141,7 +141,7 @@ std::string operatingSystemString()
     return stream.str();
 }
 
-void logStartupInfo(const ProcessorConfig& config)
+void logStartupInfo(const ProcessorConfig& config, const ScreenInfo& screenInfo)
 {
     const std::string inputSource = !config.inputPath.empty()
         ? config.inputPath
@@ -153,7 +153,7 @@ void logStartupInfo(const ProcessorConfig& config)
     LOG_VERBOSE("Build date: " << __DATE__ << " " << __TIME__);
     LOG_VERBOSE("Operating system: " << operatingSystemString());
     LOG_VERBOSE("OpenCV version: " << CV_VERSION);
-    LOG_VERBOSE("Primary screen size: " << screenInfoToString(detectPrimaryScreen()));
+    LOG_VERBOSE("Primary screen size: " << screenInfoToString(screenInfo));
     LOG_VERBOSE("Input source: " << inputSource);
     LOG_VERBOSE("Output mode: " << outputModeToString(config.outputMode));
     LOG_VERBOSE("Display mode: " << displayModeToString(config.displayMode));
@@ -194,7 +194,8 @@ VideoProcessor::VideoProcessor(ProcessorConfig config)
 
 int VideoProcessor::run()
 {
-    logStartupInfo(config_);
+    const ScreenInfo screenInfo = detectPrimaryScreen();
+    logStartupInfo(config_, screenInfo);
 
     if (!config_.verbose) {
         cv::utils::logging::setLogLevel(cv::utils::logging::LOG_LEVEL_ERROR);
@@ -221,9 +222,11 @@ int VideoProcessor::run()
 
     const cv::Size outputSize(config_.width, config_.height);
     const bool hasExplicitDisplaySize = config_.outputWidth > 0 && config_.outputHeight > 0;
+    const bool useScreenDisplaySize = config_.fullscreen && screenInfo.available && !hasExplicitDisplaySize;
     const cv::Size configuredDisplaySize = hasExplicitDisplaySize
         ? cv::Size(config_.outputWidth, config_.outputHeight)
-        : outputSize;
+        : (useScreenDisplaySize ? screenInfo.size : outputSize);
+    const bool forceConfiguredDisplaySize = hasExplicitDisplaySize || useScreenDisplaySize;
     const cv::Size maskSize(config_.maskWidth, config_.maskHeight);
     const bool writeFile = config_.outputMode == OutputMode::File;
 
@@ -253,7 +256,6 @@ int VideoProcessor::run()
 
     std::size_t frameIndex = 0;
     cv::Mat frame;
-    const ScreenInfo screenInfo = detectPrimaryScreen();
     cv::Size lastInputSize;
     cv::Size lastScreenSize;
     cv::Size lastWindowRectSize;
@@ -261,6 +263,7 @@ int VideoProcessor::run()
     cv::Rect lastDestinationRect;
     bool hasLoggedDisplayDiagnostics = false;
     bool hasWarnedDisplayFallback = false;
+    bool hasLoggedFullscreenScreenFallback = false;
     const auto startedAt = std::chrono::steady_clock::now();
     auto intervalStartedAt = startedAt;
     std::size_t intervalFrames = 0;
@@ -285,10 +288,15 @@ int VideoProcessor::run()
         if (writeFile) {
             writer.write(outputFrame);
         } else {
-            const DisplayArea displayArea = resolveDisplayArea(WindowName, configuredDisplaySize, hasExplicitDisplaySize);
+            const DisplayArea displayArea = resolveDisplayArea(WindowName, configuredDisplaySize, forceConfiguredDisplaySize);
             const DisplayRenderResult displayResult = renderForDisplay(outputFrame, displayArea.canvasSize, config_.displayMode);
 
-            if (displayArea.usedFallback && !hasExplicitDisplaySize && !hasWarnedDisplayFallback) {
+            if (useScreenDisplaySize && !hasLoggedFullscreenScreenFallback) {
+                LOG_VERBOSE("Using detected screen size for fullscreen render canvas: " << sizeToString(screenInfo.size));
+                hasLoggedFullscreenScreenFallback = true;
+            }
+
+            if (displayArea.usedFallback && !hasExplicitDisplaySize && !useScreenDisplaySize && !hasWarnedDisplayFallback) {
                 LOG_WARNING("Falling back to configured output size because HighGUI reported an unreliable window size: "
                     << sizeToString(displayArea.windowRect.size()));
                 hasWarnedDisplayFallback = true;

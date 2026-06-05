@@ -119,7 +119,7 @@ The default display mode is `fit`.
 - `fill` preserves the aspect ratio, fills the complete display area, keeps the image centered, and crops overflowing image areas when needed.
 - `stretch` ignores the aspect ratio and scales the image exactly to the display area. This avoids bars and cropping but may distort the image.
 
-The application uses the current OpenCV window image area for display sizing when that value is reliable. If OpenCV returns an invalid or very small window image area, the renderer falls back to the configured display surface. Without an explicit display surface, that fallback is the processing size configured by `--width` and `--height`.
+The application uses the current OpenCV window image area for display sizing when that value is reliable. In fullscreen mode, if the primary screen size is available, that screen size is used as the render canvas because OpenCV HighGUI can report stale or invalid window sizes on some platforms. If no reliable screen or window size is available, the renderer falls back to the configured display surface. Without an explicit display surface, that fallback is the processing size configured by `--width` and `--height`.
 
 Use `--output-width` and `--output-height` to define the display render surface explicitly. This is useful on platforms where OpenCV HighGUI does not report the real fullscreen size reliably, especially on macOS. Fullscreen is still requested, but the render calculation can use the explicit size instead of depending on an unreliable window rectangle.
 
