@@ -17,6 +17,7 @@
 #include <sstream>
 #include <string>
 #include <sys/utsname.h>
+#include <unistd.h>
 #include <utility>
 #include <vector>
 
@@ -81,6 +82,22 @@ std::string operatingSystemString()
     return stream.str();
 }
 
+std::string buildHostName()
+{
+    char hostName[256] {};
+    if (gethostname(hostName, sizeof(hostName) - 1) != 0) {
+        return "unknown";
+    }
+
+    std::string shortName(hostName);
+    const std::size_t firstDot = shortName.find('.');
+    if (firstDot != std::string::npos) {
+        shortName.erase(firstDot);
+    }
+
+    return shortName.empty() ? "unknown" : shortName;
+}
+
 void logStartupInfo(const ProcessorConfig& config, const ScreenInfo& screenInfo)
 {
     const std::string inputSource = !config.inputPath.empty()
@@ -89,10 +106,10 @@ void logStartupInfo(const ProcessorConfig& config, const ScreenInfo& screenInfo)
 
     LOG_INFO("JONImageProcessor starting");
     LOG_VERBOSE("Program version: " << jonImageProcessorReleaseVersionOrUnreleased());
-    LOG_VERBOSE("Git version: " << JON_IMAGE_PROCESSOR_GIT_VERSION);
-    LOG_VERBOSE("Build date: " << __DATE__ << " " << __TIME__);
-    LOG_VERBOSE("Operating system: " << operatingSystemString());
-    LOG_VERBOSE("OpenCV version: " << CV_VERSION);
+    LOG_INFO("Git version: " << JON_IMAGE_PROCESSOR_GIT_VERSION);
+    LOG_INFO("Build date: " << __DATE__ << " " << __TIME__ << " on " << buildHostName());
+    LOG_INFO("Operating system: " << operatingSystemString());
+    LOG_INFO("OpenCV version: " << CV_VERSION);
     LOG_VERBOSE("Primary screen size: " << screenInfoToString(screenInfo));
     LOG_VERBOSE("Input source: " << inputSource);
     LOG_VERBOSE("Output mode: " << outputModeToString(config.outputMode));
