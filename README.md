@@ -107,7 +107,7 @@ Important options:
 - `--display-mode <mode>` controls how the processed image is scaled into the current window or fullscreen area.
 - `--output-width <pixels>` and `--output-height <pixels>` explicitly define the display render surface. They must be specified together.
 - `--width`, `--height`, `--mask-width`, and `--mask-height` configure processing and mask dimensions.
-- `--version` prints the application version and the 7-character Git commit hash captured at CMake configure time.
+- `--version` prints the 7-character Git commit hash captured at CMake configure time. A semantic release version, such as `0.1.0`, is only printed when the build is configured exactly on a Git release tag like `v0.1.0` or `0.1.0`.
 
 In window mode, `ESC` or `q` exits the program cleanly.
 
@@ -150,7 +150,7 @@ Examples:
   -v
 ```
 
-Verbose startup diagnostics include the program version, build date, operating system, OpenCV version, input source, output mode, display mode, processing size, mask size, and fullscreen state.
+Verbose startup diagnostics include the release version state, Git version, build date, operating system, OpenCV version, input source, output mode, display mode, processing size, mask size, and fullscreen state.
 
 Verbose display diagnostics include input frame size, detected primary screen size, HighGUI window size, output canvas size, display mode, and destination rectangle. This makes platform-specific HighGUI behavior visible, especially when fullscreen window sizing differs between Linux and macOS. Performance diagnostics are emitted about once per second and include current FPS, average FPS, and processed frame count.
 

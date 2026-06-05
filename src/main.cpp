@@ -31,10 +31,7 @@ int main(int argc, char** argv)
     }
 
     if (commandLine.showVersion) {
-        std::cout << "JONImageProcessor "
-                  << JON_IMAGE_PROCESSOR_VERSION
-                  << " git=" << JON_IMAGE_PROCESSOR_GIT_VERSION
-                  << '\n';
+        std::cout << jonImageProcessorVersionText() << '\n';
         return ExitOk;
     }
 
