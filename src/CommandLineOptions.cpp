@@ -19,6 +19,8 @@ enum OptionId {
     OptionOutputFile = 1000,
     OptionWidth,
     OptionHeight,
+    OptionOutputWidth,
+    OptionOutputHeight,
     OptionMaskWidth,
     OptionMaskHeight,
     OptionFullscreen,
@@ -46,6 +48,8 @@ const std::vector<OptionDefinition>& optionDefinitions()
         {OptionOutputFile, 0, "output-file", required_argument, "path", "Target file for --output file", "output.mp4"},
         {OptionWidth, 0, "width", required_argument, "pixels", "Processing width", "1920"},
         {OptionHeight, 0, "height", required_argument, "pixels", "Processing height", "1080"},
+        {OptionOutputWidth, 0, "output-width", required_argument, "pixels", "Explicit display render width", "auto"},
+        {OptionOutputHeight, 0, "output-height", required_argument, "pixels", "Explicit display render height", "auto"},
         {OptionMaskWidth, 0, "mask-width", required_argument, "pixels", "Width for later mask inference", "256"},
         {OptionMaskHeight, 0, "mask-height", required_argument, "pixels", "Height for later mask inference", "144"},
         {OptionFullscreen, 0, "fullscreen", no_argument, "", "Show the window fullscreen when using window output", ""},
@@ -208,6 +212,16 @@ bool parseCommandLine(int argc, char** argv, CommandLineResult& result, std::str
                 return false;
             }
             break;
+        case OptionOutputWidth:
+            if (!parsePositiveInteger(optarg, "--output-width", result.config.outputWidth, error)) {
+                return false;
+            }
+            break;
+        case OptionOutputHeight:
+            if (!parsePositiveInteger(optarg, "--output-height", result.config.outputHeight, error)) {
+                return false;
+            }
+            break;
         case OptionMaskWidth:
             if (!parsePositiveInteger(optarg, "--mask-width", result.config.maskWidth, error)) {
                 return false;
@@ -259,6 +273,11 @@ bool parseCommandLine(int argc, char** argv, CommandLineResult& result, std::str
 
     if (result.config.outputMode == OutputMode::File && result.config.outputFile.empty()) {
         error = "--output-file must not be empty when using --output file.";
+        return false;
+    }
+
+    if ((result.config.outputWidth > 0) != (result.config.outputHeight > 0)) {
+        error = "--output-width and --output-height must be specified together.";
         return false;
     }
 

@@ -69,6 +69,16 @@ The executable is created at:
   --display-mode stretch
 ```
 
+```bash
+./build/JONImageProcessor \
+  --input testdata/Test2_pixabay_Video_HD.mp4 \
+  --fullscreen \
+  --display-mode fit \
+  --output-width 1920 \
+  --output-height 1080 \
+  --verbose
+```
+
 ## Command-Line Options
 
 The help output is generated from the same central option table that is used for `getopt_long`:
@@ -85,6 +95,7 @@ Important options:
 - `--output file` writes an MP4 file.
 - `--fullscreen` switches the window to fullscreen when `--output window` is used.
 - `--display-mode <mode>` controls how the processed image is scaled into the current window or fullscreen area.
+- `--output-width <pixels>` and `--output-height <pixels>` explicitly define the display render surface. They must be specified together.
 - `--width`, `--height`, `--mask-width`, and `--mask-height` configure processing and mask dimensions.
 
 In window mode, `ESC` or `q` exits the program cleanly.
@@ -97,7 +108,11 @@ The default display mode is `fit`.
 - `fill` preserves the aspect ratio, fills the complete display area, keeps the image centered, and crops overflowing image areas when needed.
 - `stretch` ignores the aspect ratio and scales the image exactly to the display area. This avoids bars and cropping but may distort the image.
 
-The application uses the current OpenCV window image area for display sizing. In fullscreen mode it does not change the monitor resolution; it renders into the area provided by the active display setup.
+The application uses the current OpenCV window image area for display sizing when that value is reliable. If OpenCV returns an invalid or very small window image area, the renderer falls back to the configured display surface. Without an explicit display surface, that fallback is the processing size configured by `--width` and `--height`.
+
+Use `--output-width` and `--output-height` to define the display render surface explicitly. This is useful on platforms where OpenCV HighGUI does not report the real fullscreen size reliably, especially on macOS. Fullscreen is still requested, but the render calculation can use the explicit size instead of depending on an unreliable window rectangle.
+
+In verbose mode, display diagnostics include input frame size, processing size, window rectangle size, canvas size, display mode, and destination rectangle.
 
 ## Jetson Orin Nano Notes
 

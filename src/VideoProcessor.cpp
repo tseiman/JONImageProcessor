@@ -10,6 +10,7 @@
 
 #include <algorithm>
 #include <iostream>
+#include <sstream>
 #include <string>
 #include <utility>
 #include <vector>
@@ -54,6 +55,62 @@ bool shouldStopFromKey(int key)
     return normalized == 27 || normalized == 'q' || normalized == 'Q';
 }
 
+std::string sizeToString(cv::Size size)
+{
+    std::ostringstream stream;
+    stream << size.width << "x" << size.height;
+    return stream.str();
+}
+
+std::string rectToString(const cv::Rect& rect)
+{
+    std::ostringstream stream;
+    stream << rect.x << "," << rect.y << " " << rect.width << "x" << rect.height;
+    return stream.str();
+}
+
+bool displayStateChanged(
+    cv::Size inputSize,
+    cv::Size windowRectSize,
+    cv::Size canvasSize,
+    const cv::Rect& destinationRect,
+    cv::Size& lastInputSize,
+    cv::Size& lastWindowRectSize,
+    cv::Size& lastCanvasSize,
+    cv::Rect& lastDestinationRect)
+{
+    const bool changed = inputSize != lastInputSize
+        || windowRectSize != lastWindowRectSize
+        || canvasSize != lastCanvasSize
+        || destinationRect != lastDestinationRect;
+
+    if (changed) {
+        lastInputSize = inputSize;
+        lastWindowRectSize = windowRectSize;
+        lastCanvasSize = canvasSize;
+        lastDestinationRect = destinationRect;
+    }
+
+    return changed;
+}
+
+void logDisplayDiagnostics(
+    cv::Size inputSize,
+    cv::Size processingSize,
+    cv::Rect windowRect,
+    cv::Size canvasSize,
+    DisplayMode displayMode,
+    const cv::Rect& destinationRect)
+{
+    std::cout << "Display diagnostics:\n";
+    std::cout << "  Input Frame Size: " << sizeToString(inputSize) << '\n';
+    std::cout << "  Processing Size: " << sizeToString(processingSize) << '\n';
+    std::cout << "  Window Rect Size: " << sizeToString(windowRect.size()) << '\n';
+    std::cout << "  Canvas Size: " << sizeToString(canvasSize) << '\n';
+    std::cout << "  Display Mode: " << displayModeToString(displayMode) << '\n';
+    std::cout << "  Destination Rect: " << rectToString(destinationRect) << '\n';
+}
+
 } // namespace
 
 VideoProcessor::VideoProcessor(ProcessorConfig config)
@@ -88,6 +145,10 @@ int VideoProcessor::run()
     }
 
     const cv::Size outputSize(config_.width, config_.height);
+    const bool hasExplicitDisplaySize = config_.outputWidth > 0 && config_.outputHeight > 0;
+    const cv::Size configuredDisplaySize = hasExplicitDisplaySize
+        ? cv::Size(config_.outputWidth, config_.outputHeight)
+        : outputSize;
     const cv::Size maskSize(config_.maskWidth, config_.maskHeight);
     const bool writeFile = config_.outputMode == OutputMode::File;
 
@@ -111,7 +172,7 @@ int VideoProcessor::run()
         }
     } else {
         cv::namedWindow(WindowName, cv::WINDOW_NORMAL | cv::WINDOW_FREERATIO);
-        cv::resizeWindow(WindowName, outputSize.width, outputSize.height);
+        cv::resizeWindow(WindowName, configuredDisplaySize.width, configuredDisplaySize.height);
         if (config_.fullscreen) {
             cv::setWindowProperty(WindowName, cv::WND_PROP_FULLSCREEN, cv::WINDOW_FULLSCREEN);
             cv::waitKey(1);
@@ -120,6 +181,11 @@ int VideoProcessor::run()
 
     std::size_t frameIndex = 0;
     cv::Mat frame;
+    cv::Size lastInputSize;
+    cv::Size lastWindowRectSize;
+    cv::Size lastCanvasSize;
+    cv::Rect lastDestinationRect;
+    bool hasLoggedDisplayDiagnostics = false;
 
     while (capture.read(frame)) {
         if (frame.empty()) {
@@ -141,9 +207,38 @@ int VideoProcessor::run()
         if (writeFile) {
             writer.write(outputFrame);
         } else {
-            const cv::Size displaySize = getWindowDisplaySize(WindowName, outputSize);
-            const cv::Mat displayFrame = renderForDisplay(outputFrame, displaySize, config_.displayMode);
-            cv::imshow(WindowName, displayFrame);
+            const DisplayArea displayArea = resolveDisplayArea(WindowName, configuredDisplaySize, hasExplicitDisplaySize);
+            const DisplayRenderResult displayResult = renderForDisplay(outputFrame, displayArea.canvasSize, config_.displayMode);
+
+            if (config_.verbose) {
+                const cv::Size inputSize = frame.size();
+                const cv::Size windowRectSize = displayArea.windowRect.size();
+                const bool changed = displayStateChanged(
+                    inputSize,
+                    windowRectSize,
+                    displayResult.canvasSize,
+                    displayResult.destinationRect,
+                    lastInputSize,
+                    lastWindowRectSize,
+                    lastCanvasSize,
+                    lastDestinationRect
+                );
+                const bool shouldLog = !hasLoggedDisplayDiagnostics || changed;
+
+                if (shouldLog) {
+                    logDisplayDiagnostics(
+                        inputSize,
+                        outputSize,
+                        displayArea.windowRect,
+                        displayResult.canvasSize,
+                        config_.displayMode,
+                        displayResult.destinationRect
+                    );
+                    hasLoggedDisplayDiagnostics = true;
+                }
+            }
+
+            cv::imshow(WindowName, displayResult.frame);
             if (shouldStopFromKey(cv::waitKey(1))) {
                 break;
             }

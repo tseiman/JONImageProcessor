@@ -21,6 +21,8 @@ struct ProcessorConfig {
     std::string outputFile = "output.mp4";
     int width = 1920;
     int height = 1080;
+    int outputWidth = 0;
+    int outputHeight = 0;
     int maskWidth = 256;
     int maskHeight = 144;
     bool fullscreen = false;

@@ -8,6 +8,8 @@
 
 namespace {
 
+constexpr int MinimumReliableWindowExtent = 64;
+
 cv::Rect calculateTargetRect(cv::Size sourceSize, cv::Size targetSize, DisplayMode mode)
 {
     if (mode == DisplayMode::Stretch) {
@@ -33,19 +35,37 @@ cv::Rect calculateTargetRect(cv::Size sourceSize, cv::Size targetSize, DisplayMo
 
 } // namespace
 
-cv::Mat renderForDisplay(const cv::Mat& source, cv::Size targetSize, DisplayMode mode)
+DisplayArea resolveDisplayArea(const std::string& windowName, cv::Size fallbackSize, bool forceFallbackSize)
+{
+    const cv::Rect imageRect = cv::getWindowImageRect(windowName);
+    if (forceFallbackSize) {
+        return DisplayArea {imageRect, fallbackSize, true};
+    }
+
+    const bool hasReliableWindowRect = imageRect.width >= MinimumReliableWindowExtent
+        && imageRect.height >= MinimumReliableWindowExtent;
+
+    if (hasReliableWindowRect) {
+        return DisplayArea {imageRect, imageRect.size(), false};
+    }
+
+    return DisplayArea {imageRect, fallbackSize, true};
+}
+
+DisplayRenderResult renderForDisplay(const cv::Mat& source, cv::Size targetSize, DisplayMode mode)
 {
     if (source.empty() || targetSize.width <= 0 || targetSize.height <= 0) {
-        return source;
+        return DisplayRenderResult {source, targetSize, cv::Rect()};
     }
+
+    const cv::Rect targetRect = calculateTargetRect(source.size(), targetSize, mode);
 
     if (mode == DisplayMode::Stretch) {
         cv::Mat stretched;
         cv::resize(source, stretched, targetSize, 0.0, 0.0, cv::INTER_LINEAR);
-        return stretched;
+        return DisplayRenderResult {stretched, targetSize, targetRect};
     }
 
-    const cv::Rect targetRect = calculateTargetRect(source.size(), targetSize, mode);
     cv::Mat resized;
     cv::resize(source, resized, targetRect.size(), 0.0, 0.0, cv::INTER_LINEAR);
 
@@ -54,7 +74,7 @@ cv::Mat renderForDisplay(const cv::Mat& source, cv::Size targetSize, DisplayMode
     cv::Rect visibleTargetRect = targetRect & visibleCanvasRect;
 
     if (visibleTargetRect.empty()) {
-        return canvas;
+        return DisplayRenderResult {canvas, targetSize, targetRect};
     }
 
     cv::Rect sourceRect(
@@ -64,15 +84,5 @@ cv::Mat renderForDisplay(const cv::Mat& source, cv::Size targetSize, DisplayMode
         visibleTargetRect.height
     );
     resized(sourceRect).copyTo(canvas(visibleTargetRect));
-    return canvas;
-}
-
-cv::Size getWindowDisplaySize(const std::string& windowName, cv::Size fallbackSize)
-{
-    const cv::Rect imageRect = cv::getWindowImageRect(windowName);
-    if (imageRect.width > 0 && imageRect.height > 0) {
-        return imageRect.size();
-    }
-
-    return fallbackSize;
+    return DisplayRenderResult {canvas, targetSize, targetRect};
 }

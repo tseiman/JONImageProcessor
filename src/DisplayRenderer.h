@@ -6,5 +6,17 @@
 
 #include <string>
 
-cv::Mat renderForDisplay(const cv::Mat& source, cv::Size targetSize, DisplayMode mode);
-cv::Size getWindowDisplaySize(const std::string& windowName, cv::Size fallbackSize);
+struct DisplayArea {
+    cv::Rect windowRect;
+    cv::Size canvasSize;
+    bool usedFallback = false;
+};
+
+struct DisplayRenderResult {
+    cv::Mat frame;
+    cv::Size canvasSize;
+    cv::Rect destinationRect;
+};
+
+DisplayArea resolveDisplayArea(const std::string& windowName, cv::Size fallbackSize, bool forceFallbackSize);
+DisplayRenderResult renderForDisplay(const cv::Mat& source, cv::Size targetSize, DisplayMode mode);
