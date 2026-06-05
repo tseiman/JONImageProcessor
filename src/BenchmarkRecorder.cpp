@@ -102,6 +102,20 @@ void BenchmarkRecorder::frameCompleted()
     }
 }
 
+void BenchmarkRecorder::setCaptureStats(
+    std::size_t capturedFrames,
+    std::size_t droppedFrames,
+    std::chrono::steady_clock::duration elapsed)
+{
+    if (!enabled_) {
+        return;
+    }
+
+    capturedFrames_ = capturedFrames;
+    droppedFrames_ = droppedFrames;
+    captureElapsed_ = elapsed;
+}
+
 void BenchmarkRecorder::maybeLogProgress()
 {
     if (!enabled_ || frames_ == 0) {
@@ -126,6 +140,15 @@ void BenchmarkRecorder::logSummary() const
     }
 
     LOG_BENCH("Frames processed: " << frames_);
+    if (capturedFrames_ > 0) {
+        const double captureSeconds = std::chrono::duration<double>(captureElapsed_).count();
+        const double captureFps = captureSeconds > 0.0 ? static_cast<double>(capturedFrames_) / captureSeconds : 0.0;
+        const double processingFps = captureSeconds > 0.0 ? static_cast<double>(frames_) / captureSeconds : 0.0;
+        LOG_BENCH("Captured frames: " << capturedFrames_);
+        LOG_BENCH("Dropped frames: " << droppedFrames_);
+        LOG_BENCH("Capture FPS: " << captureFps);
+        LOG_BENCH("Processing FPS: " << processingFps);
+    }
     if (frames_ == 0) {
         return;
     }

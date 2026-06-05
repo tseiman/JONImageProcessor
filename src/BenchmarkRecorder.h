@@ -22,6 +22,10 @@ public:
     bool enabled() const;
     void add(BenchmarkStage stage, std::chrono::steady_clock::duration duration);
     void frameCompleted();
+    void setCaptureStats(
+        std::size_t capturedFrames,
+        std::size_t droppedFrames,
+        std::chrono::steady_clock::duration elapsed);
     void maybeLogProgress();
     void logSummary() const;
 
@@ -38,6 +42,9 @@ private:
 
     bool enabled_ = false;
     std::size_t frames_ = 0;
+    std::size_t capturedFrames_ = 0;
+    std::size_t droppedFrames_ = 0;
+    std::chrono::steady_clock::duration captureElapsed_ {};
     StageStats stages_[static_cast<std::size_t>(BenchmarkStage::Count)];
     std::chrono::steady_clock::time_point lastProgressLog_;
 };

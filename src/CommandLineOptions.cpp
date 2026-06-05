@@ -29,6 +29,7 @@ enum OptionId {
     OptionDisplayMode,
     OptionDisplayBackend,
     OptionBenchmark,
+    OptionLowLatency,
     OptionMaxFrames,
     OptionNoDisplay,
     OptionNoMask,
@@ -66,6 +67,7 @@ const std::vector<OptionDefinition>& optionDefinitions()
         {OptionDisplayMode, 0, "display-mode", required_argument, "mode", "Display mode: fit, fill, or stretch", "fit"},
         {OptionDisplayBackend, 0, "display-backend", required_argument, "backend", "Display backend: highgui", "highgui"},
         {OptionBenchmark, 0, "benchmark", no_argument, "", "Enable benchmark mode", ""},
+        {OptionLowLatency, 0, "low-latency", no_argument, "", "Enable low-latency live camera capture", ""},
         {OptionMaxFrames, 0, "max-frames", required_argument, "n", "Process at most n frames", ""},
         {OptionNoDisplay, 0, "no-display", no_argument, "", "Disable window and file output", ""},
         {OptionNoMask, 0, "no-mask", no_argument, "", "Disable mask generation", ""},
@@ -323,6 +325,9 @@ bool parseCommandLine(int argc, char** argv, CommandLineResult& result, std::str
             break;
         case OptionBenchmark:
             result.config.benchmark = true;
+            break;
+        case OptionLowLatency:
+            result.config.lowLatency = true;
             break;
         case OptionNoDisplay:
             result.config.noDisplay = true;

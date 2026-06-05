@@ -41,6 +41,7 @@ struct ProcessorConfig {
     bool fullscreen = false;
     bool verbose = false;
     bool benchmark = false;
+    bool lowLatency = false;
     bool noDisplay = false;
     bool noMask = false;
     bool noOverlay = false;

@@ -4,6 +4,7 @@
 #include "DisplayBackendFactory.h"
 #include "DisplayEnvironment.h"
 #include "Logger.h"
+#include "LowLatencyFrameCapture.h"
 #include "Version.h"
 
 #include <opencv2/core.hpp>
@@ -117,6 +118,14 @@ bool almostEqual(double left, double right, double tolerance)
     return std::fabs(left - right) <= tolerance;
 }
 
+std::size_t effectiveDroppedFrames(const LowLatencyCaptureStats& stats, std::size_t processedFrames)
+{
+    const std::size_t unprocessedFrames = stats.capturedFrames > processedFrames
+        ? stats.capturedFrames - processedFrames
+        : 0;
+    return std::max(stats.droppedFrames, unprocessedFrames);
+}
+
 void logRequestedCameraConfig(const ProcessorConfig& config)
 {
     LOG_VERBOSE("Requested camera device: " << config.devicePath);
@@ -183,6 +192,7 @@ void logStartupInfo(const ProcessorConfig& config, const ScreenInfo& screenInfo)
     LOG_VERBOSE("Camera FPS: " << config.cameraFps);
     LOG_VERBOSE("Fullscreen: " << (config.fullscreen ? "true" : "false"));
     LOG_VERBOSE("Benchmark: " << (config.benchmark ? "true" : "false"));
+    LOG_VERBOSE("Low latency requested: " << (config.lowLatency ? "true" : "false"));
     LOG_VERBOSE("Max frames: " << (config.maxFrames > 0 ? std::to_string(config.maxFrames) : "unlimited"));
     LOG_VERBOSE("No display: " << (config.noDisplay ? "true" : "false"));
     LOG_VERBOSE("No mask: " << (config.noMask ? "true" : "false"));
@@ -224,6 +234,9 @@ int VideoProcessor::run()
     const ScreenInfo screenInfo = detectPrimaryScreen();
     logStartupInfo(config_, screenInfo);
     LOG_INFO("Display backend: " << displayBackendToString(config_.displayBackend));
+    const bool usingCamera = config_.inputPath.empty();
+    const bool lowLatencyMode = usingCamera;
+    LOG_INFO("Low latency mode: " << (lowLatencyMode ? "enabled" : "disabled"));
 
     if (!config_.verbose) {
         cv::utils::logging::setLogLevel(cv::utils::logging::LOG_LEVEL_ERROR);
@@ -250,6 +263,8 @@ int VideoProcessor::run()
     }
 
     if (config_.inputPath.empty()) {
+        LOG_VERBOSE("Camera capture buffer size requested: 1");
+        capture.set(cv::CAP_PROP_BUFFERSIZE, 1);
         configureCameraCapture(capture, config_);
     }
 
@@ -307,21 +322,31 @@ int VideoProcessor::run()
     std::size_t frameIndex = 0;
     cv::Mat frame;
     BenchmarkRecorder benchmark(config_.benchmark);
+    LowLatencyFrameCapture lowLatencyCapture;
+    if (lowLatencyMode) {
+        lowLatencyCapture.start(capture);
+    }
     const auto startedAt = std::chrono::steady_clock::now();
     auto intervalStartedAt = startedAt;
     std::size_t intervalFrames = 0;
 
     while (true) {
-        bool readOk = false;
         const auto frameStartedAt = std::chrono::steady_clock::now();
-        const auto decodeStartedAt = std::chrono::steady_clock::now();
-        readOk = capture.read(frame);
-        const auto decodeEndedAt = std::chrono::steady_clock::now();
+        bool readOk = false;
+        if (lowLatencyMode) {
+            readOk = lowLatencyCapture.waitForLatestFrame(frame);
+        } else {
+            const auto decodeStartedAt = std::chrono::steady_clock::now();
+            readOk = capture.read(frame);
+            const auto decodeEndedAt = std::chrono::steady_clock::now();
+            if (readOk) {
+                benchmark.add(BenchmarkStage::Decode, decodeEndedAt - decodeStartedAt);
+            }
+        }
 
         if (!readOk) {
             break;
         }
-        benchmark.add(BenchmarkStage::Decode, decodeEndedAt - decodeStartedAt);
 
         if (frame.empty()) {
             continue;
@@ -377,6 +402,12 @@ int VideoProcessor::run()
             const auto now = std::chrono::steady_clock::now();
             if (now - intervalStartedAt >= std::chrono::seconds(1)) {
                 logPerformance(frameIndex, intervalFrames, startedAt, intervalStartedAt, now);
+                if (lowLatencyMode) {
+                    const auto stats = lowLatencyCapture.stats();
+                    LOG_VERBOSE("Frames captured: " << stats.capturedFrames);
+                    LOG_VERBOSE("Frames processed: " << frameIndex);
+                    LOG_VERBOSE("Frames dropped/overwritten: " << effectiveDroppedFrames(stats, frameIndex));
+                }
                 intervalStartedAt = now;
                 intervalFrames = 0;
             }
@@ -385,6 +416,16 @@ int VideoProcessor::run()
         if (config_.maxFrames > 0 && frameIndex >= static_cast<std::size_t>(config_.maxFrames)) {
             break;
         }
+    }
+
+    if (lowLatencyMode) {
+        lowLatencyCapture.stop();
+        const auto stats = lowLatencyCapture.stats();
+        const std::size_t droppedFrames = effectiveDroppedFrames(stats, frameIndex);
+        LOG_VERBOSE("Frames captured: " << stats.capturedFrames);
+        LOG_VERBOSE("Frames processed: " << frameIndex);
+        LOG_VERBOSE("Frames dropped/overwritten: " << droppedFrames);
+        benchmark.setCaptureStats(stats.capturedFrames, droppedFrames, stats.elapsed);
     }
 
     if (frameIndex == 0) {

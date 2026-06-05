@@ -34,75 +34,43 @@ The executable is created at:
 ```
 
 ```bash
-./build/JONImageProcessor \
-  --input testdata/Test2_pixabay_Video_HD.mp4 \
-  --output window
+./build/JONImageProcessor --input testdata/Test2_pixabay_Video_HD.mp4 --output window
 ```
 
 ```bash
-./build/JONImageProcessor \
-  --input testdata/Test2_pixabay_Video_HD.mp4 \
-  --output file \
-  --output-file output.mp4
+./build/JONImageProcessor --input testdata/Test2_pixabay_Video_HD.mp4 --output file --output-file output.mp4
 ```
 
 ```bash
-./build/JONImageProcessor \
-  --device /dev/video0 \
-  --width 1280 \
-  --height 720 \
-  --mask-width 256 \
-  --mask-height 144
+./build/JONImageProcessor --device /dev/video0 --width 1280 --height 720 --mask-width 256 --mask-height 144
 ```
 
 ```bash
-./build/JONImageProcessor \
-  --input testdata/Test2_pixabay_Video_HD.mp4 \
-  --display-mode fit
+./build/JONImageProcessor --input testdata/Test2_pixabay_Video_HD.mp4 --display-mode fit
 ```
 
 ```bash
-./build/JONImageProcessor \
-  --input testdata/Test2_pixabay_Video_HD.mp4 \
-  --display-mode fill
+./build/JONImageProcessor --input testdata/Test2_pixabay_Video_HD.mp4 --display-mode fill
 ```
 
 ```bash
-./build/JONImageProcessor \
-  --input testdata/Test2_pixabay_Video_HD.mp4 \
-  --display-mode stretch
+./build/JONImageProcessor --input testdata/Test2_pixabay_Video_HD.mp4 --display-mode stretch
 ```
 
 ```bash
-./build/JONImageProcessor \
-  --input testdata/Test2_pixabay_Video_HD.mp4 \
-  --fullscreen \
-  --display-mode fit \
-  --output-width 1920 \
-  --output-height 1080 \
-  --verbose
+./build/JONImageProcessor --input testdata/Test2_pixabay_Video_HD.mp4 --fullscreen --display-mode fit --output-width 1920 --output-height 1080 --verbose
 ```
 
 ```bash
-./build/JONImageProcessor \
-  --input testdata/Test2_pixabay_Video_HD.mp4 \
-  -v
+./build/JONImageProcessor --input testdata/Test2_pixabay_Video_HD.mp4 -v
 ```
 
 ```bash
-./build/JONImageProcessor \
-  --input testdata/Test1_pixabay_Video_4k.mp4 \
-  --benchmark \
-  --max-frames 500
+./build/JONImageProcessor --input testdata/Test1_pixabay_Video_4k.mp4 --benchmark --max-frames 500
 ```
 
 ```bash
-./build/JONImageProcessor \
-  --input testdata/Test1_pixabay_Video_4k.mp4 \
-  --benchmark \
-  --no-display \
-  --no-mask \
-  --no-overlay
+./build/JONImageProcessor --input testdata/Test1_pixabay_Video_4k.mp4 --benchmark --no-display --no-mask --no-overlay
 ```
 
 ## Command-Line Options
@@ -126,6 +94,7 @@ Important options:
 - `--width`, `--height`, `--mask-width`, and `--mask-height` configure processing and mask dimensions.
 - `--camera-format <format>` requests a camera pixel format. Supported values are `MJPG` and `YUYV`; the default is `MJPG`.
 - `--camera-fps <fps>` requests a camera frame rate. The default is `30`.
+- `--low-latency` enables low-latency live camera capture. Camera input enables this mode automatically; file input keeps sequential frame processing.
 - `--version` prints the 7-character Git commit hash captured at CMake configure time. A semantic release version, such as `0.1.0`, is only printed when the build is configured exactly on a Git release tag like `v0.1.0` or `0.1.0`.
 - `--benchmark` enables benchmark mode.
 - `--max-frames <n>` stops automatically after n processed frames.
@@ -140,26 +109,28 @@ In window mode, `ESC` or `q` exits the program cleanly.
 When using `--device`, the application requests the configured camera pixel format, frame size, and frame rate through OpenCV. `--width` and `--height` are used both as processing size and requested camera capture size.
 
 ```bash
-./build/JONImageProcessor \
-  --device /dev/video0 \
-  --width 1920 \
-  --height 1080 \
-  --camera-format MJPG \
-  --camera-fps 30
+./build/JONImageProcessor --device /dev/video0 --width 1920 --height 1080 --camera-format MJPG --camera-fps 30
 ```
 
 ```bash
-./build/JONImageProcessor \
-  --device /dev/video0 \
-  --width 1280 \
-  --height 720 \
-  --camera-format MJPG \
-  --camera-fps 60
+./build/JONImageProcessor --device /dev/video0 --width 1280 --height 720 --camera-format MJPG --camera-fps 60
 ```
 
 Many USB webcams need MJPG for high resolutions and useful frame rates. Uncompressed YUYV often supports only very low frame rates at 1080p or above.
 
 Verbose mode logs the requested camera settings and the active settings reported by OpenCV after configuration. If the camera does not accept the requested format, size, or FPS, a warning is emitted.
+
+## Low-Latency Camera Mode
+
+Live camera input prioritizes low latency over processing every frame. Camera input automatically enables low-latency mode; file input keeps sequential frame processing.
+
+In low-latency mode a capture thread continuously reads from the camera and stores only the newest frame. The processing thread always consumes the latest available frame. Older frames may be overwritten when processing is slower than camera capture, which keeps visible latency low.
+
+```bash
+./build/JONImageProcessor --device /dev/video0 --width 1920 --height 1080 --camera-format MJPG --camera-fps 30 --low-latency
+```
+
+The application also requests an OpenCV camera buffer size of `1`. Some camera backends may ignore this setting; the application logs the request and continues.
 
 ## Display Modes
 
@@ -186,9 +157,7 @@ Currently supported backend:
 The backend can be selected explicitly:
 
 ```bash
-./build/JONImageProcessor \
-  --input testdata/Test2_pixabay_Video_HD.mp4 \
-  --display-backend highgui
+./build/JONImageProcessor --input testdata/Test2_pixabay_Video_HD.mp4 --display-backend highgui
 ```
 
 Planned future backends include SDL2, GStreamer, DRM/KMS, and Jetson-specific output paths. Adding one of those should not require changes to the video processing, mask, overlay, camera input, or file input logic.
@@ -207,15 +176,11 @@ Verbose logging is intentionally simple and currently writes directly to standar
 Examples:
 
 ```bash
-./build/JONImageProcessor \
-  --input testdata/Test2_pixabay_Video_HD.mp4 \
-  --verbose
+./build/JONImageProcessor --input testdata/Test2_pixabay_Video_HD.mp4 --verbose
 ```
 
 ```bash
-./build/JONImageProcessor \
-  --input testdata/Test2_pixabay_Video_HD.mp4 \
-  -v
+./build/JONImageProcessor --input testdata/Test2_pixabay_Video_HD.mp4 -v
 ```
 
 Verbose startup diagnostics include the release version state, Git version, build date, operating system, OpenCV version, input source, output mode, display mode, processing size, mask size, and fullscreen state.
@@ -227,10 +192,7 @@ Verbose display diagnostics include display input frame size, detected primary s
 Benchmark mode measures where frame time is spent without changing the processing pipeline by default:
 
 ```bash
-./build/JONImageProcessor \
-  --input testdata/Test1_pixabay_Video_4k.mp4 \
-  --benchmark \
-  --max-frames 500
+./build/JONImageProcessor --input testdata/Test1_pixabay_Video_4k.mp4 --benchmark --max-frames 500
 ```
 
 Use `--max-frames <n>` to make benchmark runs repeatable and automatically stop after a fixed number of frames.
@@ -238,37 +200,22 @@ Use `--max-frames <n>` to make benchmark runs repeatable and automatically stop 
 Use `--no-display` to skip window creation and file output. This isolates decode, resize, mask, and overlay cost:
 
 ```bash
-./build/JONImageProcessor \
-  --input testdata/Test1_pixabay_Video_4k.mp4 \
-  --benchmark \
-  --no-display \
-  --max-frames 500
+./build/JONImageProcessor --input testdata/Test1_pixabay_Video_4k.mp4 --benchmark --no-display --max-frames 500
 ```
 
 Use `--no-mask` to skip mask generation and mask upscaling:
 
 ```bash
-./build/JONImageProcessor \
-  --input testdata/Test1_pixabay_Video_4k.mp4 \
-  --benchmark \
-  --no-display \
-  --no-mask \
-  --max-frames 500
+./build/JONImageProcessor --input testdata/Test1_pixabay_Video_4k.mp4 --benchmark --no-display --no-mask --max-frames 500
 ```
 
 Use `--no-overlay` to skip overlay rendering:
 
 ```bash
-./build/JONImageProcessor \
-  --input testdata/Test1_pixabay_Video_4k.mp4 \
-  --benchmark \
-  --no-display \
-  --no-mask \
-  --no-overlay \
-  --max-frames 500
+./build/JONImageProcessor --input testdata/Test1_pixabay_Video_4k.mp4 --benchmark --no-display --no-mask --no-overlay --max-frames 500
 ```
 
-Benchmark output reports average time for decode, resize, mask generation, mask upscale, overlay, display, total frame time, effective FPS, and percentage distribution including unmeasured overhead as `Other`.
+Benchmark output reports average time for decode, resize, mask generation, mask upscale, overlay, display, total frame time, effective FPS, and percentage distribution including unmeasured overhead as `Other`. In low-latency camera mode, benchmark output also reports captured frames, processed frames, dropped frames, capture FPS, and processing FPS.
 
 The goal is to compare macOS development systems, Linux VMs, and Jetson Orin Nano runs objectively before deciding where optimization work should happen.
 
