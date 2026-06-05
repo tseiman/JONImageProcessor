@@ -121,6 +121,7 @@ Important options:
 - `--output file` writes an MP4 file.
 - `--fullscreen` switches the window to fullscreen when `--output window` is used.
 - `--display-mode <mode>` controls how the processed image is scaled into the current window or fullscreen area.
+- `--display-backend <backend>` selects the display backend. The current default and only supported backend is `highgui`.
 - `--output-width <pixels>` and `--output-height <pixels>` explicitly define the display render surface. They must be specified together.
 - `--width`, `--height`, `--mask-width`, and `--mask-height` configure processing and mask dimensions.
 - `--version` prints the 7-character Git commit hash captured at CMake configure time. A semantic release version, such as `0.1.0`, is only printed when the build is configured exactly on a Git release tag like `v0.1.0` or `0.1.0`.
@@ -145,6 +146,24 @@ The application uses the current OpenCV window image area for display sizing whe
 Use `--output-width` and `--output-height` to define the display render surface explicitly. This is useful on platforms where OpenCV HighGUI does not report the real fullscreen size reliably, especially on macOS. Fullscreen is still requested, but the render calculation can use the explicit size instead of depending on an unreliable window rectangle.
 
 In verbose mode, display diagnostics include input frame size, processing size, window rectangle size, canvas size, display mode, and destination rectangle.
+
+## Display Backends
+
+The display path is separated from the video processing pipeline through an `IDisplayBackend` interface. This keeps decoding, resizing, mask generation, and overlay rendering independent from the final output system.
+
+Currently supported backend:
+
+- `highgui`: OpenCV HighGUI window output. This preserves the current behavior and remains the default.
+
+The backend can be selected explicitly:
+
+```bash
+./build/JONImageProcessor \
+  --input testdata/Test2_pixabay_Video_HD.mp4 \
+  --display-backend highgui
+```
+
+Planned future backends include SDL2, GStreamer, DRM/KMS, and Jetson-specific output paths. Adding one of those should not require changes to the video processing, mask, overlay, camera input, or file input logic.
 
 ## Verbose Logging
 
@@ -173,7 +192,7 @@ Examples:
 
 Verbose startup diagnostics include the release version state, Git version, build date, operating system, OpenCV version, input source, output mode, display mode, processing size, mask size, and fullscreen state.
 
-Verbose display diagnostics include input frame size, detected primary screen size, HighGUI window size, output canvas size, display mode, and destination rectangle. This makes platform-specific HighGUI behavior visible, especially when fullscreen window sizing differs between Linux and macOS. Performance diagnostics are emitted about once per second and include current FPS, average FPS, and processed frame count.
+Verbose display diagnostics include display input frame size, detected primary screen size, backend window size, output canvas size, display mode, and destination rectangle. This makes platform-specific backend behavior visible, especially when fullscreen window sizing differs between Linux and macOS. Performance diagnostics are emitted about once per second and include current FPS, average FPS, and processed frame count.
 
 ## Performance Analysis
 

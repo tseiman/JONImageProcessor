@@ -1,19 +1,19 @@
 #include "VideoProcessor.h"
 
 #include "BenchmarkRecorder.h"
+#include "DisplayBackendFactory.h"
 #include "DisplayEnvironment.h"
-#include "DisplayRenderer.h"
 #include "Logger.h"
 #include "Version.h"
 
 #include <opencv2/core.hpp>
 #include <opencv2/core/utils/logger.hpp>
-#include <opencv2/highgui.hpp>
 #include <opencv2/imgproc.hpp>
 #include <opencv2/videoio.hpp>
 
 #include <algorithm>
 #include <chrono>
+#include <memory>
 #include <sstream>
 #include <string>
 #include <sys/utsname.h>
@@ -24,7 +24,6 @@ namespace {
 
 constexpr int ExitOk = 0;
 constexpr int ExitRuntimeError = 2;
-constexpr const char* WindowName = "JONImageProcessor";
 
 cv::Mat createDummyMask(int width, int height, std::size_t frameIndex)
 {
@@ -54,12 +53,6 @@ cv::Mat applyMaskOverlay(const cv::Mat& frame, const cv::Mat& mask)
     return result;
 }
 
-bool shouldStopFromKey(int key)
-{
-    const int normalized = key & 0xff;
-    return normalized == 27 || normalized == 'q' || normalized == 'Q';
-}
-
 std::string sizeToString(cv::Size size)
 {
     std::ostringstream stream;
@@ -74,60 +67,6 @@ std::string screenInfoToString(const ScreenInfo& screenInfo)
     }
 
     return sizeToString(screenInfo.size);
-}
-
-std::string rectToString(const cv::Rect& rect)
-{
-    std::ostringstream stream;
-    stream << "x=" << rect.x << " y=" << rect.y << " width=" << rect.width << " height=" << rect.height;
-    return stream.str();
-}
-
-bool displayStateChanged(
-    cv::Size inputSize,
-    cv::Size screenSize,
-    cv::Size windowRectSize,
-    cv::Size canvasSize,
-    const cv::Rect& destinationRect,
-    cv::Size& lastInputSize,
-    cv::Size& lastScreenSize,
-    cv::Size& lastWindowRectSize,
-    cv::Size& lastCanvasSize,
-    cv::Rect& lastDestinationRect)
-{
-    const bool changed = inputSize != lastInputSize
-        || screenSize != lastScreenSize
-        || windowRectSize != lastWindowRectSize
-        || canvasSize != lastCanvasSize
-        || destinationRect != lastDestinationRect;
-
-    if (changed) {
-        lastInputSize = inputSize;
-        lastScreenSize = screenSize;
-        lastWindowRectSize = windowRectSize;
-        lastCanvasSize = canvasSize;
-        lastDestinationRect = destinationRect;
-    }
-
-    return changed;
-}
-
-void logDisplayDiagnostics(
-    cv::Size inputSize,
-    cv::Size processingSize,
-    const ScreenInfo& screenInfo,
-    cv::Rect windowRect,
-    cv::Size canvasSize,
-    DisplayMode displayMode,
-    const cv::Rect& destinationRect)
-{
-    LOG_VERBOSE("Input frame: " << sizeToString(inputSize));
-    LOG_VERBOSE("Processing size: " << sizeToString(processingSize));
-    LOG_VERBOSE("Screen size: " << screenInfoToString(screenInfo));
-    LOG_VERBOSE("Window size: " << sizeToString(windowRect.size()));
-    LOG_VERBOSE("Canvas size: " << sizeToString(canvasSize));
-    LOG_VERBOSE("Display mode: " << displayModeToString(displayMode));
-    LOG_VERBOSE("Destination rect: " << rectToString(destinationRect));
 }
 
 std::string operatingSystemString()
@@ -158,6 +97,7 @@ void logStartupInfo(const ProcessorConfig& config, const ScreenInfo& screenInfo)
     LOG_VERBOSE("Input source: " << inputSource);
     LOG_VERBOSE("Output mode: " << outputModeToString(config.outputMode));
     LOG_VERBOSE("Display mode: " << displayModeToString(config.displayMode));
+    LOG_VERBOSE("Display backend: " << displayBackendToString(config.displayBackend));
     LOG_VERBOSE("Processing size: " << config.width << "x" << config.height);
     LOG_VERBOSE("Mask size: " << config.maskWidth << "x" << config.maskHeight);
     LOG_VERBOSE("Fullscreen: " << (config.fullscreen ? "true" : "false"));
@@ -202,6 +142,7 @@ int VideoProcessor::run()
 {
     const ScreenInfo screenInfo = detectPrimaryScreen();
     logStartupInfo(config_, screenInfo);
+    LOG_INFO("Display backend: " << displayBackendToString(config_.displayBackend));
 
     if (!config_.verbose) {
         cv::utils::logging::setLogLevel(cv::utils::logging::LOG_LEVEL_ERROR);
@@ -240,6 +181,7 @@ int VideoProcessor::run()
     const bool overlayEnabled = !config_.noOverlay && maskEnabled;
 
     cv::VideoWriter writer;
+    std::unique_ptr<IDisplayBackend> displayBackend;
     if (writeFile) {
         double fps = capture.get(cv::CAP_PROP_FPS);
         if (fps <= 1.0 || fps > 240.0) {
@@ -255,24 +197,29 @@ int VideoProcessor::run()
 
         LOG_INFO("Writing MP4 output: " << config_.outputFile << " @ " << fps << " fps");
     } else if (showWindow) {
-        cv::namedWindow(WindowName, cv::WINDOW_NORMAL | cv::WINDOW_FREERATIO);
-        cv::resizeWindow(WindowName, configuredDisplaySize.width, configuredDisplaySize.height);
-        if (config_.fullscreen) {
-            cv::setWindowProperty(WindowName, cv::WND_PROP_FULLSCREEN, cv::WINDOW_FULLSCREEN);
-            cv::waitKey(1);
+        displayBackend = DisplayBackendFactory::create(config_.displayBackend);
+        if (!displayBackend) {
+            LOG_ERROR("Cannot create display backend: " << displayBackendToString(config_.displayBackend));
+            return ExitRuntimeError;
+        }
+
+        DisplayBackendConfig displayConfig;
+        displayConfig.displayMode = config_.displayMode;
+        displayConfig.processingSize = outputSize;
+        displayConfig.canvasFallbackSize = configuredDisplaySize;
+        displayConfig.screenInfo = screenInfo;
+        displayConfig.fullscreen = config_.fullscreen;
+        displayConfig.forceCanvasFallbackSize = forceConfiguredDisplaySize;
+        displayConfig.useScreenCanvasFallback = useScreenDisplaySize;
+
+        if (!displayBackend->initialize(displayConfig)) {
+            LOG_ERROR("Cannot initialize display backend: " << displayBackendToString(config_.displayBackend));
+            return ExitRuntimeError;
         }
     }
 
     std::size_t frameIndex = 0;
     cv::Mat frame;
-    cv::Size lastInputSize;
-    cv::Size lastScreenSize;
-    cv::Size lastWindowRectSize;
-    cv::Size lastCanvasSize;
-    cv::Rect lastDestinationRect;
-    bool hasLoggedDisplayDiagnostics = false;
-    bool hasWarnedDisplayFallback = false;
-    bool hasLoggedFullscreenScreenFallback = false;
     BenchmarkRecorder benchmark(config_.benchmark);
     const auto startedAt = std::chrono::steady_clock::now();
     auto intervalStartedAt = startedAt;
@@ -329,54 +276,7 @@ int VideoProcessor::run()
             writer.write(outputFrame);
         } else if (showWindow) {
             BenchmarkScope timer(benchmark, BenchmarkStage::Display);
-            const DisplayArea displayArea = resolveDisplayArea(WindowName, configuredDisplaySize, forceConfiguredDisplaySize);
-            const DisplayRenderResult displayResult = renderForDisplay(outputFrame, displayArea.canvasSize, config_.displayMode);
-
-            if (useScreenDisplaySize && !hasLoggedFullscreenScreenFallback) {
-                LOG_VERBOSE("Using detected screen size for fullscreen render canvas: " << sizeToString(screenInfo.size));
-                hasLoggedFullscreenScreenFallback = true;
-            }
-
-            if (displayArea.usedFallback && !hasExplicitDisplaySize && !useScreenDisplaySize && !hasWarnedDisplayFallback) {
-                LOG_WARNING("Falling back to configured output size because HighGUI reported an unreliable window size: "
-                    << sizeToString(displayArea.windowRect.size()));
-                hasWarnedDisplayFallback = true;
-            }
-
-            if (config_.verbose) {
-                const cv::Size inputSize = frame.size();
-                const cv::Size screenSize = screenInfo.available ? screenInfo.size : cv::Size();
-                const cv::Size windowRectSize = displayArea.windowRect.size();
-                const bool changed = displayStateChanged(
-                    inputSize,
-                    screenSize,
-                    windowRectSize,
-                    displayResult.canvasSize,
-                    displayResult.destinationRect,
-                    lastInputSize,
-                    lastScreenSize,
-                    lastWindowRectSize,
-                    lastCanvasSize,
-                    lastDestinationRect
-                );
-                const bool shouldLog = !hasLoggedDisplayDiagnostics || changed;
-
-                if (shouldLog) {
-                    logDisplayDiagnostics(
-                        inputSize,
-                        outputSize,
-                        screenInfo,
-                        displayArea.windowRect,
-                        displayResult.canvasSize,
-                        config_.displayMode,
-                        displayResult.destinationRect
-                    );
-                    hasLoggedDisplayDiagnostics = true;
-                }
-            }
-
-            cv::imshow(WindowName, displayResult.frame);
-            if (shouldStopFromKey(cv::waitKey(1))) {
+            if (!displayBackend->render(outputFrame)) {
                 break;
             }
         }
@@ -408,6 +308,9 @@ int VideoProcessor::run()
 
     LOG_INFO("Processed frames: " << frameIndex);
     benchmark.logSummary();
+    if (displayBackend) {
+        displayBackend->shutdown();
+    }
 
     return ExitOk;
 }

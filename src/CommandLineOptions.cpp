@@ -25,6 +25,7 @@ enum OptionId {
     OptionMaskHeight,
     OptionFullscreen,
     OptionDisplayMode,
+    OptionDisplayBackend,
     OptionBenchmark,
     OptionMaxFrames,
     OptionNoDisplay,
@@ -59,6 +60,7 @@ const std::vector<OptionDefinition>& optionDefinitions()
         {OptionMaskHeight, 0, "mask-height", required_argument, "pixels", "Height for later mask inference", "144"},
         {OptionFullscreen, 0, "fullscreen", no_argument, "", "Show the window fullscreen when using window output", ""},
         {OptionDisplayMode, 0, "display-mode", required_argument, "mode", "Display mode: fit, fill, or stretch", "fit"},
+        {OptionDisplayBackend, 0, "display-backend", required_argument, "backend", "Display backend: highgui", "highgui"},
         {OptionBenchmark, 0, "benchmark", no_argument, "", "Enable benchmark mode", ""},
         {OptionMaxFrames, 0, "max-frames", required_argument, "n", "Process at most n frames", ""},
         {OptionNoDisplay, 0, "no-display", no_argument, "", "Disable window and file output", ""},
@@ -155,6 +157,18 @@ bool parseDisplayMode(const char* value, DisplayMode& mode, std::string& error)
     }
 
     error = "Invalid display mode: " + parsed + " (allowed: fit, fill, stretch)";
+    return false;
+}
+
+bool parseDisplayBackend(const char* value, DisplayBackendType& backend, std::string& error)
+{
+    const std::string parsed(value);
+    if (parsed == "highgui") {
+        backend = DisplayBackendType::HighGui;
+        return true;
+    }
+
+    error = "Invalid display backend: " + parsed + " (allowed: highgui)";
     return false;
 }
 
@@ -255,6 +269,11 @@ bool parseCommandLine(int argc, char** argv, CommandLineResult& result, std::str
                 return false;
             }
             break;
+        case OptionDisplayBackend:
+            if (!parseDisplayBackend(optarg, result.config.displayBackend, error)) {
+                return false;
+            }
+            break;
         case OptionVerbose:
             result.config.verbose = true;
             break;
@@ -352,6 +371,16 @@ std::string displayModeToString(DisplayMode mode)
         return "fill";
     case DisplayMode::Stretch:
         return "stretch";
+    }
+
+    return "unknown";
+}
+
+std::string displayBackendToString(DisplayBackendType backend)
+{
+    switch (backend) {
+    case DisplayBackendType::HighGui:
+        return "highgui";
     }
 
     return "unknown";

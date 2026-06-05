@@ -13,11 +13,16 @@ enum class DisplayMode {
     Stretch
 };
 
+enum class DisplayBackendType {
+    HighGui
+};
+
 struct ProcessorConfig {
     std::string inputPath;
     std::string devicePath = "/dev/video0";
     OutputMode outputMode = OutputMode::Window;
     DisplayMode displayMode = DisplayMode::Fit;
+    DisplayBackendType displayBackend = DisplayBackendType::HighGui;
     std::string outputFile = "output.mp4";
     int width = 1920;
     int height = 1080;
@@ -44,3 +49,4 @@ bool parseCommandLine(int argc, char** argv, CommandLineResult& result, std::str
 std::string buildHelpText(const std::string& programName);
 std::string outputModeToString(OutputMode mode);
 std::string displayModeToString(DisplayMode mode);
+std::string displayBackendToString(DisplayBackendType backend);
