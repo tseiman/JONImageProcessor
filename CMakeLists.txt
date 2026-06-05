@@ -16,6 +16,7 @@ add_executable(JONImageProcessor
     src/main.cpp
     src/CommandLineOptions.cpp
     src/DisplayRenderer.cpp
+    src/Logger.cpp
     src/VideoProcessor.cpp
 )
 

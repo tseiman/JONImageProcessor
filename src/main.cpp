@@ -1,4 +1,5 @@
 #include "CommandLineOptions.h"
+#include "Logger.h"
 #include "Version.h"
 #include "VideoProcessor.h"
 
@@ -17,10 +18,12 @@ int main(int argc, char** argv)
     std::string error;
 
     if (!parseCommandLine(argc, argv, commandLine, error)) {
-        std::cerr << "Error: " << error << "\n\n";
-        std::cerr << buildHelpText(argv[0]);
+        LOG_ERROR(error);
+        std::cout << '\n' << buildHelpText(argv[0]);
         return ExitUsageError;
     }
+
+    Logger::setVerbose(commandLine.config.verbose);
 
     if (commandLine.showHelp) {
         std::cout << buildHelpText(argv[0]);

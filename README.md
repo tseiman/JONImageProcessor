@@ -79,6 +79,12 @@ The executable is created at:
   --verbose
 ```
 
+```bash
+./build/JONImageProcessor \
+  --input testdata/Test2_pixabay_Video_HD.mp4 \
+  -v
+```
+
 ## Command-Line Options
 
 The help output is generated from the same central option table that is used for `getopt_long`:
@@ -113,6 +119,35 @@ The application uses the current OpenCV window image area for display sizing whe
 Use `--output-width` and `--output-height` to define the display render surface explicitly. This is useful on platforms where OpenCV HighGUI does not report the real fullscreen size reliably, especially on macOS. Fullscreen is still requested, but the render calculation can use the explicit size instead of depending on an unreliable window rectangle.
 
 In verbose mode, display diagnostics include input frame size, processing size, window rectangle size, canvas size, display mode, and destination rectangle.
+
+## Verbose Logging
+
+The application uses a small central logging layer with prefixed output:
+
+- `[INFO]` for normal lifecycle messages
+- `[WARNING]` for recoverable fallback behavior
+- `[ERROR]` for failures
+- `[VERBOSE]` for diagnostics that are only shown when `--verbose` or `-v` is enabled
+
+Verbose logging is intentionally simple and currently writes directly to standard output. It is designed so it can later be replaced by syslog, journald, or a dedicated logging system when JONImageProcessor runs as a systemd service.
+
+Examples:
+
+```bash
+./build/JONImageProcessor \
+  --input testdata/Test2_pixabay_Video_HD.mp4 \
+  --verbose
+```
+
+```bash
+./build/JONImageProcessor \
+  --input testdata/Test2_pixabay_Video_HD.mp4 \
+  -v
+```
+
+Verbose startup diagnostics include the program version, build date, operating system, OpenCV version, input source, output mode, display mode, processing size, mask size, and fullscreen state.
+
+Verbose display diagnostics include input frame size, window size, canvas size, display mode, and destination rectangle. Performance diagnostics are emitted about once per second and include current FPS, average FPS, and processed frame count.
 
 ## Jetson Orin Nano Notes
 

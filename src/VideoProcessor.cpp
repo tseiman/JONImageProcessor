@@ -1,6 +1,8 @@
 #include "VideoProcessor.h"
 
 #include "DisplayRenderer.h"
+#include "Logger.h"
+#include "Version.h"
 
 #include <opencv2/core.hpp>
 #include <opencv2/core/utils/logger.hpp>
@@ -9,9 +11,10 @@
 #include <opencv2/videoio.hpp>
 
 #include <algorithm>
-#include <iostream>
+#include <chrono>
 #include <sstream>
 #include <string>
+#include <sys/utsname.h>
 #include <utility>
 #include <vector>
 
@@ -65,7 +68,7 @@ std::string sizeToString(cv::Size size)
 std::string rectToString(const cv::Rect& rect)
 {
     std::ostringstream stream;
-    stream << rect.x << "," << rect.y << " " << rect.width << "x" << rect.height;
+    stream << "x=" << rect.x << " y=" << rect.y << " width=" << rect.width << " height=" << rect.height;
     return stream.str();
 }
 
@@ -102,13 +105,66 @@ void logDisplayDiagnostics(
     DisplayMode displayMode,
     const cv::Rect& destinationRect)
 {
-    std::cout << "Display diagnostics:\n";
-    std::cout << "  Input Frame Size: " << sizeToString(inputSize) << '\n';
-    std::cout << "  Processing Size: " << sizeToString(processingSize) << '\n';
-    std::cout << "  Window Rect Size: " << sizeToString(windowRect.size()) << '\n';
-    std::cout << "  Canvas Size: " << sizeToString(canvasSize) << '\n';
-    std::cout << "  Display Mode: " << displayModeToString(displayMode) << '\n';
-    std::cout << "  Destination Rect: " << rectToString(destinationRect) << '\n';
+    LOG_VERBOSE("Input frame: " << sizeToString(inputSize));
+    LOG_VERBOSE("Processing size: " << sizeToString(processingSize));
+    LOG_VERBOSE("Window size: " << sizeToString(windowRect.size()));
+    LOG_VERBOSE("Canvas size: " << sizeToString(canvasSize));
+    LOG_VERBOSE("Display mode: " << displayModeToString(displayMode));
+    LOG_VERBOSE("Destination rect: " << rectToString(destinationRect));
+}
+
+std::string operatingSystemString()
+{
+    utsname info {};
+    if (uname(&info) != 0) {
+        return "unknown";
+    }
+
+    std::ostringstream stream;
+    stream << info.sysname << ' ' << info.release << ' ' << info.machine;
+    return stream.str();
+}
+
+void logStartupInfo(const ProcessorConfig& config)
+{
+    const std::string inputSource = !config.inputPath.empty()
+        ? config.inputPath
+        : config.devicePath;
+
+    LOG_INFO("JONImageProcessor starting");
+    LOG_VERBOSE("Program version: " << JON_IMAGE_PROCESSOR_VERSION);
+    LOG_VERBOSE("Build date: " << __DATE__ << " " << __TIME__);
+    LOG_VERBOSE("Operating system: " << operatingSystemString());
+    LOG_VERBOSE("OpenCV version: " << CV_VERSION);
+    LOG_VERBOSE("Input source: " << inputSource);
+    LOG_VERBOSE("Output mode: " << outputModeToString(config.outputMode));
+    LOG_VERBOSE("Display mode: " << displayModeToString(config.displayMode));
+    LOG_VERBOSE("Processing size: " << config.width << "x" << config.height);
+    LOG_VERBOSE("Mask size: " << config.maskWidth << "x" << config.maskHeight);
+    LOG_VERBOSE("Fullscreen: " << (config.fullscreen ? "true" : "false"));
+    if (config.outputWidth > 0 && config.outputHeight > 0) {
+        LOG_VERBOSE("Output canvas override: " << config.outputWidth << "x" << config.outputHeight);
+    } else {
+        LOG_VERBOSE("Output canvas override: auto");
+    }
+}
+
+void logPerformance(
+    std::size_t processedFrames,
+    std::size_t intervalFrames,
+    std::chrono::steady_clock::time_point startedAt,
+    std::chrono::steady_clock::time_point intervalStartedAt,
+    std::chrono::steady_clock::time_point now)
+{
+    const std::chrono::duration<double> intervalDuration = now - intervalStartedAt;
+    const std::chrono::duration<double> totalDuration = now - startedAt;
+    if (intervalDuration.count() <= 0.0 || totalDuration.count() <= 0.0) {
+        return;
+    }
+
+    const double currentFps = static_cast<double>(intervalFrames) / intervalDuration.count();
+    const double averageFps = static_cast<double>(processedFrames) / totalDuration.count();
+    LOG_VERBOSE("FPS: " << currentFps << " avg=" << averageFps << " frames=" << processedFrames);
 }
 
 } // namespace
@@ -120,6 +176,8 @@ VideoProcessor::VideoProcessor(ProcessorConfig config)
 
 int VideoProcessor::run()
 {
+    logStartupInfo(config_);
+
     if (!config_.verbose) {
         cv::utils::logging::setLogLevel(cv::utils::logging::LOG_LEVEL_ERROR);
     }
@@ -127,20 +185,19 @@ int VideoProcessor::run()
     cv::VideoCapture capture;
 
     if (!config_.inputPath.empty()) {
-        if (config_.verbose) {
-            std::cout << "Opening input file: " << config_.inputPath << '\n';
-        }
+        LOG_INFO("Opening input video: " << config_.inputPath);
         capture.open(config_.inputPath);
     } else {
-        if (config_.verbose) {
-            std::cout << "Opening camera device: " << config_.devicePath << '\n';
-        }
+        LOG_INFO("Opening camera device: " << config_.devicePath);
         capture.open(config_.devicePath, cv::CAP_ANY);
     }
 
     if (!capture.isOpened()) {
-        std::cerr << "Error: Could not open video source: "
-                  << (!config_.inputPath.empty() ? config_.inputPath : config_.devicePath) << '\n';
+        if (!config_.inputPath.empty()) {
+            LOG_ERROR("Cannot open input file: " << config_.inputPath);
+        } else {
+            LOG_ERROR("Cannot open camera device: " << config_.devicePath);
+        }
         return ExitRuntimeError;
     }
 
@@ -162,14 +219,11 @@ int VideoProcessor::run()
         const int fourcc = cv::VideoWriter::fourcc('m', 'p', '4', 'v');
         writer.open(config_.outputFile, fourcc, fps, outputSize, true);
         if (!writer.isOpened()) {
-            std::cerr << "Error: Could not open output file: "
-                      << config_.outputFile << '\n';
+            LOG_ERROR("Cannot open output file: " << config_.outputFile);
             return ExitRuntimeError;
         }
 
-        if (config_.verbose) {
-            std::cout << "Writing MP4 output: " << config_.outputFile << " @ " << fps << " fps\n";
-        }
+        LOG_INFO("Writing MP4 output: " << config_.outputFile << " @ " << fps << " fps");
     } else {
         cv::namedWindow(WindowName, cv::WINDOW_NORMAL | cv::WINDOW_FREERATIO);
         cv::resizeWindow(WindowName, configuredDisplaySize.width, configuredDisplaySize.height);
@@ -186,6 +240,10 @@ int VideoProcessor::run()
     cv::Size lastCanvasSize;
     cv::Rect lastDestinationRect;
     bool hasLoggedDisplayDiagnostics = false;
+    bool hasWarnedDisplayFallback = false;
+    const auto startedAt = std::chrono::steady_clock::now();
+    auto intervalStartedAt = startedAt;
+    std::size_t intervalFrames = 0;
 
     while (capture.read(frame)) {
         if (frame.empty()) {
@@ -209,6 +267,12 @@ int VideoProcessor::run()
         } else {
             const DisplayArea displayArea = resolveDisplayArea(WindowName, configuredDisplaySize, hasExplicitDisplaySize);
             const DisplayRenderResult displayResult = renderForDisplay(outputFrame, displayArea.canvasSize, config_.displayMode);
+
+            if (displayArea.usedFallback && !hasExplicitDisplaySize && !hasWarnedDisplayFallback) {
+                LOG_WARNING("Falling back to configured output size because HighGUI reported an unreliable window size: "
+                    << sizeToString(displayArea.windowRect.size()));
+                hasWarnedDisplayFallback = true;
+            }
 
             if (config_.verbose) {
                 const cv::Size inputSize = frame.size();
@@ -245,16 +309,24 @@ int VideoProcessor::run()
         }
 
         ++frameIndex;
+        ++intervalFrames;
+
+        if (config_.verbose) {
+            const auto now = std::chrono::steady_clock::now();
+            if (now - intervalStartedAt >= std::chrono::seconds(1)) {
+                logPerformance(frameIndex, intervalFrames, startedAt, intervalStartedAt, now);
+                intervalStartedAt = now;
+                intervalFrames = 0;
+            }
+        }
     }
 
     if (frameIndex == 0) {
-        std::cerr << "Error: No frames could be read.\n";
+        LOG_ERROR("No frames could be read");
         return ExitRuntimeError;
     }
 
-    if (config_.verbose) {
-        std::cout << "Processed frames: " << frameIndex << '\n';
-    }
+    LOG_INFO("Processed frames: " << frameIndex);
 
     return ExitOk;
 }
