@@ -22,6 +22,7 @@ enum OptionId {
     OptionMaskWidth,
     OptionMaskHeight,
     OptionFullscreen,
+    OptionDisplayMode,
     OptionVersion
 };
 
@@ -48,6 +49,7 @@ const std::vector<OptionDefinition>& optionDefinitions()
         {OptionMaskWidth, 0, "mask-width", required_argument, "pixels", "Width for later mask inference", "256"},
         {OptionMaskHeight, 0, "mask-height", required_argument, "pixels", "Height for later mask inference", "144"},
         {OptionFullscreen, 0, "fullscreen", no_argument, "", "Show the window fullscreen when using window output", ""},
+        {OptionDisplayMode, 0, "display-mode", required_argument, "mode", "Display mode: fit, fill, or stretch", "fit"},
         {OptionVerbose, 'v', "verbose", no_argument, "", "Enable more detailed logs", ""},
         {OptionVersion, 0, "version", no_argument, "", "Show version information", ""},
     };
@@ -119,6 +121,26 @@ bool parseOutputMode(const char* value, OutputMode& mode, std::string& error)
     }
 
     error = "Invalid output mode: " + parsed + " (allowed: window, file)";
+    return false;
+}
+
+bool parseDisplayMode(const char* value, DisplayMode& mode, std::string& error)
+{
+    const std::string parsed(value);
+    if (parsed == "fit") {
+        mode = DisplayMode::Fit;
+        return true;
+    }
+    if (parsed == "fill") {
+        mode = DisplayMode::Fill;
+        return true;
+    }
+    if (parsed == "stretch") {
+        mode = DisplayMode::Stretch;
+        return true;
+    }
+
+    error = "Invalid display mode: " + parsed + " (allowed: fit, fill, stretch)";
     return false;
 }
 
@@ -199,6 +221,11 @@ bool parseCommandLine(int argc, char** argv, CommandLineResult& result, std::str
         case OptionFullscreen:
             result.config.fullscreen = true;
             break;
+        case OptionDisplayMode:
+            if (!parseDisplayMode(optarg, result.config.displayMode, error)) {
+                return false;
+            }
+            break;
         case OptionVerbose:
             result.config.verbose = true;
             break;
@@ -265,6 +292,20 @@ std::string outputModeToString(OutputMode mode)
         return "window";
     case OutputMode::File:
         return "file";
+    }
+
+    return "unknown";
+}
+
+std::string displayModeToString(DisplayMode mode)
+{
+    switch (mode) {
+    case DisplayMode::Fit:
+        return "fit";
+    case DisplayMode::Fill:
+        return "fill";
+    case DisplayMode::Stretch:
+        return "stretch";
     }
 
     return "unknown";

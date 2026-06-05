@@ -15,6 +15,7 @@ find_package(OpenCV REQUIRED COMPONENTS core imgproc highgui videoio)
 add_executable(JONImageProcessor
     src/main.cpp
     src/CommandLineOptions.cpp
+    src/DisplayRenderer.cpp
     src/VideoProcessor.cpp
 )
 

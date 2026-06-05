@@ -7,10 +7,17 @@ enum class OutputMode {
     File
 };
 
+enum class DisplayMode {
+    Fit,
+    Fill,
+    Stretch
+};
+
 struct ProcessorConfig {
     std::string inputPath;
     std::string devicePath = "/dev/video0";
     OutputMode outputMode = OutputMode::Window;
+    DisplayMode displayMode = DisplayMode::Fit;
     std::string outputFile = "output.mp4";
     int width = 1920;
     int height = 1080;
@@ -29,3 +36,4 @@ struct CommandLineResult {
 bool parseCommandLine(int argc, char** argv, CommandLineResult& result, std::string& error);
 std::string buildHelpText(const std::string& programName);
 std::string outputModeToString(OutputMode mode);
+std::string displayModeToString(DisplayMode mode);

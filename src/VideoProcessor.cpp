@@ -1,5 +1,7 @@
 #include "VideoProcessor.h"
 
+#include "DisplayRenderer.h"
+
 #include <opencv2/core.hpp>
 #include <opencv2/core/utils/logger.hpp>
 #include <opencv2/highgui.hpp>
@@ -16,6 +18,7 @@ namespace {
 
 constexpr int ExitOk = 0;
 constexpr int ExitRuntimeError = 2;
+constexpr const char* WindowName = "JONImageProcessor";
 
 cv::Mat createDummyMask(int width, int height, std::size_t frameIndex)
 {
@@ -107,9 +110,11 @@ int VideoProcessor::run()
             std::cout << "Writing MP4 output: " << config_.outputFile << " @ " << fps << " fps\n";
         }
     } else {
-        cv::namedWindow("JONImageProcessor", cv::WINDOW_NORMAL);
+        cv::namedWindow(WindowName, cv::WINDOW_NORMAL | cv::WINDOW_FREERATIO);
+        cv::resizeWindow(WindowName, outputSize.width, outputSize.height);
         if (config_.fullscreen) {
-            cv::setWindowProperty("JONImageProcessor", cv::WND_PROP_FULLSCREEN, cv::WINDOW_FULLSCREEN);
+            cv::setWindowProperty(WindowName, cv::WND_PROP_FULLSCREEN, cv::WINDOW_FULLSCREEN);
+            cv::waitKey(1);
         }
     }
 
@@ -136,7 +141,9 @@ int VideoProcessor::run()
         if (writeFile) {
             writer.write(outputFrame);
         } else {
-            cv::imshow("JONImageProcessor", outputFrame);
+            const cv::Size displaySize = getWindowDisplaySize(WindowName, outputSize);
+            const cv::Mat displayFrame = renderForDisplay(outputFrame, displaySize, config_.displayMode);
+            cv::imshow(WindowName, displayFrame);
             if (shouldStopFromKey(cv::waitKey(1))) {
                 break;
             }

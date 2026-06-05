@@ -51,6 +51,24 @@ The executable is created at:
   --mask-height 144
 ```
 
+```bash
+./build/JONImageProcessor \
+  --input testdata/Test2_pixabay_Video_HD.mp4 \
+  --display-mode fit
+```
+
+```bash
+./build/JONImageProcessor \
+  --input testdata/Test2_pixabay_Video_HD.mp4 \
+  --display-mode fill
+```
+
+```bash
+./build/JONImageProcessor \
+  --input testdata/Test2_pixabay_Video_HD.mp4 \
+  --display-mode stretch
+```
+
 ## Command-Line Options
 
 The help output is generated from the same central option table that is used for `getopt_long`:
@@ -66,9 +84,20 @@ Important options:
 - `--output window` shows an OpenCV window.
 - `--output file` writes an MP4 file.
 - `--fullscreen` switches the window to fullscreen when `--output window` is used.
+- `--display-mode <mode>` controls how the processed image is scaled into the current window or fullscreen area.
 - `--width`, `--height`, `--mask-width`, and `--mask-height` configure processing and mask dimensions.
 
 In window mode, `ESC` or `q` exits the program cleanly.
+
+## Display Modes
+
+The default display mode is `fit`.
+
+- `fit` preserves the aspect ratio, keeps the complete image visible, centers it horizontally and vertically, and uses black bars when the display area has a different aspect ratio.
+- `fill` preserves the aspect ratio, fills the complete display area, keeps the image centered, and crops overflowing image areas when needed.
+- `stretch` ignores the aspect ratio and scales the image exactly to the display area. This avoids bars and cropping but may distort the image.
+
+The application uses the current OpenCV window image area for display sizing. In fullscreen mode it does not change the monitor resolution; it renders into the area provided by the active display setup.
 
 ## Jetson Orin Nano Notes
 
@@ -81,6 +110,17 @@ On the Jetson, OpenCV and camera access should be verified separately before ser
 Future versions should run automatically as a Linux service/daemon through systemd and display the processed camera image fullscreen on HDMI or DisplayPort.
 
 This initial step does not include a systemd unit, daemon mode, or display-specific initialization.
+
+Long-term appliance flow:
+
+```text
+Jetson boots
+-> systemd starts JONImageProcessor
+-> HDMI resolution is detected
+-> fullscreen output is opened
+-> the image is centered correctly
+-> the display mode controls scaling
+```
 
 ## Planned runtime control
 
