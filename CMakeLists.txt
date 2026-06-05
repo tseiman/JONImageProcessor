@@ -12,6 +12,18 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 
 find_package(OpenCV REQUIRED COMPONENTS core imgproc highgui videoio)
 
+execute_process(
+    COMMAND git rev-parse --short=7 HEAD
+    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+    OUTPUT_VARIABLE JON_IMAGE_PROCESSOR_GIT_VERSION
+    OUTPUT_STRIP_TRAILING_WHITESPACE
+    ERROR_QUIET
+)
+
+if (NOT JON_IMAGE_PROCESSOR_GIT_VERSION)
+    set(JON_IMAGE_PROCESSOR_GIT_VERSION "unknown")
+endif()
+
 add_executable(JONImageProcessor
     src/main.cpp
     src/CommandLineOptions.cpp
@@ -27,6 +39,10 @@ target_include_directories(JONImageProcessor PRIVATE
 )
 
 target_link_libraries(JONImageProcessor PRIVATE ${OpenCV_LIBS})
+
+target_compile_definitions(JONImageProcessor PRIVATE
+    JON_IMAGE_PROCESSOR_GIT_VERSION="${JON_IMAGE_PROCESSOR_GIT_VERSION}"
+)
 
 if (APPLE)
     target_link_libraries(JONImageProcessor PRIVATE "-framework CoreGraphics")

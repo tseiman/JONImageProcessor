@@ -30,6 +30,10 @@ The executable is created at:
 ```
 
 ```bash
+./build/JONImageProcessor --version
+```
+
+```bash
 ./build/JONImageProcessor \
   --input testdata/Test2_pixabay_Video_HD.mp4 \
   --output window
@@ -103,6 +107,7 @@ Important options:
 - `--display-mode <mode>` controls how the processed image is scaled into the current window or fullscreen area.
 - `--output-width <pixels>` and `--output-height <pixels>` explicitly define the display render surface. They must be specified together.
 - `--width`, `--height`, `--mask-width`, and `--mask-height` configure processing and mask dimensions.
+- `--version` prints the application version and the 7-character Git commit hash captured at CMake configure time.
 
 In window mode, `ESC` or `q` exits the program cleanly.
 
