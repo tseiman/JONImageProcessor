@@ -39,6 +39,7 @@ endif()
 
 add_executable(JONImageProcessor
     src/main.cpp
+    src/BenchmarkRecorder.cpp
     src/CommandLineOptions.cpp
     src/DisplayEnvironment.cpp
     src/DisplayRenderer.cpp

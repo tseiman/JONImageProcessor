@@ -25,8 +25,13 @@ struct ProcessorConfig {
     int outputHeight = 0;
     int maskWidth = 256;
     int maskHeight = 144;
+    int maxFrames = 0;
     bool fullscreen = false;
     bool verbose = false;
+    bool benchmark = false;
+    bool noDisplay = false;
+    bool noMask = false;
+    bool noOverlay = false;
 };
 
 struct CommandLineResult {

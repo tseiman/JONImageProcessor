@@ -89,6 +89,22 @@ The executable is created at:
   -v
 ```
 
+```bash
+./build/JONImageProcessor \
+  --input testdata/Test1_pixabay_Video_4k.mp4 \
+  --benchmark \
+  --max-frames 500
+```
+
+```bash
+./build/JONImageProcessor \
+  --input testdata/Test1_pixabay_Video_4k.mp4 \
+  --benchmark \
+  --no-display \
+  --no-mask \
+  --no-overlay
+```
+
 ## Command-Line Options
 
 The help output is generated from the same central option table that is used for `getopt_long`:
@@ -108,6 +124,11 @@ Important options:
 - `--output-width <pixels>` and `--output-height <pixels>` explicitly define the display render surface. They must be specified together.
 - `--width`, `--height`, `--mask-width`, and `--mask-height` configure processing and mask dimensions.
 - `--version` prints the 7-character Git commit hash captured at CMake configure time. A semantic release version, such as `0.1.0`, is only printed when the build is configured exactly on a Git release tag like `v0.1.0` or `0.1.0`.
+- `--benchmark` enables benchmark mode.
+- `--max-frames <n>` stops automatically after n processed frames.
+- `--no-display` disables window and file output.
+- `--no-mask` disables dummy mask generation and mask upscaling.
+- `--no-overlay` disables overlay rendering.
 
 In window mode, `ESC` or `q` exits the program cleanly.
 
@@ -153,6 +174,56 @@ Examples:
 Verbose startup diagnostics include the release version state, Git version, build date, operating system, OpenCV version, input source, output mode, display mode, processing size, mask size, and fullscreen state.
 
 Verbose display diagnostics include input frame size, detected primary screen size, HighGUI window size, output canvas size, display mode, and destination rectangle. This makes platform-specific HighGUI behavior visible, especially when fullscreen window sizing differs between Linux and macOS. Performance diagnostics are emitted about once per second and include current FPS, average FPS, and processed frame count.
+
+## Performance Analysis
+
+Benchmark mode measures where frame time is spent without changing the processing pipeline by default:
+
+```bash
+./build/JONImageProcessor \
+  --input testdata/Test1_pixabay_Video_4k.mp4 \
+  --benchmark \
+  --max-frames 500
+```
+
+Use `--max-frames <n>` to make benchmark runs repeatable and automatically stop after a fixed number of frames.
+
+Use `--no-display` to skip window creation and file output. This isolates decode, resize, mask, and overlay cost:
+
+```bash
+./build/JONImageProcessor \
+  --input testdata/Test1_pixabay_Video_4k.mp4 \
+  --benchmark \
+  --no-display \
+  --max-frames 500
+```
+
+Use `--no-mask` to skip mask generation and mask upscaling:
+
+```bash
+./build/JONImageProcessor \
+  --input testdata/Test1_pixabay_Video_4k.mp4 \
+  --benchmark \
+  --no-display \
+  --no-mask \
+  --max-frames 500
+```
+
+Use `--no-overlay` to skip overlay rendering:
+
+```bash
+./build/JONImageProcessor \
+  --input testdata/Test1_pixabay_Video_4k.mp4 \
+  --benchmark \
+  --no-display \
+  --no-mask \
+  --no-overlay \
+  --max-frames 500
+```
+
+Benchmark output reports average time for decode, resize, mask generation, mask upscale, overlay, display, total frame time, effective FPS, and percentage distribution including unmeasured overhead as `Other`.
+
+The goal is to compare macOS development systems, Linux VMs, and Jetson Orin Nano runs objectively before deciding where optimization work should happen.
 
 ## Jetson Orin Nano Notes
 

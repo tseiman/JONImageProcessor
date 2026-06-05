@@ -25,6 +25,11 @@ enum OptionId {
     OptionMaskHeight,
     OptionFullscreen,
     OptionDisplayMode,
+    OptionBenchmark,
+    OptionMaxFrames,
+    OptionNoDisplay,
+    OptionNoMask,
+    OptionNoOverlay,
     OptionVersion
 };
 
@@ -54,6 +59,11 @@ const std::vector<OptionDefinition>& optionDefinitions()
         {OptionMaskHeight, 0, "mask-height", required_argument, "pixels", "Height for later mask inference", "144"},
         {OptionFullscreen, 0, "fullscreen", no_argument, "", "Show the window fullscreen when using window output", ""},
         {OptionDisplayMode, 0, "display-mode", required_argument, "mode", "Display mode: fit, fill, or stretch", "fit"},
+        {OptionBenchmark, 0, "benchmark", no_argument, "", "Enable benchmark mode", ""},
+        {OptionMaxFrames, 0, "max-frames", required_argument, "n", "Process at most n frames", ""},
+        {OptionNoDisplay, 0, "no-display", no_argument, "", "Disable window and file output", ""},
+        {OptionNoMask, 0, "no-mask", no_argument, "", "Disable mask generation", ""},
+        {OptionNoOverlay, 0, "no-overlay", no_argument, "", "Disable overlay rendering", ""},
         {OptionVerbose, 'v', "verbose", no_argument, "", "Enable more detailed logs", ""},
         {OptionVersion, 0, "version", no_argument, "", "Show version information", ""},
     };
@@ -232,6 +242,11 @@ bool parseCommandLine(int argc, char** argv, CommandLineResult& result, std::str
                 return false;
             }
             break;
+        case OptionMaxFrames:
+            if (!parsePositiveInteger(optarg, "--max-frames", result.config.maxFrames, error)) {
+                return false;
+            }
+            break;
         case OptionFullscreen:
             result.config.fullscreen = true;
             break;
@@ -242,6 +257,18 @@ bool parseCommandLine(int argc, char** argv, CommandLineResult& result, std::str
             break;
         case OptionVerbose:
             result.config.verbose = true;
+            break;
+        case OptionBenchmark:
+            result.config.benchmark = true;
+            break;
+        case OptionNoDisplay:
+            result.config.noDisplay = true;
+            break;
+        case OptionNoMask:
+            result.config.noMask = true;
+            break;
+        case OptionNoOverlay:
+            result.config.noOverlay = true;
             break;
         case OptionVersion:
             result.showVersion = true;

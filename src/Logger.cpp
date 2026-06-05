@@ -47,4 +47,9 @@ void verbose(const std::string& message)
     }
 }
 
+void bench(const std::string& message)
+{
+    writeLog("BENCH", message);
+}
+
 } // namespace Logger

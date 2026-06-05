@@ -12,6 +12,7 @@ void info(const std::string& message);
 void warning(const std::string& message);
 void error(const std::string& message);
 void verbose(const std::string& message);
+void bench(const std::string& message);
 
 } // namespace Logger
 
@@ -41,4 +42,11 @@ void verbose(const std::string& message);
         std::ostringstream logStream; \
         logStream << message; \
         Logger::verbose(logStream.str()); \
+    } while (false)
+
+#define LOG_BENCH(message) \
+    do { \
+        std::ostringstream logStream; \
+        logStream << message; \
+        Logger::bench(logStream.str()); \
     } while (false)

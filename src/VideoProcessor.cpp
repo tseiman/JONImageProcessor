@@ -1,5 +1,6 @@
 #include "VideoProcessor.h"
 
+#include "BenchmarkRecorder.h"
 #include "DisplayEnvironment.h"
 #include "DisplayRenderer.h"
 #include "Logger.h"
@@ -160,6 +161,11 @@ void logStartupInfo(const ProcessorConfig& config, const ScreenInfo& screenInfo)
     LOG_VERBOSE("Processing size: " << config.width << "x" << config.height);
     LOG_VERBOSE("Mask size: " << config.maskWidth << "x" << config.maskHeight);
     LOG_VERBOSE("Fullscreen: " << (config.fullscreen ? "true" : "false"));
+    LOG_VERBOSE("Benchmark: " << (config.benchmark ? "true" : "false"));
+    LOG_VERBOSE("Max frames: " << (config.maxFrames > 0 ? std::to_string(config.maxFrames) : "unlimited"));
+    LOG_VERBOSE("No display: " << (config.noDisplay ? "true" : "false"));
+    LOG_VERBOSE("No mask: " << (config.noMask ? "true" : "false"));
+    LOG_VERBOSE("No overlay: " << (config.noOverlay ? "true" : "false"));
     if (config.outputWidth > 0 && config.outputHeight > 0) {
         LOG_VERBOSE("Output canvas override: " << config.outputWidth << "x" << config.outputHeight);
     } else {
@@ -228,7 +234,10 @@ int VideoProcessor::run()
         : (useScreenDisplaySize ? screenInfo.size : outputSize);
     const bool forceConfiguredDisplaySize = hasExplicitDisplaySize || useScreenDisplaySize;
     const cv::Size maskSize(config_.maskWidth, config_.maskHeight);
-    const bool writeFile = config_.outputMode == OutputMode::File;
+    const bool writeFile = config_.outputMode == OutputMode::File && !config_.noDisplay;
+    const bool showWindow = config_.outputMode == OutputMode::Window && !config_.noDisplay;
+    const bool maskEnabled = !config_.noMask;
+    const bool overlayEnabled = !config_.noOverlay && maskEnabled;
 
     cv::VideoWriter writer;
     if (writeFile) {
@@ -245,7 +254,7 @@ int VideoProcessor::run()
         }
 
         LOG_INFO("Writing MP4 output: " << config_.outputFile << " @ " << fps << " fps");
-    } else {
+    } else if (showWindow) {
         cv::namedWindow(WindowName, cv::WINDOW_NORMAL | cv::WINDOW_FREERATIO);
         cv::resizeWindow(WindowName, configuredDisplaySize.width, configuredDisplaySize.height);
         if (config_.fullscreen) {
@@ -264,30 +273,62 @@ int VideoProcessor::run()
     bool hasLoggedDisplayDiagnostics = false;
     bool hasWarnedDisplayFallback = false;
     bool hasLoggedFullscreenScreenFallback = false;
+    BenchmarkRecorder benchmark(config_.benchmark);
     const auto startedAt = std::chrono::steady_clock::now();
     auto intervalStartedAt = startedAt;
     std::size_t intervalFrames = 0;
 
-    while (capture.read(frame)) {
+    while (true) {
+        bool readOk = false;
+        const auto frameStartedAt = std::chrono::steady_clock::now();
+        const auto decodeStartedAt = std::chrono::steady_clock::now();
+        readOk = capture.read(frame);
+        const auto decodeEndedAt = std::chrono::steady_clock::now();
+
+        if (!readOk) {
+            break;
+        }
+        benchmark.add(BenchmarkStage::Decode, decodeEndedAt - decodeStartedAt);
+
         if (frame.empty()) {
             continue;
         }
 
         cv::Mat resized;
-        cv::resize(frame, resized, outputSize, 0.0, 0.0, cv::INTER_LINEAR);
+        {
+            BenchmarkScope timer(benchmark, BenchmarkStage::Resize);
+            cv::resize(frame, resized, outputSize, 0.0, 0.0, cv::INTER_LINEAR);
+        }
 
-        cv::Mat maskWorkCopy;
-        cv::resize(resized, maskWorkCopy, maskSize, 0.0, 0.0, cv::INTER_AREA);
-
-        cv::Mat smallMask = createDummyMask(maskWorkCopy.cols, maskWorkCopy.rows, frameIndex);
         cv::Mat outputMask;
-        cv::resize(smallMask, outputMask, outputSize, 0.0, 0.0, cv::INTER_NEAREST);
+        if (maskEnabled) {
+            cv::Mat maskWorkCopy;
+            {
+                BenchmarkScope timer(benchmark, BenchmarkStage::Mask);
+                cv::resize(resized, maskWorkCopy, maskSize, 0.0, 0.0, cv::INTER_AREA);
+                cv::Mat smallMask = createDummyMask(maskWorkCopy.cols, maskWorkCopy.rows, frameIndex);
+                maskWorkCopy = smallMask;
+            }
 
-        cv::Mat outputFrame = applyMaskOverlay(resized, outputMask);
+            {
+                BenchmarkScope timer(benchmark, BenchmarkStage::MaskUpscale);
+                cv::resize(maskWorkCopy, outputMask, outputSize, 0.0, 0.0, cv::INTER_NEAREST);
+            }
+        }
+
+        cv::Mat outputFrame;
+        if (overlayEnabled) {
+            BenchmarkScope timer(benchmark, BenchmarkStage::Overlay);
+            outputFrame = applyMaskOverlay(resized, outputMask);
+        } else {
+            outputFrame = resized;
+        }
 
         if (writeFile) {
+            BenchmarkScope timer(benchmark, BenchmarkStage::Display);
             writer.write(outputFrame);
-        } else {
+        } else if (showWindow) {
+            BenchmarkScope timer(benchmark, BenchmarkStage::Display);
             const DisplayArea displayArea = resolveDisplayArea(WindowName, configuredDisplaySize, forceConfiguredDisplaySize);
             const DisplayRenderResult displayResult = renderForDisplay(outputFrame, displayArea.canvasSize, config_.displayMode);
 
@@ -342,6 +383,9 @@ int VideoProcessor::run()
 
         ++frameIndex;
         ++intervalFrames;
+        benchmark.add(BenchmarkStage::Total, std::chrono::steady_clock::now() - frameStartedAt);
+        benchmark.frameCompleted();
+        benchmark.maybeLogProgress();
 
         if (config_.verbose) {
             const auto now = std::chrono::steady_clock::now();
@@ -351,6 +395,10 @@ int VideoProcessor::run()
                 intervalFrames = 0;
             }
         }
+
+        if (config_.maxFrames > 0 && frameIndex >= static_cast<std::size_t>(config_.maxFrames)) {
+            break;
+        }
     }
 
     if (frameIndex == 0) {
@@ -359,6 +407,7 @@ int VideoProcessor::run()
     }
 
     LOG_INFO("Processed frames: " << frameIndex);
+    benchmark.logSummary();
 
     return ExitOk;
 }
