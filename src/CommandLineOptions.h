@@ -17,6 +17,11 @@ enum class DisplayBackendType {
     HighGui
 };
 
+enum class CameraFormat {
+    MJPG,
+    YUYV
+};
+
 struct ProcessorConfig {
     std::string inputPath;
     std::string devicePath = "/dev/video0";
@@ -30,6 +35,8 @@ struct ProcessorConfig {
     int outputHeight = 0;
     int maskWidth = 256;
     int maskHeight = 144;
+    CameraFormat cameraFormat = CameraFormat::MJPG;
+    int cameraFps = 30;
     int maxFrames = 0;
     bool fullscreen = false;
     bool verbose = false;
@@ -50,3 +57,4 @@ std::string buildHelpText(const std::string& programName);
 std::string outputModeToString(OutputMode mode);
 std::string displayModeToString(DisplayMode mode);
 std::string displayBackendToString(DisplayBackendType backend);
+std::string cameraFormatToString(CameraFormat format);

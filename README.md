@@ -124,6 +124,8 @@ Important options:
 - `--display-backend <backend>` selects the display backend. The current default and only supported backend is `highgui`.
 - `--output-width <pixels>` and `--output-height <pixels>` explicitly define the display render surface. They must be specified together.
 - `--width`, `--height`, `--mask-width`, and `--mask-height` configure processing and mask dimensions.
+- `--camera-format <format>` requests a camera pixel format. Supported values are `MJPG` and `YUYV`; the default is `MJPG`.
+- `--camera-fps <fps>` requests a camera frame rate. The default is `30`.
 - `--version` prints the 7-character Git commit hash captured at CMake configure time. A semantic release version, such as `0.1.0`, is only printed when the build is configured exactly on a Git release tag like `v0.1.0` or `0.1.0`.
 - `--benchmark` enables benchmark mode.
 - `--max-frames <n>` stops automatically after n processed frames.
@@ -132,6 +134,32 @@ Important options:
 - `--no-overlay` disables overlay rendering.
 
 In window mode, `ESC` or `q` exits the program cleanly.
+
+## Camera Configuration
+
+When using `--device`, the application requests the configured camera pixel format, frame size, and frame rate through OpenCV. `--width` and `--height` are used both as processing size and requested camera capture size.
+
+```bash
+./build/JONImageProcessor \
+  --device /dev/video0 \
+  --width 1920 \
+  --height 1080 \
+  --camera-format MJPG \
+  --camera-fps 30
+```
+
+```bash
+./build/JONImageProcessor \
+  --device /dev/video0 \
+  --width 1280 \
+  --height 720 \
+  --camera-format MJPG \
+  --camera-fps 60
+```
+
+Many USB webcams need MJPG for high resolutions and useful frame rates. Uncompressed YUYV often supports only very low frame rates at 1080p or above.
+
+Verbose mode logs the requested camera settings and the active settings reported by OpenCV after configuration. If the camera does not accept the requested format, size, or FPS, a warning is emitted.
 
 ## Display Modes
 

@@ -13,6 +13,7 @@
 
 #include <algorithm>
 #include <chrono>
+#include <cmath>
 #include <memory>
 #include <sstream>
 #include <string>
@@ -81,6 +82,84 @@ std::string operatingSystemString()
     return stream.str();
 }
 
+int cameraFormatFourcc(CameraFormat format)
+{
+    switch (format) {
+    case CameraFormat::MJPG:
+        return cv::VideoWriter::fourcc('M', 'J', 'P', 'G');
+    case CameraFormat::YUYV:
+        return cv::VideoWriter::fourcc('Y', 'U', 'Y', 'V');
+    }
+
+    return cv::VideoWriter::fourcc('M', 'J', 'P', 'G');
+}
+
+std::string fourccToString(double fourccValue)
+{
+    const auto fourcc = static_cast<int>(std::llround(fourccValue));
+    std::string text;
+    text.push_back(static_cast<char>(fourcc & 0xff));
+    text.push_back(static_cast<char>((fourcc >> 8) & 0xff));
+    text.push_back(static_cast<char>((fourcc >> 16) & 0xff));
+    text.push_back(static_cast<char>((fourcc >> 24) & 0xff));
+
+    for (char& character : text) {
+        if (character < 32 || character > 126) {
+            character = '?';
+        }
+    }
+
+    return text;
+}
+
+bool almostEqual(double left, double right, double tolerance)
+{
+    return std::fabs(left - right) <= tolerance;
+}
+
+void logRequestedCameraConfig(const ProcessorConfig& config)
+{
+    LOG_VERBOSE("Requested camera device: " << config.devicePath);
+    LOG_VERBOSE("Requested camera format: " << cameraFormatToString(config.cameraFormat));
+    LOG_VERBOSE("Requested camera size: " << config.width << "x" << config.height);
+    LOG_VERBOSE("Requested camera FPS: " << config.cameraFps);
+}
+
+void configureCameraCapture(cv::VideoCapture& capture, const ProcessorConfig& config)
+{
+    capture.set(cv::CAP_PROP_FOURCC, cameraFormatFourcc(config.cameraFormat));
+    capture.set(cv::CAP_PROP_FRAME_WIDTH, config.width);
+    capture.set(cv::CAP_PROP_FRAME_HEIGHT, config.height);
+    capture.set(cv::CAP_PROP_FPS, config.cameraFps);
+
+    const std::string activeFormat = fourccToString(capture.get(cv::CAP_PROP_FOURCC));
+    const double activeWidth = capture.get(cv::CAP_PROP_FRAME_WIDTH);
+    const double activeHeight = capture.get(cv::CAP_PROP_FRAME_HEIGHT);
+    const double activeFps = capture.get(cv::CAP_PROP_FPS);
+
+    LOG_VERBOSE("Active camera format: " << activeFormat);
+    LOG_VERBOSE("Active camera size: " << static_cast<int>(std::llround(activeWidth))
+        << "x" << static_cast<int>(std::llround(activeHeight)));
+    LOG_VERBOSE("Active camera FPS: " << activeFps);
+
+    const std::string requestedFormat = cameraFormatToString(config.cameraFormat);
+    if (activeFormat != requestedFormat) {
+        LOG_WARNING("Camera did not accept requested format. Requested "
+            << requestedFormat << ", active " << activeFormat);
+    }
+
+    if (!almostEqual(activeWidth, config.width, 0.5) || !almostEqual(activeHeight, config.height, 0.5)) {
+        LOG_WARNING("Camera did not accept requested size. Requested "
+            << config.width << "x" << config.height << ", active "
+            << static_cast<int>(std::llround(activeWidth)) << "x" << static_cast<int>(std::llround(activeHeight)));
+    }
+
+    if (!almostEqual(activeFps, config.cameraFps, 0.5)) {
+        LOG_WARNING("Camera did not accept requested FPS. Requested "
+            << config.cameraFps << ", active " << activeFps);
+    }
+}
+
 void logStartupInfo(const ProcessorConfig& config, const ScreenInfo& screenInfo)
 {
     const std::string inputSource = !config.inputPath.empty()
@@ -100,6 +179,8 @@ void logStartupInfo(const ProcessorConfig& config, const ScreenInfo& screenInfo)
     LOG_VERBOSE("Display backend: " << displayBackendToString(config.displayBackend));
     LOG_VERBOSE("Processing size: " << config.width << "x" << config.height);
     LOG_VERBOSE("Mask size: " << config.maskWidth << "x" << config.maskHeight);
+    LOG_VERBOSE("Camera format: " << cameraFormatToString(config.cameraFormat));
+    LOG_VERBOSE("Camera FPS: " << config.cameraFps);
     LOG_VERBOSE("Fullscreen: " << (config.fullscreen ? "true" : "false"));
     LOG_VERBOSE("Benchmark: " << (config.benchmark ? "true" : "false"));
     LOG_VERBOSE("Max frames: " << (config.maxFrames > 0 ? std::to_string(config.maxFrames) : "unlimited"));
@@ -155,6 +236,7 @@ int VideoProcessor::run()
         capture.open(config_.inputPath);
     } else {
         LOG_INFO("Opening camera device: " << config_.devicePath);
+        logRequestedCameraConfig(config_);
         capture.open(config_.devicePath, cv::CAP_ANY);
     }
 
@@ -165,6 +247,10 @@ int VideoProcessor::run()
             LOG_ERROR("Cannot open camera device: " << config_.devicePath);
         }
         return ExitRuntimeError;
+    }
+
+    if (config_.inputPath.empty()) {
+        configureCameraCapture(capture, config_);
     }
 
     const cv::Size outputSize(config_.width, config_.height);

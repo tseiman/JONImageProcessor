@@ -23,6 +23,8 @@ enum OptionId {
     OptionOutputHeight,
     OptionMaskWidth,
     OptionMaskHeight,
+    OptionCameraFormat,
+    OptionCameraFps,
     OptionFullscreen,
     OptionDisplayMode,
     OptionDisplayBackend,
@@ -58,6 +60,8 @@ const std::vector<OptionDefinition>& optionDefinitions()
         {OptionOutputHeight, 0, "output-height", required_argument, "pixels", "Explicit display render height", "auto"},
         {OptionMaskWidth, 0, "mask-width", required_argument, "pixels", "Width for later mask inference", "256"},
         {OptionMaskHeight, 0, "mask-height", required_argument, "pixels", "Height for later mask inference", "144"},
+        {OptionCameraFormat, 0, "camera-format", required_argument, "format", "Camera pixel format: MJPG or YUYV", "MJPG"},
+        {OptionCameraFps, 0, "camera-fps", required_argument, "fps", "Requested camera frame rate", "30"},
         {OptionFullscreen, 0, "fullscreen", no_argument, "", "Show the window fullscreen when using window output", ""},
         {OptionDisplayMode, 0, "display-mode", required_argument, "mode", "Display mode: fit, fill, or stretch", "fit"},
         {OptionDisplayBackend, 0, "display-backend", required_argument, "backend", "Display backend: highgui", "highgui"},
@@ -172,6 +176,36 @@ bool parseDisplayBackend(const char* value, DisplayBackendType& backend, std::st
     return false;
 }
 
+bool parseCameraFormat(const char* value, CameraFormat& format, std::string& error)
+{
+    const std::string parsed(value);
+    if (parsed == "MJPG") {
+        format = CameraFormat::MJPG;
+        return true;
+    }
+    if (parsed == "YUYV") {
+        format = CameraFormat::YUYV;
+        return true;
+    }
+
+    error = "Invalid camera format: " + parsed;
+    return false;
+}
+
+bool parseCameraFps(const char* value, int& target, std::string& error)
+{
+    char* end = nullptr;
+    const long parsed = std::strtol(value, &end, 10);
+
+    if (end == value || *end != '\0' || parsed <= 0 || parsed > 1000) {
+        error = "Invalid camera FPS: " + std::string(value);
+        return false;
+    }
+
+    target = static_cast<int>(parsed);
+    return true;
+}
+
 std::string formatOptionName(const OptionDefinition& definition)
 {
     std::ostringstream stream;
@@ -253,6 +287,16 @@ bool parseCommandLine(int argc, char** argv, CommandLineResult& result, std::str
             break;
         case OptionMaskHeight:
             if (!parsePositiveInteger(optarg, "--mask-height", result.config.maskHeight, error)) {
+                return false;
+            }
+            break;
+        case OptionCameraFormat:
+            if (!parseCameraFormat(optarg, result.config.cameraFormat, error)) {
+                return false;
+            }
+            break;
+        case OptionCameraFps:
+            if (!parseCameraFps(optarg, result.config.cameraFps, error)) {
                 return false;
             }
             break;
@@ -381,6 +425,18 @@ std::string displayBackendToString(DisplayBackendType backend)
     switch (backend) {
     case DisplayBackendType::HighGui:
         return "highgui";
+    }
+
+    return "unknown";
+}
+
+std::string cameraFormatToString(CameraFormat format)
+{
+    switch (format) {
+    case CameraFormat::MJPG:
+        return "MJPG";
+    case CameraFormat::YUYV:
+        return "YUYV";
     }
 
     return "unknown";
