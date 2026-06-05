@@ -1,5 +1,6 @@
 #include "VideoProcessor.h"
 
+#include "DisplayEnvironment.h"
 #include "DisplayRenderer.h"
 #include "Logger.h"
 #include "Version.h"
@@ -65,6 +66,15 @@ std::string sizeToString(cv::Size size)
     return stream.str();
 }
 
+std::string screenInfoToString(const ScreenInfo& screenInfo)
+{
+    if (!screenInfo.available) {
+        return "unknown";
+    }
+
+    return sizeToString(screenInfo.size);
+}
+
 std::string rectToString(const cv::Rect& rect)
 {
     std::ostringstream stream;
@@ -74,21 +84,25 @@ std::string rectToString(const cv::Rect& rect)
 
 bool displayStateChanged(
     cv::Size inputSize,
+    cv::Size screenSize,
     cv::Size windowRectSize,
     cv::Size canvasSize,
     const cv::Rect& destinationRect,
     cv::Size& lastInputSize,
+    cv::Size& lastScreenSize,
     cv::Size& lastWindowRectSize,
     cv::Size& lastCanvasSize,
     cv::Rect& lastDestinationRect)
 {
     const bool changed = inputSize != lastInputSize
+        || screenSize != lastScreenSize
         || windowRectSize != lastWindowRectSize
         || canvasSize != lastCanvasSize
         || destinationRect != lastDestinationRect;
 
     if (changed) {
         lastInputSize = inputSize;
+        lastScreenSize = screenSize;
         lastWindowRectSize = windowRectSize;
         lastCanvasSize = canvasSize;
         lastDestinationRect = destinationRect;
@@ -100,6 +114,7 @@ bool displayStateChanged(
 void logDisplayDiagnostics(
     cv::Size inputSize,
     cv::Size processingSize,
+    const ScreenInfo& screenInfo,
     cv::Rect windowRect,
     cv::Size canvasSize,
     DisplayMode displayMode,
@@ -107,6 +122,7 @@ void logDisplayDiagnostics(
 {
     LOG_VERBOSE("Input frame: " << sizeToString(inputSize));
     LOG_VERBOSE("Processing size: " << sizeToString(processingSize));
+    LOG_VERBOSE("Screen size: " << screenInfoToString(screenInfo));
     LOG_VERBOSE("Window size: " << sizeToString(windowRect.size()));
     LOG_VERBOSE("Canvas size: " << sizeToString(canvasSize));
     LOG_VERBOSE("Display mode: " << displayModeToString(displayMode));
@@ -136,6 +152,7 @@ void logStartupInfo(const ProcessorConfig& config)
     LOG_VERBOSE("Build date: " << __DATE__ << " " << __TIME__);
     LOG_VERBOSE("Operating system: " << operatingSystemString());
     LOG_VERBOSE("OpenCV version: " << CV_VERSION);
+    LOG_VERBOSE("Primary screen size: " << screenInfoToString(detectPrimaryScreen()));
     LOG_VERBOSE("Input source: " << inputSource);
     LOG_VERBOSE("Output mode: " << outputModeToString(config.outputMode));
     LOG_VERBOSE("Display mode: " << displayModeToString(config.displayMode));
@@ -235,7 +252,9 @@ int VideoProcessor::run()
 
     std::size_t frameIndex = 0;
     cv::Mat frame;
+    const ScreenInfo screenInfo = detectPrimaryScreen();
     cv::Size lastInputSize;
+    cv::Size lastScreenSize;
     cv::Size lastWindowRectSize;
     cv::Size lastCanvasSize;
     cv::Rect lastDestinationRect;
@@ -276,13 +295,16 @@ int VideoProcessor::run()
 
             if (config_.verbose) {
                 const cv::Size inputSize = frame.size();
+                const cv::Size screenSize = screenInfo.available ? screenInfo.size : cv::Size();
                 const cv::Size windowRectSize = displayArea.windowRect.size();
                 const bool changed = displayStateChanged(
                     inputSize,
+                    screenSize,
                     windowRectSize,
                     displayResult.canvasSize,
                     displayResult.destinationRect,
                     lastInputSize,
+                    lastScreenSize,
                     lastWindowRectSize,
                     lastCanvasSize,
                     lastDestinationRect
@@ -293,6 +315,7 @@ int VideoProcessor::run()
                     logDisplayDiagnostics(
                         inputSize,
                         outputSize,
+                        screenInfo,
                         displayArea.windowRect,
                         displayResult.canvasSize,
                         config_.displayMode,

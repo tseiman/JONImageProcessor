@@ -147,7 +147,7 @@ Examples:
 
 Verbose startup diagnostics include the program version, build date, operating system, OpenCV version, input source, output mode, display mode, processing size, mask size, and fullscreen state.
 
-Verbose display diagnostics include input frame size, window size, canvas size, display mode, and destination rectangle. Performance diagnostics are emitted about once per second and include current FPS, average FPS, and processed frame count.
+Verbose display diagnostics include input frame size, detected primary screen size, HighGUI window size, output canvas size, display mode, and destination rectangle. This makes platform-specific HighGUI behavior visible, especially when fullscreen window sizing differs between Linux and macOS. Performance diagnostics are emitted about once per second and include current FPS, average FPS, and processed frame count.
 
 ## Jetson Orin Nano Notes
 

@@ -15,6 +15,7 @@ find_package(OpenCV REQUIRED COMPONENTS core imgproc highgui videoio)
 add_executable(JONImageProcessor
     src/main.cpp
     src/CommandLineOptions.cpp
+    src/DisplayEnvironment.cpp
     src/DisplayRenderer.cpp
     src/Logger.cpp
     src/VideoProcessor.cpp
@@ -26,6 +27,10 @@ target_include_directories(JONImageProcessor PRIVATE
 )
 
 target_link_libraries(JONImageProcessor PRIVATE ${OpenCV_LIBS})
+
+if (APPLE)
+    target_link_libraries(JONImageProcessor PRIVATE "-framework CoreGraphics")
+endif()
 
 if (MSVC)
     target_compile_options(JONImageProcessor PRIVATE /W4)
