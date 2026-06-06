@@ -25,7 +25,10 @@ public:
 
     void start(cv::VideoCapture& capture);
     void stop();
-    bool waitForLatestFrame(cv::Mat& frame);
+    bool waitForLatestFrame(
+        cv::Mat& frame,
+        std::chrono::steady_clock::duration& waitDuration,
+        std::chrono::steady_clock::duration& handoverDuration);
     LowLatencyCaptureStats stats() const;
 
 private:

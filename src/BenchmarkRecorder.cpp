@@ -23,6 +23,10 @@ double milliseconds(std::chrono::steady_clock::duration duration)
 const char* stageName(BenchmarkStage stage)
 {
     switch (stage) {
+    case BenchmarkStage::CaptureWait:
+        return "Capture wait";
+    case BenchmarkStage::FrameHandover:
+        return "Frame handover";
     case BenchmarkStage::Decode:
         return "Decode";
     case BenchmarkStage::Resize:
@@ -35,8 +39,10 @@ const char* stageName(BenchmarkStage stage)
         return "Overlay";
     case BenchmarkStage::Display:
         return "Display";
-    case BenchmarkStage::Total:
-        return "Total frame";
+    case BenchmarkStage::ProcessingTotal:
+        return "Processing total";
+    case BenchmarkStage::PipelineTotal:
+        return "Pipeline total";
     case BenchmarkStage::Count:
         break;
     }
@@ -61,7 +67,7 @@ std::string formatPercent(double value)
 void logAverageLine(BenchmarkStage stage, double value)
 {
     std::ostringstream stream;
-    stream << std::left << std::setw(14) << (std::string(stageName(stage)) + ":")
+    stream << std::left << std::setw(22) << (std::string(stageName(stage)) + ":")
            << formatMilliseconds(value);
     LOG_BENCH(stream.str());
 }
@@ -69,7 +75,7 @@ void logAverageLine(BenchmarkStage stage, double value)
 void logDistributionLine(const std::string& label, double percent)
 {
     std::ostringstream stream;
-    stream << std::left << std::setw(14) << (label + ":") << formatPercent(percent);
+    stream << std::left << std::setw(22) << (label + ":") << formatPercent(percent);
     LOG_BENCH(stream.str());
 }
 
@@ -128,8 +134,8 @@ void BenchmarkRecorder::maybeLogProgress()
     }
 
     LOG_BENCH("Frames processed: " << frames_
-        << " avg-frame=" << formatMilliseconds(totalAverageMilliseconds())
-        << " fps=" << (1000.0 / std::max(0.001, totalAverageMilliseconds())));
+        << " avg-frame=" << formatMilliseconds(pipelineAverageMilliseconds())
+        << " fps=" << (1000.0 / std::max(0.001, pipelineAverageMilliseconds())));
     lastProgressLog_ = now;
 }
 
@@ -145,7 +151,8 @@ void BenchmarkRecorder::logSummary() const
         const double captureFps = captureSeconds > 0.0 ? static_cast<double>(capturedFrames_) / captureSeconds : 0.0;
         const double processingFps = captureSeconds > 0.0 ? static_cast<double>(frames_) / captureSeconds : 0.0;
         LOG_BENCH("Captured frames: " << capturedFrames_);
-        LOG_BENCH("Dropped frames: " << droppedFrames_);
+        LOG_BENCH("Processed frames: " << frames_);
+        LOG_BENCH("Dropped/overwritten frames: " << droppedFrames_);
         LOG_BENCH("Capture FPS: " << captureFps);
         LOG_BENCH("Processing FPS: " << processingFps);
     }
@@ -154,25 +161,30 @@ void BenchmarkRecorder::logSummary() const
     }
 
     LOG_BENCH("Average frame time:");
+    logAverageLine(BenchmarkStage::CaptureWait, averageMilliseconds(BenchmarkStage::CaptureWait));
+    logAverageLine(BenchmarkStage::FrameHandover, averageMilliseconds(BenchmarkStage::FrameHandover));
     logAverageLine(BenchmarkStage::Decode, averageMilliseconds(BenchmarkStage::Decode));
     logAverageLine(BenchmarkStage::Resize, averageMilliseconds(BenchmarkStage::Resize));
     logAverageLine(BenchmarkStage::Mask, averageMilliseconds(BenchmarkStage::Mask));
     logAverageLine(BenchmarkStage::MaskUpscale, averageMilliseconds(BenchmarkStage::MaskUpscale));
     logAverageLine(BenchmarkStage::Overlay, averageMilliseconds(BenchmarkStage::Overlay));
     logAverageLine(BenchmarkStage::Display, averageMilliseconds(BenchmarkStage::Display));
-    LOG_BENCH("Total frame time: " << formatMilliseconds(totalAverageMilliseconds()));
-    LOG_BENCH("Effective FPS: " << (1000.0 / std::max(0.001, totalAverageMilliseconds())));
+    logAverageLine(BenchmarkStage::ProcessingTotal, averageMilliseconds(BenchmarkStage::ProcessingTotal));
+    logAverageLine(BenchmarkStage::PipelineTotal, averageMilliseconds(BenchmarkStage::PipelineTotal));
+    LOG_BENCH("Effective FPS: " << (1000.0 / std::max(0.001, pipelineAverageMilliseconds())));
 
     LOG_BENCH("Time distribution:");
+    logDistributionLine("Capture wait", percentOfTotal(BenchmarkStage::CaptureWait));
+    logDistributionLine("Frame handover", percentOfTotal(BenchmarkStage::FrameHandover));
     logDistributionLine("Decode", percentOfTotal(BenchmarkStage::Decode));
     logDistributionLine("Resize", percentOfTotal(BenchmarkStage::Resize));
     logDistributionLine("Mask", percentOfTotal(BenchmarkStage::Mask));
     logDistributionLine("Mask upscale", percentOfTotal(BenchmarkStage::MaskUpscale));
     logDistributionLine("Overlay", percentOfTotal(BenchmarkStage::Overlay));
     logDistributionLine("Display", percentOfTotal(BenchmarkStage::Display));
-    const double totalMs = milliseconds(stages_[stageIndex(BenchmarkStage::Total)].total);
+    const double totalMs = milliseconds(stages_[stageIndex(BenchmarkStage::PipelineTotal)].total);
     const double otherMs = milliseconds(otherTotal());
-    logDistributionLine("Other", totalMs > 0.0 ? (otherMs / totalMs) * 100.0 : 0.0);
+    logDistributionLine("Unclassified other", totalMs > 0.0 ? (otherMs / totalMs) * 100.0 : 0.0);
 }
 
 double BenchmarkRecorder::averageMilliseconds(BenchmarkStage stage) const
@@ -184,14 +196,14 @@ double BenchmarkRecorder::averageMilliseconds(BenchmarkStage stage) const
     return milliseconds(stages_[stageIndex(stage)].total) / static_cast<double>(frames_);
 }
 
-double BenchmarkRecorder::totalAverageMilliseconds() const
+double BenchmarkRecorder::pipelineAverageMilliseconds() const
 {
-    return averageMilliseconds(BenchmarkStage::Total);
+    return averageMilliseconds(BenchmarkStage::PipelineTotal);
 }
 
 double BenchmarkRecorder::percentOfTotal(BenchmarkStage stage) const
 {
-    const double totalMs = milliseconds(stages_[stageIndex(BenchmarkStage::Total)].total);
+    const double totalMs = milliseconds(stages_[stageIndex(BenchmarkStage::PipelineTotal)].total);
     if (totalMs <= 0.0) {
         return 0.0;
     }
@@ -202,6 +214,8 @@ double BenchmarkRecorder::percentOfTotal(BenchmarkStage stage) const
 std::chrono::steady_clock::duration BenchmarkRecorder::measuredStageTotal() const
 {
     std::chrono::steady_clock::duration total {};
+    total += stages_[stageIndex(BenchmarkStage::CaptureWait)].total;
+    total += stages_[stageIndex(BenchmarkStage::FrameHandover)].total;
     total += stages_[stageIndex(BenchmarkStage::Decode)].total;
     total += stages_[stageIndex(BenchmarkStage::Resize)].total;
     total += stages_[stageIndex(BenchmarkStage::Mask)].total;
@@ -213,7 +227,7 @@ std::chrono::steady_clock::duration BenchmarkRecorder::measuredStageTotal() cons
 
 std::chrono::steady_clock::duration BenchmarkRecorder::otherTotal() const
 {
-    const auto total = stages_[stageIndex(BenchmarkStage::Total)].total;
+    const auto total = stages_[stageIndex(BenchmarkStage::PipelineTotal)].total;
     const auto measured = measuredStageTotal();
     return total > measured ? total - measured : std::chrono::steady_clock::duration {};
 }

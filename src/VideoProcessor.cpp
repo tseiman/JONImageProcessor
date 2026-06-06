@@ -331,10 +331,16 @@ int VideoProcessor::run()
     std::size_t intervalFrames = 0;
 
     while (true) {
-        const auto frameStartedAt = std::chrono::steady_clock::now();
+        const auto pipelineStartedAt = std::chrono::steady_clock::now();
         bool readOk = false;
         if (lowLatencyMode) {
-            readOk = lowLatencyCapture.waitForLatestFrame(frame);
+            std::chrono::steady_clock::duration captureWait {};
+            std::chrono::steady_clock::duration frameHandover {};
+            readOk = lowLatencyCapture.waitForLatestFrame(frame, captureWait, frameHandover);
+            if (readOk) {
+                benchmark.add(BenchmarkStage::CaptureWait, captureWait);
+                benchmark.add(BenchmarkStage::FrameHandover, frameHandover);
+            }
         } else {
             const auto decodeStartedAt = std::chrono::steady_clock::now();
             readOk = capture.read(frame);
@@ -351,6 +357,8 @@ int VideoProcessor::run()
         if (frame.empty()) {
             continue;
         }
+
+        const auto processingStartedAt = std::chrono::steady_clock::now();
 
         cv::Mat resized;
         {
@@ -394,7 +402,9 @@ int VideoProcessor::run()
 
         ++frameIndex;
         ++intervalFrames;
-        benchmark.add(BenchmarkStage::Total, std::chrono::steady_clock::now() - frameStartedAt);
+        const auto frameEndedAt = std::chrono::steady_clock::now();
+        benchmark.add(BenchmarkStage::ProcessingTotal, frameEndedAt - processingStartedAt);
+        benchmark.add(BenchmarkStage::PipelineTotal, frameEndedAt - pipelineStartedAt);
         benchmark.frameCompleted();
         benchmark.maybeLogProgress();
 

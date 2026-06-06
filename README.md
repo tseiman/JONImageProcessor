@@ -215,7 +215,11 @@ Use `--no-overlay` to skip overlay rendering:
 ./build/JONImageProcessor --input testdata/Test1_pixabay_Video_4k.mp4 --benchmark --no-display --no-mask --no-overlay --max-frames 500
 ```
 
-Benchmark output reports average time for decode, resize, mask generation, mask upscale, overlay, display, total frame time, effective FPS, and percentage distribution including unmeasured overhead as `Other`. In low-latency camera mode, benchmark output also reports captured frames, processed frames, dropped frames, capture FPS, and processing FPS.
+Benchmark output reports average time for capture wait, frame handover, decode, resize, mask generation, mask upscale, overlay, display, processing total, pipeline total, and effective FPS. The percentage distribution separates `Capture wait`, `Frame handover`, and `Unclassified other` so live-camera runs show whether time is spent waiting for camera frames, copying the latest frame into the processing loop, or actually processing the frame.
+
+`Processing total` measures the work after a frame is available. `Pipeline total` includes frame acquisition wait/handover plus processing. This distinction is important for live camera measurements, where a 30 FPS camera naturally limits the pipeline rate even if processing is much faster.
+
+In low-latency camera mode, benchmark output also reports captured frames, processed frames, dropped/overwritten frames, capture FPS, and processing FPS.
 
 The goal is to compare macOS development systems, Linux VMs, and Jetson Orin Nano runs objectively before deciding where optimization work should happen.
 

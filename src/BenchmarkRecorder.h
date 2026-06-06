@@ -5,13 +5,16 @@
 #include <string>
 
 enum class BenchmarkStage {
+    CaptureWait,
+    FrameHandover,
     Decode,
     Resize,
     Mask,
     MaskUpscale,
     Overlay,
     Display,
-    Total,
+    ProcessingTotal,
+    PipelineTotal,
     Count
 };
 
@@ -35,7 +38,7 @@ private:
     };
 
     double averageMilliseconds(BenchmarkStage stage) const;
-    double totalAverageMilliseconds() const;
+    double pipelineAverageMilliseconds() const;
     double percentOfTotal(BenchmarkStage stage) const;
     std::chrono::steady_clock::duration measuredStageTotal() const;
     std::chrono::steady_clock::duration otherTotal() const;

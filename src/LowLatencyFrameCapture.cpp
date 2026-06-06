@@ -43,20 +43,29 @@ void LowLatencyFrameCapture::stop()
     }
 }
 
-bool LowLatencyFrameCapture::waitForLatestFrame(cv::Mat& frame)
+bool LowLatencyFrameCapture::waitForLatestFrame(
+    cv::Mat& frame,
+    std::chrono::steady_clock::duration& waitDuration,
+    std::chrono::steady_clock::duration& handoverDuration)
 {
+    const auto waitStartedAt = std::chrono::steady_clock::now();
     std::unique_lock<std::mutex> lock(mutex_);
     frameAvailable_.wait(lock, [this] {
         return stopped_ || latestSequence_ != deliveredSequence_;
     });
+    const auto waitEndedAt = std::chrono::steady_clock::now();
+    waitDuration = waitEndedAt - waitStartedAt;
 
     if (latestSequence_ == deliveredSequence_) {
+        handoverDuration = std::chrono::steady_clock::duration {};
         return false;
     }
 
+    const auto handoverStartedAt = std::chrono::steady_clock::now();
     frame = latestFrame_.clone();
     deliveredSequence_ = latestSequence_;
     latestConsumed_ = true;
+    handoverDuration = std::chrono::steady_clock::now() - handoverStartedAt;
     return true;
 }
 
