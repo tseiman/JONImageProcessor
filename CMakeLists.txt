@@ -13,6 +13,7 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 find_package(OpenCV REQUIRED COMPONENTS core imgproc imgcodecs highgui videoio)
 
 option(JON_ENABLE_JETSON_INFERENCE "Enable jetson-inference/TensorRT segmentation backend" OFF)
+set(JON_JETSON_INFERENCE_ROOT "" CACHE PATH "Optional root/prefix containing jetson-inference and jetson-utils for cross builds")
 
 execute_process(
     COMMAND git rev-parse --short=7 HEAD
@@ -75,22 +76,37 @@ target_include_directories(JONImageProcessor PRIVATE
 target_link_libraries(JONImageProcessor PRIVATE ${OpenCV_LIBS})
 
 if (JON_ENABLE_JETSON_INFERENCE)
+    set(JON_JETSON_INFERENCE_SEARCH_PATHS
+        ${JON_JETSON_INFERENCE_ROOT}
+        /usr/local
+        /usr
+    )
+
     find_package(CUDAToolkit REQUIRED)
     find_path(JETSON_INFERENCE_INCLUDE_DIR
         NAMES jetson-inference/segNet.h
-        PATHS /usr/local/include /usr/include
+        PATHS ${JON_JETSON_INFERENCE_SEARCH_PATHS}
+        PATH_SUFFIXES include
     )
     find_library(JETSON_INFERENCE_LIBRARY
         NAMES jetson-inference
-        PATHS /usr/local/lib /usr/lib /usr/lib/aarch64-linux-gnu
+        PATHS ${JON_JETSON_INFERENCE_SEARCH_PATHS}
+        PATH_SUFFIXES lib lib/aarch64-linux-gnu
     )
     find_library(JETSON_UTILS_LIBRARY
         NAMES jetson-utils
-        PATHS /usr/local/lib /usr/lib /usr/lib/aarch64-linux-gnu
+        PATHS ${JON_JETSON_INFERENCE_SEARCH_PATHS}
+        PATH_SUFFIXES lib lib/aarch64-linux-gnu
     )
 
     if (NOT JETSON_INFERENCE_INCLUDE_DIR OR NOT JETSON_INFERENCE_LIBRARY OR NOT JETSON_UTILS_LIBRARY)
-        message(FATAL_ERROR "jetson-inference backend requested but jetson-inference/jetson-utils headers or libraries were not found")
+        message(FATAL_ERROR
+            "JON_ENABLE_JETSON_INFERENCE=ON was requested, but jetson-inference/jetson-utils were not found.\n"
+            "Expected header: jetson-inference/segNet.h\n"
+            "Expected libraries: libjetson-inference and libjetson-utils\n"
+            "Provide them from a Jetson sysroot, from the NGC container, or from a cross-compiled jetson-inference install.\n"
+            "Set -DJON_JETSON_INFERENCE_ROOT=/path/to/prefix if they are installed outside /usr or /usr/local."
+        )
     endif()
 
     target_include_directories(JONImageProcessor PRIVATE ${JETSON_INFERENCE_INCLUDE_DIR})

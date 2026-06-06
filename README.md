@@ -311,7 +311,7 @@ git clone --recursive https://github.com/dusty-nv/jetson-inference.git
 cd jetson-inference && mkdir -p build && cd build && cmake .. && make -j$(nproc) && sudo make install && sudo ldconfig
 ```
 
-Install commands require system rights and are intentionally not run by this project. For cross-compilation notes, see `docs/cross-compile-jetson.md`.
+Install commands require system rights and are intentionally not run by this project. Cross-compilation is the preferred reproducible build path; use `./scripts/build-jetson-cross.sh` from an x86_64 Linux VM and see `docs/cross-compile-jetson.md` for sysroot, JetPack/L4T, and optional `jetson-inference` details.
 
 ## Planned Service Operation
 
