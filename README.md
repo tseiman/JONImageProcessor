@@ -4,9 +4,202 @@ JONImageProcessor is a C++ base project for a Jetson Orin Nano image processor. 
 
 This initial version provides the project foundation: CMake, OpenCV, command-line options, file or camera input, a simple dummy mask as a visible overlay, and output to either an OpenCV window or an MP4 file.
 
+## Table of Contents
+
+- [Prerequisites](#prerequisites)
+  - [x86_64 Build Host](#x86_64-build-host)
+  - [Jetson Target](#jetson-target)
+  - [Jetson Sysroot](#jetson-sysroot)
+  - [Optional Jetson Inference](#optional-jetson-inference)
+- [Build](#build)
+  - [Native Linux Build](#native-linux-build)
+  - [Cross-Compile Container Build](#cross-compile-container-build)
+  - [Cross-Compile With Jetson Inference](#cross-compile-with-jetson-inference)
+- [Install and Run on Jetson](#install-and-run-on-jetson)
+  - [Binary Deployment](#binary-deployment)
+  - [Runtime Container Status](#runtime-container-status)
+- [Example Commands](#example-commands)
+- [Command-Line Options](#command-line-options)
+- [Camera Configuration](#camera-configuration)
+- [Capture Backends](#capture-backends)
+- [Low-Latency Camera Mode](#low-latency-camera-mode)
+- [Mask Backends](#mask-backends)
+- [Display Modes](#display-modes)
+- [Display Backends](#display-backends)
+- [Verbose Logging](#verbose-logging)
+- [Performance Analysis](#performance-analysis)
+- [Jetson Orin Nano Notes](#jetson-orin-nano-notes)
+- [Planned Service Operation](#planned-service-operation)
+- [Planned runtime control](#planned-runtime-control)
+- [Test Data](#test-data)
+
+## Prerequisites
+
+### x86_64 Build Host
+
+The preferred reproducible build path is cross-compilation from an x86_64 Linux VM using NVIDIA's JetPack cross-compile container.
+
+Required host software:
+
+- Linux x86_64 host or VM
+- Git
+- Docker
+- Access to `nvcr.io/nvidia/jetpack-linux-aarch64-crosscompile-x86:<JetPack version>`
+- A Jetson target sysroot copied from the Jetson Orin Nano
+
+Install Docker on a Debian/Ubuntu build host:
+
+```bash
+sudo apt update
+```
+
+```bash
+sudo apt install -y docker.io
+```
+
+```bash
+sudo systemctl enable --now docker
+```
+
+```bash
+sudo usermod -aG docker "$USER"
+```
+
+Log out and back in, or run:
+
+```bash
+newgrp docker
+```
+
+Verify Docker access:
+
+```bash
+docker run --rm hello-world
+```
+
+Pull the JetPack 6.1 cross-compile container:
+
+```bash
+docker pull nvcr.io/nvidia/jetpack-linux-aarch64-crosscompile-x86:6.1
+```
+
+If the Jetson target uses a different JetPack/L4T release, use the matching NGC container tag instead of `6.1`.
+
+### Jetson Target
+
+Required target setup:
+
+- NVIDIA Jetson Orin Nano
+- JetPack installed
+- Camera available as `/dev/video0`
+- HDMI/DisplayPort display for window/fullscreen output
+- OpenCV runtime libraries
+- V4L2 device access for the runtime user
+
+Check the target JetPack/L4T version on the Jetson:
+
+```bash
+cat /etc/nv_tegra_release
+```
+
+```bash
+dpkg-query -W nvidia-l4t-core
+```
+
+For JetPack 6.1, the expected Jetson Linux/L4T line is in the 36.4 family.
+
+Check the camera:
+
+```bash
+v4l2-ctl --list-formats-ext -d /dev/video0
+```
+
+If the runtime user cannot access the camera, add it to the `video` group on the Jetson:
+
+```bash
+sudo usermod -aG video "$USER"
+```
+
+Then log out and back in.
+
+### Jetson Sysroot
+
+The cross-build needs target headers, libraries, and CMake package files. Copy these from the Jetson to the x86_64 build host:
+
+```bash
+mkdir -p "$HOME/sysroots/orin-nano"
+```
+
+```bash
+rsync -aHAX --numeric-ids --delete tseiman@jon:/lib/ "$HOME/sysroots/orin-nano/lib/"
+```
+
+```bash
+rsync -aHAX --numeric-ids --delete --exclude=/libexec/sssd/ tseiman@jon:/usr/ "$HOME/sysroots/orin-nano/usr/"
+```
+
+```bash
+rsync -aHAX --numeric-ids --delete --exclude=/containerd/ tseiman@jon:/opt/ "$HOME/sysroots/orin-nano/opt/"
+```
+
+The resulting sysroot should look like:
+
+```text
+$HOME/sysroots/orin-nano/
+  lib/
+  usr/
+  opt/
+```
+
+Verify required files:
+
+```bash
+test -d "$HOME/sysroots/orin-nano/usr/include" && echo ok
+```
+
+```bash
+test -d "$HOME/sysroots/orin-nano/usr/lib/aarch64-linux-gnu" && echo ok
+```
+
+```bash
+find "$HOME/sysroots/orin-nano/usr" -name OpenCVConfig.cmake -o -name opencv4.pc
+```
+
+Optional CUDA/TensorRT checks:
+
+```bash
+find "$HOME/sysroots/orin-nano/usr" -name cuda_runtime_api.h
+```
+
+```bash
+find "$HOME/sysroots/orin-nano/usr" "$HOME/sysroots/orin-nano/opt" -name NvInfer.h
+```
+
+### Optional Jetson Inference
+
+The default cross-build does not require `jetson-inference`.
+
+Only `--mask-backend jetson` needs:
+
+- `include/jetson-inference/segNet.h`
+- `libjetson-inference`
+- `libjetson-utils`
+- CUDA runtime
+- TensorRT
+
+These dependencies must be present in one of these places:
+
+- the mounted Jetson sysroot
+- the NVIDIA cross-compile container
+- a separate AArch64 install prefix passed as `JETSON_INFERENCE_ROOT`
+
+If `ENABLE_JETSON_INFERENCE=ON` is requested but these files are missing, the build script exits with a clear error before CMake configuration.
+
 ## Build
 
-Linux requirements:
+### Native Linux Build
+
+Native build requirements:
 
 - CMake
 - C++17 compiler
@@ -22,6 +215,116 @@ The executable is created at:
 ```bash
 ./build/JONImageProcessor
 ```
+
+### Cross-Compile Container Build
+
+The cross-compile path uses:
+
+- `scripts/build-jetson-cross.sh`
+- `cmake/toolchains/jetson-aarch64.cmake`
+- NVIDIA NGC image `nvcr.io/nvidia/jetpack-linux-aarch64-crosscompile-x86:<JetPack version>`
+- a mounted Jetson sysroot
+
+Default cross-build without `jetson-inference`:
+
+```bash
+JETSON_SYSROOT="$HOME/sysroots/orin-nano" ./scripts/build-jetson-cross.sh
+```
+
+Expected output:
+
+```text
+build-jetson-cross/JONImageProcessor
+```
+
+Verify the binary architecture:
+
+```bash
+file build-jetson-cross/JONImageProcessor
+```
+
+Expected result:
+
+```text
+ELF 64-bit LSB pie executable, ARM aarch64, version 1 (GNU/Linux)
+```
+
+Use a different JetPack container tag when needed:
+
+```bash
+JETPACK_VERSION=6.1 JETSON_SYSROOT="$HOME/sysroots/orin-nano" ./scripts/build-jetson-cross.sh
+```
+
+The script also accepts an explicit container image:
+
+```bash
+CONTAINER_IMAGE=nvcr.io/nvidia/jetpack-linux-aarch64-crosscompile-x86:6.1 JETSON_SYSROOT="$HOME/sysroots/orin-nano" ./scripts/build-jetson-cross.sh
+```
+
+### Cross-Compile With Jetson Inference
+
+Build with `jetson-inference` only after the default cross-build works:
+
+```bash
+ENABLE_JETSON_INFERENCE=ON JETSON_SYSROOT="$HOME/sysroots/orin-nano" ./scripts/build-jetson-cross.sh
+```
+
+If `jetson-inference` is installed into a separate AArch64 prefix:
+
+```bash
+ENABLE_JETSON_INFERENCE=ON JETSON_SYSROOT="$HOME/sysroots/orin-nano" JETSON_INFERENCE_ROOT=/path/to/aarch64/jetson-inference-prefix ./scripts/build-jetson-cross.sh
+```
+
+Expected missing-dependency error when the prefix/sysroot does not contain the required files:
+
+```text
+[ERROR] ENABLE_JETSON_INFERENCE=ON, but jetson-inference dependencies were not found.
+[ERROR] Required: include/jetson-inference/segNet.h, libjetson-inference, libjetson-utils.
+```
+
+More detail is available in [docs/cross-compile-jetson.md](docs/cross-compile-jetson.md).
+
+## Install and Run on Jetson
+
+### Binary Deployment
+
+The current supported deployment path is copying the AArch64 binary to the Jetson and running it directly on the Jetson OS.
+
+Copy the binary:
+
+```bash
+scp build-jetson-cross/JONImageProcessor tseiman@jon:~/JONImageProcessor
+```
+
+Run on the Jetson:
+
+```bash
+ssh tseiman@jon 'chmod +x ~/JONImageProcessor && ~/JONImageProcessor --version'
+```
+
+Run with the Logitech BRIO through V4L2:
+
+```bash
+ssh -t tseiman@jon '~/JONImageProcessor --device /dev/video0 --capture-backend v4l2 --camera-format MJPG --camera-fps 30 --width 1280 --height 720 --mask-backend dummy --background-overlay-color 0,0,255 --background-overlay-alpha 0.35 --benchmark'
+```
+
+Run with Jetson segmentation when the binary was built with `ENABLE_JETSON_INFERENCE=ON` and the target has the matching runtime libraries:
+
+```bash
+ssh -t tseiman@jon '~/JONImageProcessor --device /dev/video0 --capture-backend v4l2 --camera-format MJPG --camera-fps 30 --width 1280 --height 720 --mask-backend jetson --background-overlay-color 0,0,255 --background-overlay-alpha 0.35 --benchmark'
+```
+
+If dynamic libraries are missing on the Jetson, inspect them with:
+
+```bash
+ssh tseiman@jon 'ldd ~/JONImageProcessor'
+```
+
+### Runtime Container Status
+
+This repository currently does not provide a Jetson runtime Dockerfile or a packaged runtime image. The container currently documented and automated here is the NVIDIA x86_64 cross-compile container, not an application runtime container for the Jetson.
+
+Running JONImageProcessor inside a Jetson runtime container will require a separate runtime image based on a compatible JetPack/L4T base image, plus camera/display device mounts such as `/dev/video0`, `/tmp/.X11-unix`, and the relevant NVIDIA runtime configuration. That packaging step is intentionally not implemented in this project yet.
 
 ## Example Commands
 
@@ -190,14 +493,16 @@ Jetson segmentation example:
 ./build/JONImageProcessor --device /dev/video0 --capture-backend v4l2 --camera-format MJPG --camera-fps 30 --width 1280 --height 720 --mask-backend jetson --background-overlay-color 0,0,255 --background-overlay-alpha 0.35 --benchmark
 ```
 
-Build with Jetson inference support on a Jetson:
+Cross-build with Jetson inference support after the default cross-build works:
 
 ```bash
-cmake -B build -S . -DJON_ENABLE_JETSON_INFERENCE=ON
+ENABLE_JETSON_INFERENCE=ON JETSON_SYSROOT="$HOME/sysroots/orin-nano" ./scripts/build-jetson-cross.sh
 ```
 
+If `jetson-inference` is installed into a separate AArch64 prefix, pass that prefix explicitly:
+
 ```bash
-cmake --build build
+ENABLE_JETSON_INFERENCE=ON JETSON_SYSROOT="$HOME/sysroots/orin-nano" JETSON_INFERENCE_ROOT=/path/to/aarch64/jetson-inference-prefix ./scripts/build-jetson-cross.sh
 ```
 
 The Jetson backend currently uses the `fcn-resnet18-voc-320x320` `segNet` model because it provides a `person` class. The model output is converted into a binary person/background mask. The first run may take longer while TensorRT builds or loads its optimized engine.
@@ -301,17 +606,7 @@ This version intentionally uses only CMake, C++17, and OpenCV so it can build on
 
 On the Jetson, OpenCV and camera access should be verified separately before service operation. `/dev/video0` is the default for USB cameras. The `v4l2` capture backend is preferred for low-latency USB camera input.
 
-For `--mask-backend jetson`, install JetPack components, CUDA/TensorRT, and `jetson-inference`/`jetson-utils` before configuring with `-DJON_ENABLE_JETSON_INFERENCE=ON`. A typical source install starts with:
-
-```bash
-git clone --recursive https://github.com/dusty-nv/jetson-inference.git
-```
-
-```bash
-cd jetson-inference && mkdir -p build && cd build && cmake .. && make -j$(nproc) && sudo make install && sudo ldconfig
-```
-
-Install commands require system rights and are intentionally not run by this project. Cross-compilation is the preferred reproducible build path; use `./scripts/build-jetson-cross.sh` from an x86_64 Linux VM and see `docs/cross-compile-jetson.md` for sysroot, JetPack/L4T, and optional `jetson-inference` details.
+For `--mask-backend jetson`, the AArch64 build environment must provide JetPack-compatible CUDA/TensorRT runtime files and `jetson-inference`/`jetson-utils` headers and libraries. Do not infer from missing `/usr/local/include` files on the Jetson that a native Jetson source install is required. The preferred reproducible path is cross-compilation from an x86_64 Linux VM with a matching Jetson sysroot and, if needed, a separate AArch64 `jetson-inference` prefix. See `docs/cross-compile-jetson.md` for details.
 
 ## Planned Service Operation
 
