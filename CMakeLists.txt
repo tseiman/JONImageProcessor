@@ -10,7 +10,7 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
-find_package(OpenCV REQUIRED COMPONENTS core imgproc highgui videoio)
+find_package(OpenCV REQUIRED COMPONENTS core imgproc imgcodecs highgui videoio)
 
 execute_process(
     COMMAND git rev-parse --short=7 HEAD
@@ -49,6 +49,7 @@ endif()
 add_executable(JONImageProcessor
     src/main.cpp
     src/BenchmarkRecorder.cpp
+    src/CaptureBackendFactory.cpp
     src/CommandLineOptions.cpp
     src/DisplayBackendFactory.cpp
     src/DisplayEnvironment.cpp
@@ -56,6 +57,8 @@ add_executable(JONImageProcessor
     src/Logger.cpp
     src/LowLatencyFrameCapture.cpp
     src/OpenCvDisplayBackend.cpp
+    src/OpenCvCaptureBackends.cpp
+    src/V4L2CameraCaptureBackend.cpp
     src/VideoProcessor.cpp
 )
 

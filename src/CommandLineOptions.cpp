@@ -28,6 +28,7 @@ enum OptionId {
     OptionFullscreen,
     OptionDisplayMode,
     OptionDisplayBackend,
+    OptionCaptureBackend,
     OptionBenchmark,
     OptionLowLatency,
     OptionMaxFrames,
@@ -66,6 +67,7 @@ const std::vector<OptionDefinition>& optionDefinitions()
         {OptionFullscreen, 0, "fullscreen", no_argument, "", "Show the window fullscreen when using window output", ""},
         {OptionDisplayMode, 0, "display-mode", required_argument, "mode", "Display mode: fit, fill, or stretch", "fit"},
         {OptionDisplayBackend, 0, "display-backend", required_argument, "backend", "Display backend: highgui", "highgui"},
+        {OptionCaptureBackend, 0, "capture-backend", required_argument, "backend", "Capture backend for camera input: opencv or v4l2", "opencv"},
         {OptionBenchmark, 0, "benchmark", no_argument, "", "Enable benchmark mode", ""},
         {OptionLowLatency, 0, "low-latency", no_argument, "", "Enable low-latency live camera capture", ""},
         {OptionMaxFrames, 0, "max-frames", required_argument, "n", "Process at most n frames", ""},
@@ -175,6 +177,22 @@ bool parseDisplayBackend(const char* value, DisplayBackendType& backend, std::st
     }
 
     error = "Invalid display backend: " + parsed + " (allowed: highgui)";
+    return false;
+}
+
+bool parseCaptureBackend(const char* value, CaptureBackendType& backend, std::string& error)
+{
+    const std::string parsed(value);
+    if (parsed == "opencv") {
+        backend = CaptureBackendType::OpenCv;
+        return true;
+    }
+    if (parsed == "v4l2") {
+        backend = CaptureBackendType::V4L2;
+        return true;
+    }
+
+    error = "Invalid capture backend: " + parsed + " (allowed: opencv, v4l2)";
     return false;
 }
 
@@ -320,6 +338,11 @@ bool parseCommandLine(int argc, char** argv, CommandLineResult& result, std::str
                 return false;
             }
             break;
+        case OptionCaptureBackend:
+            if (!parseCaptureBackend(optarg, result.config.captureBackend, error)) {
+                return false;
+            }
+            break;
         case OptionVerbose:
             result.config.verbose = true;
             break;
@@ -430,6 +453,18 @@ std::string displayBackendToString(DisplayBackendType backend)
     switch (backend) {
     case DisplayBackendType::HighGui:
         return "highgui";
+    }
+
+    return "unknown";
+}
+
+std::string captureBackendToString(CaptureBackendType backend)
+{
+    switch (backend) {
+    case CaptureBackendType::OpenCv:
+        return "opencv";
+    case CaptureBackendType::V4L2:
+        return "v4l2";
     }
 
     return "unknown";

@@ -1,7 +1,8 @@
 #pragma once
 
+#include "ICaptureBackend.h"
+
 #include <opencv2/core.hpp>
-#include <opencv2/videoio.hpp>
 
 #include <chrono>
 #include <condition_variable>
@@ -23,7 +24,7 @@ public:
     LowLatencyFrameCapture(const LowLatencyFrameCapture&) = delete;
     LowLatencyFrameCapture& operator=(const LowLatencyFrameCapture&) = delete;
 
-    void start(cv::VideoCapture& capture);
+    void start(ICaptureBackend& capture);
     void stop();
     bool waitForLatestFrame(
         cv::Mat& frame,
@@ -34,7 +35,7 @@ public:
 private:
     void captureLoop();
 
-    cv::VideoCapture* capture_ = nullptr;
+    ICaptureBackend* capture_ = nullptr;
     mutable std::mutex mutex_;
     std::condition_variable frameAvailable_;
     std::thread thread_;

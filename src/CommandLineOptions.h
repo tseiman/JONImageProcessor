@@ -17,6 +17,11 @@ enum class DisplayBackendType {
     HighGui
 };
 
+enum class CaptureBackendType {
+    OpenCv,
+    V4L2
+};
+
 enum class CameraFormat {
     MJPG,
     YUYV
@@ -28,6 +33,7 @@ struct ProcessorConfig {
     OutputMode outputMode = OutputMode::Window;
     DisplayMode displayMode = DisplayMode::Fit;
     DisplayBackendType displayBackend = DisplayBackendType::HighGui;
+    CaptureBackendType captureBackend = CaptureBackendType::OpenCv;
     std::string outputFile = "output.mp4";
     int width = 1920;
     int height = 1080;
@@ -58,4 +64,5 @@ std::string buildHelpText(const std::string& programName);
 std::string outputModeToString(OutputMode mode);
 std::string displayModeToString(DisplayMode mode);
 std::string displayBackendToString(DisplayBackendType backend);
+std::string captureBackendToString(CaptureBackendType backend);
 std::string cameraFormatToString(CameraFormat format);

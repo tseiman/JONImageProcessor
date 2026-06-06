@@ -90,6 +90,7 @@ Important options:
 - `--fullscreen` switches the window to fullscreen when `--output window` is used.
 - `--display-mode <mode>` controls how the processed image is scaled into the current window or fullscreen area.
 - `--display-backend <backend>` selects the display backend. The current default and only supported backend is `highgui`.
+- `--capture-backend <backend>` selects the camera capture backend. Supported values are `opencv` and `v4l2`; the default is `opencv`. File input always uses OpenCV.
 - `--output-width <pixels>` and `--output-height <pixels>` explicitly define the display render surface. They must be specified together.
 - `--width`, `--height`, `--mask-width`, and `--mask-height` configure processing and mask dimensions.
 - `--camera-format <format>` requests a camera pixel format. Supported values are `MJPG` and `YUYV`; the default is `MJPG`.
@@ -106,7 +107,7 @@ In window mode, `ESC` or `q` exits the program cleanly.
 
 ## Camera Configuration
 
-When using `--device`, the application requests the configured camera pixel format, frame size, and frame rate through OpenCV. `--width` and `--height` are used both as processing size and requested camera capture size.
+When using `--device`, the application requests the configured camera pixel format, frame size, and frame rate through the selected camera capture backend. `--width` and `--height` are used both as processing size and requested camera capture size.
 
 ```bash
 ./build/JONImageProcessor --device /dev/video0 --width 1920 --height 1080 --camera-format MJPG --camera-fps 30
@@ -118,7 +119,30 @@ When using `--device`, the application requests the configured camera pixel form
 
 Many USB webcams need MJPG for high resolutions and useful frame rates. Uncompressed YUYV often supports only very low frame rates at 1080p or above.
 
-Verbose mode logs the requested camera settings and the active settings reported by OpenCV after configuration. If the camera does not accept the requested format, size, or FPS, a warning is emitted.
+Verbose mode logs the requested camera settings and the active settings reported by the capture backend after configuration. If the camera does not accept the requested format, size, or FPS, a warning is emitted.
+
+## Capture Backends
+
+The capture path is separated from the video processing pipeline through an `ICaptureBackend` interface. File input always uses OpenCV. Camera input can use either OpenCV or direct V4L2 on Linux.
+
+Supported backends:
+
+- `opencv`: portable OpenCV capture. This is the default and is useful for files, first tests, and non-Linux development systems.
+- `v4l2`: Linux camera backend using direct V4L2 access with mmap streaming. This is intended for low-latency live camera use on Jetson and other Linux systems.
+
+Select OpenCV camera capture explicitly:
+
+```bash
+./build/JONImageProcessor --device /dev/video0 --capture-backend opencv --camera-format MJPG --camera-fps 30 --width 1280 --height 720 --benchmark --max-frames 100 --no-display --no-mask --no-overlay
+```
+
+Select V4L2 camera capture on Linux or Jetson:
+
+```bash
+./build/JONImageProcessor --device /dev/video0 --capture-backend v4l2 --camera-format MJPG --camera-fps 30 --width 1280 --height 720 --benchmark --max-frames 100 --no-display --no-mask --no-overlay
+```
+
+The V4L2 backend currently supports `MJPG` and `YUYV`. MJPG frames are decoded with OpenCV `imdecode`; YUYV frames are converted to BGR with OpenCV color conversion. Automatic V4L2 format enumeration and automatic format selection are intentionally not implemented yet.
 
 ## Low-Latency Camera Mode
 

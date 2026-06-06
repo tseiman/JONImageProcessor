@@ -7,7 +7,7 @@ LowLatencyFrameCapture::~LowLatencyFrameCapture()
     stop();
 }
 
-void LowLatencyFrameCapture::start(cv::VideoCapture& capture)
+void LowLatencyFrameCapture::start(ICaptureBackend& capture)
 {
     stop();
 
@@ -32,9 +32,14 @@ void LowLatencyFrameCapture::start(cv::VideoCapture& capture)
 
 void LowLatencyFrameCapture::stop()
 {
+    ICaptureBackend* capture = nullptr;
     {
         std::lock_guard<std::mutex> lock(mutex_);
         stopRequested_ = true;
+        capture = capture_;
+    }
+    if (capture != nullptr) {
+        capture->interrupt();
     }
     frameAvailable_.notify_all();
 

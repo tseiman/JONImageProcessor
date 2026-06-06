@@ -1,8 +1,10 @@
 #include "VideoProcessor.h"
 
 #include "BenchmarkRecorder.h"
+#include "CaptureBackendFactory.h"
 #include "DisplayBackendFactory.h"
 #include "DisplayEnvironment.h"
+#include "ICaptureBackend.h"
 #include "Logger.h"
 #include "LowLatencyFrameCapture.h"
 #include "Version.h"
@@ -14,7 +16,6 @@
 
 #include <algorithm>
 #include <chrono>
-#include <cmath>
 #include <memory>
 #include <sstream>
 #include <string>
@@ -83,90 +84,12 @@ std::string operatingSystemString()
     return stream.str();
 }
 
-int cameraFormatFourcc(CameraFormat format)
-{
-    switch (format) {
-    case CameraFormat::MJPG:
-        return cv::VideoWriter::fourcc('M', 'J', 'P', 'G');
-    case CameraFormat::YUYV:
-        return cv::VideoWriter::fourcc('Y', 'U', 'Y', 'V');
-    }
-
-    return cv::VideoWriter::fourcc('M', 'J', 'P', 'G');
-}
-
-std::string fourccToString(double fourccValue)
-{
-    const auto fourcc = static_cast<int>(std::llround(fourccValue));
-    std::string text;
-    text.push_back(static_cast<char>(fourcc & 0xff));
-    text.push_back(static_cast<char>((fourcc >> 8) & 0xff));
-    text.push_back(static_cast<char>((fourcc >> 16) & 0xff));
-    text.push_back(static_cast<char>((fourcc >> 24) & 0xff));
-
-    for (char& character : text) {
-        if (character < 32 || character > 126) {
-            character = '?';
-        }
-    }
-
-    return text;
-}
-
-bool almostEqual(double left, double right, double tolerance)
-{
-    return std::fabs(left - right) <= tolerance;
-}
-
 std::size_t effectiveDroppedFrames(const LowLatencyCaptureStats& stats, std::size_t processedFrames)
 {
     const std::size_t unprocessedFrames = stats.capturedFrames > processedFrames
         ? stats.capturedFrames - processedFrames
         : 0;
     return std::max(stats.droppedFrames, unprocessedFrames);
-}
-
-void logRequestedCameraConfig(const ProcessorConfig& config)
-{
-    LOG_VERBOSE("Requested camera device: " << config.devicePath);
-    LOG_VERBOSE("Requested camera format: " << cameraFormatToString(config.cameraFormat));
-    LOG_VERBOSE("Requested camera size: " << config.width << "x" << config.height);
-    LOG_VERBOSE("Requested camera FPS: " << config.cameraFps);
-}
-
-void configureCameraCapture(cv::VideoCapture& capture, const ProcessorConfig& config)
-{
-    capture.set(cv::CAP_PROP_FOURCC, cameraFormatFourcc(config.cameraFormat));
-    capture.set(cv::CAP_PROP_FRAME_WIDTH, config.width);
-    capture.set(cv::CAP_PROP_FRAME_HEIGHT, config.height);
-    capture.set(cv::CAP_PROP_FPS, config.cameraFps);
-
-    const std::string activeFormat = fourccToString(capture.get(cv::CAP_PROP_FOURCC));
-    const double activeWidth = capture.get(cv::CAP_PROP_FRAME_WIDTH);
-    const double activeHeight = capture.get(cv::CAP_PROP_FRAME_HEIGHT);
-    const double activeFps = capture.get(cv::CAP_PROP_FPS);
-
-    LOG_VERBOSE("Active camera format: " << activeFormat);
-    LOG_VERBOSE("Active camera size: " << static_cast<int>(std::llround(activeWidth))
-        << "x" << static_cast<int>(std::llround(activeHeight)));
-    LOG_VERBOSE("Active camera FPS: " << activeFps);
-
-    const std::string requestedFormat = cameraFormatToString(config.cameraFormat);
-    if (activeFormat != requestedFormat) {
-        LOG_WARNING("Camera did not accept requested format. Requested "
-            << requestedFormat << ", active " << activeFormat);
-    }
-
-    if (!almostEqual(activeWidth, config.width, 0.5) || !almostEqual(activeHeight, config.height, 0.5)) {
-        LOG_WARNING("Camera did not accept requested size. Requested "
-            << config.width << "x" << config.height << ", active "
-            << static_cast<int>(std::llround(activeWidth)) << "x" << static_cast<int>(std::llround(activeHeight)));
-    }
-
-    if (!almostEqual(activeFps, config.cameraFps, 0.5)) {
-        LOG_WARNING("Camera did not accept requested FPS. Requested "
-            << config.cameraFps << ", active " << activeFps);
-    }
 }
 
 void logStartupInfo(const ProcessorConfig& config, const ScreenInfo& screenInfo)
@@ -186,6 +109,7 @@ void logStartupInfo(const ProcessorConfig& config, const ScreenInfo& screenInfo)
     LOG_VERBOSE("Output mode: " << outputModeToString(config.outputMode));
     LOG_VERBOSE("Display mode: " << displayModeToString(config.displayMode));
     LOG_VERBOSE("Display backend: " << displayBackendToString(config.displayBackend));
+    LOG_VERBOSE("Capture backend: " << captureBackendToString(config.captureBackend));
     LOG_VERBOSE("Processing size: " << config.width << "x" << config.height);
     LOG_VERBOSE("Mask size: " << config.maskWidth << "x" << config.maskHeight);
     LOG_VERBOSE("Camera format: " << cameraFormatToString(config.cameraFormat));
@@ -235,6 +159,10 @@ int VideoProcessor::run()
     logStartupInfo(config_, screenInfo);
     LOG_INFO("Display backend: " << displayBackendToString(config_.displayBackend));
     const bool usingCamera = config_.inputPath.empty();
+    const CaptureBackendType effectiveCaptureBackend = usingCamera
+        ? config_.captureBackend
+        : CaptureBackendType::OpenCv;
+    LOG_INFO("Capture backend: " << captureBackendToString(effectiveCaptureBackend));
     const bool lowLatencyMode = usingCamera;
     LOG_INFO("Low latency mode: " << (lowLatencyMode ? "enabled" : "disabled"));
 
@@ -242,30 +170,14 @@ int VideoProcessor::run()
         cv::utils::logging::setLogLevel(cv::utils::logging::LOG_LEVEL_ERROR);
     }
 
-    cv::VideoCapture capture;
-
-    if (!config_.inputPath.empty()) {
-        LOG_INFO("Opening input video: " << config_.inputPath);
-        capture.open(config_.inputPath);
-    } else {
-        LOG_INFO("Opening camera device: " << config_.devicePath);
-        logRequestedCameraConfig(config_);
-        capture.open(config_.devicePath, cv::CAP_ANY);
-    }
-
-    if (!capture.isOpened()) {
-        if (!config_.inputPath.empty()) {
-            LOG_ERROR("Cannot open input file: " << config_.inputPath);
-        } else {
-            LOG_ERROR("Cannot open camera device: " << config_.devicePath);
-        }
+    std::unique_ptr<ICaptureBackend> captureBackend = CaptureBackendFactory::create(config_);
+    if (!captureBackend) {
+        LOG_ERROR("Cannot create capture backend: " << captureBackendToString(effectiveCaptureBackend));
         return ExitRuntimeError;
     }
 
-    if (config_.inputPath.empty()) {
-        LOG_VERBOSE("Camera capture buffer size requested: 1");
-        capture.set(cv::CAP_PROP_BUFFERSIZE, 1);
-        configureCameraCapture(capture, config_);
+    if (!captureBackend->open(config_)) {
+        return ExitRuntimeError;
     }
 
     const cv::Size outputSize(config_.width, config_.height);
@@ -284,7 +196,7 @@ int VideoProcessor::run()
     cv::VideoWriter writer;
     std::unique_ptr<IDisplayBackend> displayBackend;
     if (writeFile) {
-        double fps = capture.get(cv::CAP_PROP_FPS);
+        double fps = captureBackend->fps();
         if (fps <= 1.0 || fps > 240.0) {
             fps = 30.0;
         }
@@ -324,7 +236,7 @@ int VideoProcessor::run()
     BenchmarkRecorder benchmark(config_.benchmark);
     LowLatencyFrameCapture lowLatencyCapture;
     if (lowLatencyMode) {
-        lowLatencyCapture.start(capture);
+        lowLatencyCapture.start(*captureBackend);
     }
     const auto startedAt = std::chrono::steady_clock::now();
     auto intervalStartedAt = startedAt;
@@ -343,7 +255,7 @@ int VideoProcessor::run()
             }
         } else {
             const auto decodeStartedAt = std::chrono::steady_clock::now();
-            readOk = capture.read(frame);
+            readOk = captureBackend->read(frame);
             const auto decodeEndedAt = std::chrono::steady_clock::now();
             if (readOk) {
                 benchmark.add(BenchmarkStage::Decode, decodeEndedAt - decodeStartedAt);
@@ -448,6 +360,7 @@ int VideoProcessor::run()
     if (displayBackend) {
         displayBackend->shutdown();
     }
+    captureBackend->close();
 
     return ExitOk;
 }
