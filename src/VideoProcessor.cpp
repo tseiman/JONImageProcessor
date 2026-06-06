@@ -16,6 +16,7 @@
 
 #include <algorithm>
 #include <chrono>
+#include <cmath>
 #include <memory>
 #include <sstream>
 #include <string>
@@ -54,6 +55,24 @@ cv::Mat applyMaskOverlay(const cv::Mat& frame, const cv::Mat& mask)
     cv::drawContours(result, contours, -1, cv::Scalar(255, 255, 255), 2, cv::LINE_AA);
 
     return result;
+}
+
+cv::Size fitSizePreservingAspect(cv::Size sourceSize, cv::Size bounds)
+{
+    if (sourceSize.width <= 0 || sourceSize.height <= 0 || bounds.width <= 0 || bounds.height <= 0) {
+        return bounds;
+    }
+
+    const double sourceAspect = static_cast<double>(sourceSize.width) / static_cast<double>(sourceSize.height);
+    const double boundsAspect = static_cast<double>(bounds.width) / static_cast<double>(bounds.height);
+
+    if (sourceAspect > boundsAspect) {
+        const int height = std::max(1, static_cast<int>(std::round(bounds.width / sourceAspect)));
+        return cv::Size(bounds.width, height);
+    }
+
+    const int width = std::max(1, static_cast<int>(std::round(bounds.height * sourceAspect)));
+    return cv::Size(width, bounds.height);
 }
 
 std::string sizeToString(cv::Size size)
@@ -272,10 +291,14 @@ int VideoProcessor::run()
 
         const auto processingStartedAt = std::chrono::steady_clock::now();
 
+        const cv::Size frameProcessingSize = showWindow
+            ? fitSizePreservingAspect(frame.size(), outputSize)
+            : outputSize;
+
         cv::Mat resized;
         {
             BenchmarkScope timer(benchmark, BenchmarkStage::Resize);
-            cv::resize(frame, resized, outputSize, 0.0, 0.0, cv::INTER_LINEAR);
+            cv::resize(frame, resized, frameProcessingSize, 0.0, 0.0, cv::INTER_LINEAR);
         }
 
         cv::Mat outputMask;
@@ -290,7 +313,7 @@ int VideoProcessor::run()
 
             {
                 BenchmarkScope timer(benchmark, BenchmarkStage::MaskUpscale);
-                cv::resize(maskWorkCopy, outputMask, outputSize, 0.0, 0.0, cv::INTER_NEAREST);
+                cv::resize(maskWorkCopy, outputMask, resized.size(), 0.0, 0.0, cv::INTER_NEAREST);
             }
         }
 
