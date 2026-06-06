@@ -27,6 +27,18 @@ enum class CameraFormat {
     YUYV
 };
 
+enum class MaskBackendType {
+    None,
+    Dummy,
+    Jetson
+};
+
+struct RgbColor {
+    int r = 0;
+    int g = 0;
+    int b = 255;
+};
+
 struct ProcessorConfig {
     std::string inputPath;
     std::string devicePath = "/dev/video0";
@@ -41,7 +53,12 @@ struct ProcessorConfig {
     int outputHeight = 0;
     int maskWidth = 256;
     int maskHeight = 144;
+    int segmentationWidth = 256;
+    int segmentationHeight = 144;
     CameraFormat cameraFormat = CameraFormat::MJPG;
+    MaskBackendType maskBackend = MaskBackendType::Dummy;
+    RgbColor backgroundOverlayColor;
+    double backgroundOverlayAlpha = 0.35;
     int cameraFps = 30;
     int maxFrames = 0;
     bool fullscreen = false;
@@ -66,3 +83,4 @@ std::string displayModeToString(DisplayMode mode);
 std::string displayBackendToString(DisplayBackendType backend);
 std::string captureBackendToString(CaptureBackendType backend);
 std::string cameraFormatToString(CameraFormat format);
+std::string maskBackendToString(MaskBackendType backend);

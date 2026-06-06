@@ -92,7 +92,11 @@ Important options:
 - `--display-backend <backend>` selects the display backend. The current default and only supported backend is `highgui`.
 - `--capture-backend <backend>` selects the camera capture backend. Supported values are `opencv` and `v4l2`; the default is `opencv`. File input always uses OpenCV.
 - `--output-width <pixels>` and `--output-height <pixels>` explicitly define the display render surface. They must be specified together.
-- `--width`, `--height`, `--mask-width`, and `--mask-height` configure processing and mask dimensions.
+- `--width` and `--height` configure processing dimensions and requested camera capture size.
+- `--mask-backend <backend>` selects the mask backend. Supported values are `none`, `dummy`, and `jetson`; the default is `dummy`.
+- `--segmentation-width <pixels>` and `--segmentation-height <pixels>` configure segmentation inference size. Legacy `--mask-width` and `--mask-height` map to the same setting.
+- `--background-overlay-color <R,G,B>` sets the background debug overlay color. The default is `0,0,255`.
+- `--background-overlay-alpha <0.0..1.0>` sets the background debug overlay opacity. The default is `0.35`.
 - `--camera-format <format>` requests a camera pixel format. Supported values are `MJPG` and `YUYV`; the default is `MJPG`.
 - `--camera-fps <fps>` requests a camera frame rate. The default is `30`.
 - `--low-latency` enables low-latency live camera capture. Camera input enables this mode automatically; file input keeps sequential frame processing.
@@ -100,7 +104,7 @@ Important options:
 - `--benchmark` enables benchmark mode.
 - `--max-frames <n>` stops automatically after n processed frames.
 - `--no-display` disables window and file output.
-- `--no-mask` disables dummy mask generation and mask upscaling.
+- `--no-mask` disables mask generation and mask upscaling.
 - `--no-overlay` disables overlay rendering.
 
 In window mode, `ESC` or `q` exits the program cleanly.
@@ -155,6 +159,48 @@ In low-latency mode a capture thread continuously reads from the camera and stor
 ```
 
 The application also requests an OpenCV camera buffer size of `1`. Some camera backends may ignore this setting; the application logs the request and continues.
+
+## Mask Backends
+
+Mask generation is separated from the video pipeline through an `IMaskBackend` interface. A generated mask is an OpenCV `CV_8UC1` image where `255` means person and `0` means background.
+
+Supported backends:
+
+- `none`: no mask is generated.
+- `dummy`: keeps the previous moving-circle debug mask. The circle is treated as the person area.
+- `jetson`: uses NVIDIA Jetson `jetson-inference` `segNet` with TensorRT/CUDA acceleration. This backend is only available when the binary is configured with `-DJON_ENABLE_JETSON_INFERENCE=ON` and built against `jetson-inference` and `jetson-utils`.
+
+The current debug visualization keeps the detected person unchanged and applies a semi-transparent color overlay to the background.
+
+Dummy mask example:
+
+```bash
+./build/JONImageProcessor --input testdata/Test2_pixabay_Video_HD.mp4 --mask-backend dummy --background-overlay-color 0,0,255 --background-overlay-alpha 0.35
+```
+
+Disable mask generation:
+
+```bash
+./build/JONImageProcessor --input testdata/Test2_pixabay_Video_HD.mp4 --mask-backend none
+```
+
+Jetson segmentation example:
+
+```bash
+./build/JONImageProcessor --device /dev/video0 --capture-backend v4l2 --camera-format MJPG --camera-fps 30 --width 1280 --height 720 --mask-backend jetson --background-overlay-color 0,0,255 --background-overlay-alpha 0.35 --benchmark
+```
+
+Build with Jetson inference support on a Jetson:
+
+```bash
+cmake -B build -S . -DJON_ENABLE_JETSON_INFERENCE=ON
+```
+
+```bash
+cmake --build build
+```
+
+The Jetson backend currently uses the `fcn-resnet18-voc-320x320` `segNet` model because it provides a `person` class. The model output is converted into a binary person/background mask. The first run may take longer while TensorRT builds or loads its optimized engine.
 
 ## Display Modes
 
@@ -241,7 +287,7 @@ Use `--no-overlay` to skip overlay rendering:
 ./build/JONImageProcessor --input testdata/Test1_pixabay_Video_4k.mp4 --benchmark --no-display --no-mask --no-overlay --max-frames 500
 ```
 
-Benchmark output reports average time for capture wait, frame handover, decode, resize, mask generation, mask upscale, overlay, display, processing total, pipeline total, and effective FPS. The percentage distribution separates `Capture wait`, `Frame handover`, and `Unclassified other` so live-camera runs show whether time is spent waiting for camera frames, copying the latest frame into the processing loop, or actually processing the frame.
+Benchmark output reports average time for capture wait, frame handover, decode, resize, segmentation preprocess, segmentation inference, segmentation postprocess, mask upscale, overlay, display, processing total, pipeline total, and effective FPS. The percentage distribution separates `Capture wait`, `Frame handover`, segmentation stages, and `Unclassified other` so live-camera runs show whether time is spent waiting for camera frames, running inference, copying the latest frame into the processing loop, or actually processing the frame.
 
 `Processing total` measures the work after a frame is available. `Pipeline total` includes frame acquisition wait/handover plus processing. This distinction is important for live camera measurements, where a 30 FPS camera naturally limits the pipeline rate even if processing is much faster.
 
@@ -253,7 +299,19 @@ The goal is to compare macOS development systems, Linux VMs, and Jetson Orin Nan
 
 This version intentionally uses only CMake, C++17, and OpenCV so it can build on a normal Linux VM and later on the Jetson Orin Nano.
 
-On the Jetson, OpenCV and camera access should be verified separately before service operation. `/dev/video0` is the default for USB cameras. Depending on the camera, driver, and performance target, a GStreamer-based OpenCV pipeline may be useful later.
+On the Jetson, OpenCV and camera access should be verified separately before service operation. `/dev/video0` is the default for USB cameras. The `v4l2` capture backend is preferred for low-latency USB camera input.
+
+For `--mask-backend jetson`, install JetPack components, CUDA/TensorRT, and `jetson-inference`/`jetson-utils` before configuring with `-DJON_ENABLE_JETSON_INFERENCE=ON`. A typical source install starts with:
+
+```bash
+git clone --recursive https://github.com/dusty-nv/jetson-inference.git
+```
+
+```bash
+cd jetson-inference && mkdir -p build && cd build && cmake .. && make -j$(nproc) && sudo make install && sudo ldconfig
+```
+
+Install commands require system rights and are intentionally not run by this project. For cross-compilation notes, see `docs/cross-compile-jetson.md`.
 
 ## Planned Service Operation
 

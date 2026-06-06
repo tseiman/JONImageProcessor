@@ -31,8 +31,12 @@ const char* stageName(BenchmarkStage stage)
         return "Decode";
     case BenchmarkStage::Resize:
         return "Resize";
-    case BenchmarkStage::Mask:
-        return "Mask";
+    case BenchmarkStage::SegmentationPreprocess:
+        return "Segmentation preprocess";
+    case BenchmarkStage::SegmentationInference:
+        return "Segmentation inference";
+    case BenchmarkStage::SegmentationPostprocess:
+        return "Segmentation postprocess";
     case BenchmarkStage::MaskUpscale:
         return "Mask upscale";
     case BenchmarkStage::Overlay:
@@ -67,7 +71,7 @@ std::string formatPercent(double value)
 void logAverageLine(BenchmarkStage stage, double value)
 {
     std::ostringstream stream;
-    stream << std::left << std::setw(22) << (std::string(stageName(stage)) + ":")
+    stream << std::left << std::setw(30) << (std::string(stageName(stage)) + ":")
            << formatMilliseconds(value);
     LOG_BENCH(stream.str());
 }
@@ -75,7 +79,7 @@ void logAverageLine(BenchmarkStage stage, double value)
 void logDistributionLine(const std::string& label, double percent)
 {
     std::ostringstream stream;
-    stream << std::left << std::setw(22) << (label + ":") << formatPercent(percent);
+    stream << std::left << std::setw(30) << (label + ":") << formatPercent(percent);
     LOG_BENCH(stream.str());
 }
 
@@ -165,7 +169,9 @@ void BenchmarkRecorder::logSummary() const
     logAverageLine(BenchmarkStage::FrameHandover, averageMilliseconds(BenchmarkStage::FrameHandover));
     logAverageLine(BenchmarkStage::Decode, averageMilliseconds(BenchmarkStage::Decode));
     logAverageLine(BenchmarkStage::Resize, averageMilliseconds(BenchmarkStage::Resize));
-    logAverageLine(BenchmarkStage::Mask, averageMilliseconds(BenchmarkStage::Mask));
+    logAverageLine(BenchmarkStage::SegmentationPreprocess, averageMilliseconds(BenchmarkStage::SegmentationPreprocess));
+    logAverageLine(BenchmarkStage::SegmentationInference, averageMilliseconds(BenchmarkStage::SegmentationInference));
+    logAverageLine(BenchmarkStage::SegmentationPostprocess, averageMilliseconds(BenchmarkStage::SegmentationPostprocess));
     logAverageLine(BenchmarkStage::MaskUpscale, averageMilliseconds(BenchmarkStage::MaskUpscale));
     logAverageLine(BenchmarkStage::Overlay, averageMilliseconds(BenchmarkStage::Overlay));
     logAverageLine(BenchmarkStage::Display, averageMilliseconds(BenchmarkStage::Display));
@@ -178,7 +184,9 @@ void BenchmarkRecorder::logSummary() const
     logDistributionLine("Frame handover", percentOfTotal(BenchmarkStage::FrameHandover));
     logDistributionLine("Decode", percentOfTotal(BenchmarkStage::Decode));
     logDistributionLine("Resize", percentOfTotal(BenchmarkStage::Resize));
-    logDistributionLine("Mask", percentOfTotal(BenchmarkStage::Mask));
+    logDistributionLine("Segmentation preprocess", percentOfTotal(BenchmarkStage::SegmentationPreprocess));
+    logDistributionLine("Segmentation inference", percentOfTotal(BenchmarkStage::SegmentationInference));
+    logDistributionLine("Segmentation postprocess", percentOfTotal(BenchmarkStage::SegmentationPostprocess));
     logDistributionLine("Mask upscale", percentOfTotal(BenchmarkStage::MaskUpscale));
     logDistributionLine("Overlay", percentOfTotal(BenchmarkStage::Overlay));
     logDistributionLine("Display", percentOfTotal(BenchmarkStage::Display));
@@ -218,7 +226,9 @@ std::chrono::steady_clock::duration BenchmarkRecorder::measuredStageTotal() cons
     total += stages_[stageIndex(BenchmarkStage::FrameHandover)].total;
     total += stages_[stageIndex(BenchmarkStage::Decode)].total;
     total += stages_[stageIndex(BenchmarkStage::Resize)].total;
-    total += stages_[stageIndex(BenchmarkStage::Mask)].total;
+    total += stages_[stageIndex(BenchmarkStage::SegmentationPreprocess)].total;
+    total += stages_[stageIndex(BenchmarkStage::SegmentationInference)].total;
+    total += stages_[stageIndex(BenchmarkStage::SegmentationPostprocess)].total;
     total += stages_[stageIndex(BenchmarkStage::MaskUpscale)].total;
     total += stages_[stageIndex(BenchmarkStage::Overlay)].total;
     total += stages_[stageIndex(BenchmarkStage::Display)].total;

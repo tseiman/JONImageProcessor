@@ -23,8 +23,13 @@ enum OptionId {
     OptionOutputHeight,
     OptionMaskWidth,
     OptionMaskHeight,
+    OptionSegmentationWidth,
+    OptionSegmentationHeight,
     OptionCameraFormat,
     OptionCameraFps,
+    OptionMaskBackend,
+    OptionBackgroundOverlayColor,
+    OptionBackgroundOverlayAlpha,
     OptionFullscreen,
     OptionDisplayMode,
     OptionDisplayBackend,
@@ -62,8 +67,13 @@ const std::vector<OptionDefinition>& optionDefinitions()
         {OptionOutputHeight, 0, "output-height", required_argument, "pixels", "Explicit display render height", "auto"},
         {OptionMaskWidth, 0, "mask-width", required_argument, "pixels", "Width for later mask inference", "256"},
         {OptionMaskHeight, 0, "mask-height", required_argument, "pixels", "Height for later mask inference", "144"},
+        {OptionSegmentationWidth, 0, "segmentation-width", required_argument, "pixels", "Segmentation inference width", "256"},
+        {OptionSegmentationHeight, 0, "segmentation-height", required_argument, "pixels", "Segmentation inference height", "144"},
         {OptionCameraFormat, 0, "camera-format", required_argument, "format", "Camera pixel format: MJPG or YUYV", "MJPG"},
         {OptionCameraFps, 0, "camera-fps", required_argument, "fps", "Requested camera frame rate", "30"},
+        {OptionMaskBackend, 0, "mask-backend", required_argument, "backend", "Mask backend: none, dummy, or jetson", "dummy"},
+        {OptionBackgroundOverlayColor, 0, "background-overlay-color", required_argument, "R,G,B", "Background overlay color", "0,0,255"},
+        {OptionBackgroundOverlayAlpha, 0, "background-overlay-alpha", required_argument, "0.0..1.0", "Background overlay alpha", "0.35"},
         {OptionFullscreen, 0, "fullscreen", no_argument, "", "Show the window fullscreen when using window output", ""},
         {OptionDisplayMode, 0, "display-mode", required_argument, "mode", "Display mode: fit, fill, or stretch", "fit"},
         {OptionDisplayBackend, 0, "display-backend", required_argument, "backend", "Display backend: highgui", "highgui"},
@@ -226,6 +236,72 @@ bool parseCameraFps(const char* value, int& target, std::string& error)
     return true;
 }
 
+bool parseMaskBackend(const char* value, MaskBackendType& backend, std::string& error)
+{
+    const std::string parsed(value);
+    if (parsed == "none") {
+        backend = MaskBackendType::None;
+        return true;
+    }
+    if (parsed == "dummy") {
+        backend = MaskBackendType::Dummy;
+        return true;
+    }
+    if (parsed == "jetson") {
+        backend = MaskBackendType::Jetson;
+        return true;
+    }
+
+    error = "Invalid mask backend: " + parsed + " (allowed: none, dummy, jetson)";
+    return false;
+}
+
+bool parseOverlayColor(const char* value, RgbColor& color, std::string& error)
+{
+    int parsed[3] {};
+    const char* current = value;
+    char* end = nullptr;
+
+    for (int index = 0; index < 3; ++index) {
+        const long component = std::strtol(current, &end, 10);
+        if (end == current || component < 0 || component > 255) {
+            error = "Invalid background overlay color: " + std::string(value);
+            return false;
+        }
+
+        parsed[index] = static_cast<int>(component);
+
+        if (index < 2) {
+            if (*end != ',') {
+                error = "Invalid background overlay color: " + std::string(value);
+                return false;
+            }
+            current = end + 1;
+        } else if (*end != '\0') {
+            error = "Invalid background overlay color: " + std::string(value);
+            return false;
+        }
+    }
+
+    color.r = parsed[0];
+    color.g = parsed[1];
+    color.b = parsed[2];
+    return true;
+}
+
+bool parseOverlayAlpha(const char* value, double& alpha, std::string& error)
+{
+    char* end = nullptr;
+    const double parsed = std::strtod(value, &end);
+    if (end == value || *end != '\0' || parsed < 0.0 || parsed > 1.0) {
+        error = "Invalid background overlay alpha: " + std::string(value);
+        return false;
+    }
+
+    alpha = parsed;
+    return true;
+}
+
 std::string formatOptionName(const OptionDefinition& definition)
 {
     std::ostringstream stream;
@@ -304,11 +380,25 @@ bool parseCommandLine(int argc, char** argv, CommandLineResult& result, std::str
             if (!parsePositiveInteger(optarg, "--mask-width", result.config.maskWidth, error)) {
                 return false;
             }
+            result.config.segmentationWidth = result.config.maskWidth;
             break;
         case OptionMaskHeight:
             if (!parsePositiveInteger(optarg, "--mask-height", result.config.maskHeight, error)) {
                 return false;
             }
+            result.config.segmentationHeight = result.config.maskHeight;
+            break;
+        case OptionSegmentationWidth:
+            if (!parsePositiveInteger(optarg, "--segmentation-width", result.config.segmentationWidth, error)) {
+                return false;
+            }
+            result.config.maskWidth = result.config.segmentationWidth;
+            break;
+        case OptionSegmentationHeight:
+            if (!parsePositiveInteger(optarg, "--segmentation-height", result.config.segmentationHeight, error)) {
+                return false;
+            }
+            result.config.maskHeight = result.config.segmentationHeight;
             break;
         case OptionCameraFormat:
             if (!parseCameraFormat(optarg, result.config.cameraFormat, error)) {
@@ -317,6 +407,21 @@ bool parseCommandLine(int argc, char** argv, CommandLineResult& result, std::str
             break;
         case OptionCameraFps:
             if (!parseCameraFps(optarg, result.config.cameraFps, error)) {
+                return false;
+            }
+            break;
+        case OptionMaskBackend:
+            if (!parseMaskBackend(optarg, result.config.maskBackend, error)) {
+                return false;
+            }
+            break;
+        case OptionBackgroundOverlayColor:
+            if (!parseOverlayColor(optarg, result.config.backgroundOverlayColor, error)) {
+                return false;
+            }
+            break;
+        case OptionBackgroundOverlayAlpha:
+            if (!parseOverlayAlpha(optarg, result.config.backgroundOverlayAlpha, error)) {
                 return false;
             }
             break;
@@ -409,7 +514,7 @@ std::string buildHelpText(const std::string& programName)
     stream << "Options:\n";
 
     for (const auto& definition : optionDefinitions()) {
-        stream << "  " << std::left << std::setw(32) << formatOptionName(definition)
+        stream << "  " << std::left << std::setw(42) << formatOptionName(definition)
                << definition.description;
 
         if (!definition.defaultValue.empty()) {
@@ -477,6 +582,20 @@ std::string cameraFormatToString(CameraFormat format)
         return "MJPG";
     case CameraFormat::YUYV:
         return "YUYV";
+    }
+
+    return "unknown";
+}
+
+std::string maskBackendToString(MaskBackendType backend)
+{
+    switch (backend) {
+    case MaskBackendType::None:
+        return "none";
+    case MaskBackendType::Dummy:
+        return "dummy";
+    case MaskBackendType::Jetson:
+        return "jetson";
     }
 
     return "unknown";

@@ -12,6 +12,8 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 
 find_package(OpenCV REQUIRED COMPONENTS core imgproc imgcodecs highgui videoio)
 
+option(JON_ENABLE_JETSON_INFERENCE "Enable jetson-inference/TensorRT segmentation backend" OFF)
+
 execute_process(
     COMMAND git rev-parse --short=7 HEAD
     WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
@@ -56,6 +58,9 @@ add_executable(JONImageProcessor
     src/DisplayRenderer.cpp
     src/Logger.cpp
     src/LowLatencyFrameCapture.cpp
+    src/MaskBackendFactory.cpp
+    src/MaskBackends.cpp
+    src/JetsonSegmentationMaskBackend.cpp
     src/OpenCvDisplayBackend.cpp
     src/OpenCvCaptureBackends.cpp
     src/V4L2CameraCaptureBackend.cpp
@@ -68,6 +73,34 @@ target_include_directories(JONImageProcessor PRIVATE
 )
 
 target_link_libraries(JONImageProcessor PRIVATE ${OpenCV_LIBS})
+
+if (JON_ENABLE_JETSON_INFERENCE)
+    find_package(CUDAToolkit REQUIRED)
+    find_path(JETSON_INFERENCE_INCLUDE_DIR
+        NAMES jetson-inference/segNet.h
+        PATHS /usr/local/include /usr/include
+    )
+    find_library(JETSON_INFERENCE_LIBRARY
+        NAMES jetson-inference
+        PATHS /usr/local/lib /usr/lib /usr/lib/aarch64-linux-gnu
+    )
+    find_library(JETSON_UTILS_LIBRARY
+        NAMES jetson-utils
+        PATHS /usr/local/lib /usr/lib /usr/lib/aarch64-linux-gnu
+    )
+
+    if (NOT JETSON_INFERENCE_INCLUDE_DIR OR NOT JETSON_INFERENCE_LIBRARY OR NOT JETSON_UTILS_LIBRARY)
+        message(FATAL_ERROR "jetson-inference backend requested but jetson-inference/jetson-utils headers or libraries were not found")
+    endif()
+
+    target_include_directories(JONImageProcessor PRIVATE ${JETSON_INFERENCE_INCLUDE_DIR})
+    target_link_libraries(JONImageProcessor PRIVATE
+        ${JETSON_INFERENCE_LIBRARY}
+        ${JETSON_UTILS_LIBRARY}
+        CUDA::cudart
+    )
+    target_compile_definitions(JONImageProcessor PRIVATE JON_WITH_JETSON_INFERENCE=1)
+endif()
 
 target_compile_definitions(JONImageProcessor PRIVATE
     JON_IMAGE_PROCESSOR_GIT_VERSION="${JON_IMAGE_PROCESSOR_GIT_VERSION}"

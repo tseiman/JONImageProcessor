@@ -7,6 +7,7 @@
 #include "ICaptureBackend.h"
 #include "Logger.h"
 #include "LowLatencyFrameCapture.h"
+#include "MaskBackendFactory.h"
 #include "Version.h"
 
 #include <opencv2/core.hpp>
@@ -29,29 +30,29 @@ namespace {
 constexpr int ExitOk = 0;
 constexpr int ExitRuntimeError = 2;
 
-cv::Mat createDummyMask(int width, int height, std::size_t frameIndex)
+cv::Scalar overlayColorBgr(const RgbColor& color)
 {
-    cv::Mat mask(height, width, CV_8UC1, cv::Scalar(0));
-    const int radius = std::max(8, std::min(width, height) / 5);
-    const int usableWidth = std::max(1, width - 2 * radius);
-    const int x = radius + static_cast<int>((frameIndex * 3) % usableWidth);
-    const int y = height / 2;
-
-    cv::circle(mask, cv::Point(x, y), radius, cv::Scalar(255), cv::FILLED, cv::LINE_AA);
-    return mask;
+    return cv::Scalar(color.b, color.g, color.r);
 }
 
-cv::Mat applyMaskOverlay(const cv::Mat& frame, const cv::Mat& mask)
+cv::Mat applyBackgroundOverlay(
+    const cv::Mat& frame,
+    const cv::Mat& personMask,
+    const RgbColor& color,
+    double alpha)
 {
-    cv::Mat colorOverlay(frame.size(), frame.type(), cv::Scalar(40, 40, 220));
+    cv::Mat colorOverlay(frame.size(), frame.type(), overlayColorBgr(color));
     cv::Mat blended;
-    cv::addWeighted(frame, 0.65, colorOverlay, 0.35, 0.0, blended);
+    cv::addWeighted(frame, 1.0 - alpha, colorOverlay, alpha, 0.0, blended);
+
+    cv::Mat backgroundMask;
+    cv::bitwise_not(personMask, backgroundMask);
 
     cv::Mat result = frame.clone();
-    blended.copyTo(result, mask);
+    blended.copyTo(result, backgroundMask);
 
     std::vector<std::vector<cv::Point>> contours;
-    cv::findContours(mask, contours, cv::RETR_EXTERNAL, cv::CHAIN_APPROX_SIMPLE);
+    cv::findContours(personMask, contours, cv::RETR_EXTERNAL, cv::CHAIN_APPROX_SIMPLE);
     cv::drawContours(result, contours, -1, cv::Scalar(255, 255, 255), 2, cv::LINE_AA);
 
     return result;
@@ -130,7 +131,13 @@ void logStartupInfo(const ProcessorConfig& config, const ScreenInfo& screenInfo)
     LOG_VERBOSE("Display backend: " << displayBackendToString(config.displayBackend));
     LOG_VERBOSE("Capture backend: " << captureBackendToString(config.captureBackend));
     LOG_VERBOSE("Processing size: " << config.width << "x" << config.height);
-    LOG_VERBOSE("Mask size: " << config.maskWidth << "x" << config.maskHeight);
+    LOG_VERBOSE("Mask backend: " << maskBackendToString(config.maskBackend));
+    LOG_VERBOSE("Segmentation size: " << config.segmentationWidth << "x" << config.segmentationHeight);
+    LOG_VERBOSE("Background overlay color: "
+        << config.backgroundOverlayColor.r << ","
+        << config.backgroundOverlayColor.g << ","
+        << config.backgroundOverlayColor.b);
+    LOG_VERBOSE("Background overlay alpha: " << config.backgroundOverlayAlpha);
     LOG_VERBOSE("Camera format: " << cameraFormatToString(config.cameraFormat));
     LOG_VERBOSE("Camera FPS: " << config.cameraFps);
     LOG_VERBOSE("Fullscreen: " << (config.fullscreen ? "true" : "false"));
@@ -206,11 +213,27 @@ int VideoProcessor::run()
         ? cv::Size(config_.outputWidth, config_.outputHeight)
         : (useScreenDisplaySize ? screenInfo.size : outputSize);
     const bool forceConfiguredDisplaySize = hasExplicitDisplaySize || useScreenDisplaySize;
-    const cv::Size maskSize(config_.maskWidth, config_.maskHeight);
     const bool writeFile = config_.outputMode == OutputMode::File && !config_.noDisplay;
     const bool showWindow = config_.outputMode == OutputMode::Window && !config_.noDisplay;
-    const bool maskEnabled = !config_.noMask;
+    const bool maskEnabled = !config_.noMask && config_.maskBackend != MaskBackendType::None;
     const bool overlayEnabled = !config_.noOverlay && maskEnabled;
+
+    std::unique_ptr<IMaskBackend> maskBackend;
+    if (maskEnabled) {
+        maskBackend = MaskBackendFactory::create(config_.maskBackend);
+        if (!maskBackend) {
+            LOG_ERROR("Cannot create mask backend: " << maskBackendToString(config_.maskBackend));
+            return ExitRuntimeError;
+        }
+
+        if (!maskBackend->initialize(config_)) {
+            LOG_ERROR("Cannot initialize mask backend: " << maskBackendToString(config_.maskBackend));
+            return ExitRuntimeError;
+        }
+        LOG_INFO("Mask backend: " << maskBackend->name());
+    } else {
+        LOG_INFO("Mask backend: none");
+    }
 
     cv::VideoWriter writer;
     std::unique_ptr<IDisplayBackend> displayBackend;
@@ -303,24 +326,30 @@ int VideoProcessor::run()
 
         cv::Mat outputMask;
         if (maskEnabled) {
-            cv::Mat maskWorkCopy;
-            {
-                BenchmarkScope timer(benchmark, BenchmarkStage::Mask);
-                cv::resize(resized, maskWorkCopy, maskSize, 0.0, 0.0, cv::INTER_AREA);
-                cv::Mat smallMask = createDummyMask(maskWorkCopy.cols, maskWorkCopy.rows, frameIndex);
-                maskWorkCopy = smallMask;
+            cv::Mat segmentationMask;
+            MaskTimings maskTimings;
+            if (!maskBackend->generate(resized, frameIndex, segmentationMask, maskTimings)) {
+                LOG_ERROR("Mask backend failed to generate a mask");
+                break;
             }
+            benchmark.add(BenchmarkStage::SegmentationPreprocess, maskTimings.preprocess);
+            benchmark.add(BenchmarkStage::SegmentationInference, maskTimings.inference);
+            benchmark.add(BenchmarkStage::SegmentationPostprocess, maskTimings.postprocess);
 
-            {
+            if (!segmentationMask.empty()) {
                 BenchmarkScope timer(benchmark, BenchmarkStage::MaskUpscale);
-                cv::resize(maskWorkCopy, outputMask, resized.size(), 0.0, 0.0, cv::INTER_NEAREST);
+                cv::resize(segmentationMask, outputMask, resized.size(), 0.0, 0.0, cv::INTER_NEAREST);
             }
         }
 
         cv::Mat outputFrame;
-        if (overlayEnabled) {
+        if (overlayEnabled && !outputMask.empty()) {
             BenchmarkScope timer(benchmark, BenchmarkStage::Overlay);
-            outputFrame = applyMaskOverlay(resized, outputMask);
+            outputFrame = applyBackgroundOverlay(
+                resized,
+                outputMask,
+                config_.backgroundOverlayColor,
+                config_.backgroundOverlayAlpha);
         } else {
             outputFrame = resized;
         }
