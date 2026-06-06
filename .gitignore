@@ -1,5 +1,6 @@
 # Build outputs
 build/
+build-jetson-cross/
 cmake-build-*/
 
 # CMake generated files

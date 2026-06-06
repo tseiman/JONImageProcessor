@@ -101,6 +101,8 @@ if [[ "${ENABLE_JETSON_INFERENCE}" == "ON" ]]; then
     fi
 fi
 
+rm -rf "${BUILD_DIR_NAME}/CMakeCache.txt" "${BUILD_DIR_NAME}/CMakeFiles"
+
 cmake \
     -B "${BUILD_DIR_NAME}" \
     -S . \
