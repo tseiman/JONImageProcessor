@@ -25,6 +25,7 @@ enum OptionId {
     OptionMaskHeight,
     OptionSegmentationWidth,
     OptionSegmentationHeight,
+    OptionJetsonSegmentationModel,
     OptionCameraFormat,
     OptionCameraFps,
     OptionMaskBackend,
@@ -69,6 +70,7 @@ const std::vector<OptionDefinition>& optionDefinitions()
         {OptionMaskHeight, 0, "mask-height", required_argument, "pixels", "Height for later mask inference", "144"},
         {OptionSegmentationWidth, 0, "segmentation-width", required_argument, "pixels", "Segmentation inference width", "256"},
         {OptionSegmentationHeight, 0, "segmentation-height", required_argument, "pixels", "Segmentation inference height", "144"},
+        {OptionJetsonSegmentationModel, 0, "jetson-segmentation-model", required_argument, "model", "jetson-inference segNet model", "fcn-resnet18-voc-320x320"},
         {OptionCameraFormat, 0, "camera-format", required_argument, "format", "Camera pixel format: MJPG or YUYV", "MJPG"},
         {OptionCameraFps, 0, "camera-fps", required_argument, "fps", "Requested camera frame rate", "30"},
         {OptionMaskBackend, 0, "mask-backend", required_argument, "backend", "Mask backend: none, dummy, or jetson", "dummy"},
@@ -399,6 +401,13 @@ bool parseCommandLine(int argc, char** argv, CommandLineResult& result, std::str
                 return false;
             }
             result.config.maskHeight = result.config.segmentationHeight;
+            break;
+        case OptionJetsonSegmentationModel:
+            result.config.jetsonSegmentationModel = optarg;
+            if (result.config.jetsonSegmentationModel.empty()) {
+                error = "--jetson-segmentation-model must not be empty.";
+                return false;
+            }
             break;
         case OptionCameraFormat:
             if (!parseCameraFormat(optarg, result.config.cameraFormat, error)) {

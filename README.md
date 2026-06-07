@@ -273,7 +273,12 @@ Download the segmentation model data on the build host. This step does not insta
 cd "$HOME/src/jetson-inference/tools" && ./download-models.sh
 ```
 
-In the model selection dialog, keep `FCN-ResNet18-Pascal-VOC-320x320` selected. JONImageProcessor currently uses this model for `--mask-backend jetson`.
+In the model selection dialog, select these segmentation models:
+
+- `FCN-ResNet18-Pascal-VOC-320x320`: default model, fast but coarse 10x10 segmentation output.
+- `FCN-ResNet18-MHP-640x360`: recommended Jetson test model for a higher-resolution human mask.
+
+The 320x320 VOC model is useful as a known-good baseline. The 640x360 MHP model produces a denser segmentation grid and is the better first choice when arms, face edges, or people farther away from the camera are visibly lost in large blocks.
 
 If the tool exits with `Model selection status: 127`, install the missing host-side dialog dependencies and run it again:
 
@@ -281,10 +286,10 @@ If the tool exits with `Model selection status: 127`, install the missing host-s
 sudo apt update && sudo apt install -y dialog wget ca-certificates
 ```
 
-Verify that the model directory exists:
+Verify that the model directories exist:
 
 ```bash
-test -f "$HOME/src/jetson-inference/data/networks/models.json" && test -f "$HOME/src/jetson-inference/data/networks/FCN-ResNet18-Pascal-VOC-320x320/fcn_resnet18.onnx" && echo ok
+test -f "$HOME/src/jetson-inference/data/networks/models.json" && test -f "$HOME/src/jetson-inference/data/networks/FCN-ResNet18-Pascal-VOC-320x320/fcn_resnet18.onnx" && test -f "$HOME/src/jetson-inference/data/networks/FCN-ResNet18-MHP-640x360/fcn_resnet18.onnx" && echo ok
 ```
 
 ### Cross-Build With Jetson Inference
@@ -372,10 +377,16 @@ Run with the dummy mask backend:
 Run with Jetson/TensorRT segmentation:
 
 ```bash
-cd ~/JONImageProcessor && LD_LIBRARY_PATH="$HOME/JONImageProcessor/jetson-inference/lib:$LD_LIBRARY_PATH" ./JONImageProcessor --device /dev/video0 --capture-backend v4l2 --camera-format MJPG --camera-fps 30 --width 1280 --height 720 --mask-backend jetson --background-overlay-color 0,0,255 --background-overlay-alpha 0.35 --display-mode fit --fullscreen --benchmark
+cd ~/JONImageProcessor && LD_LIBRARY_PATH="$HOME/JONImageProcessor/jetson-inference/lib:$LD_LIBRARY_PATH" ./JONImageProcessor --device /dev/video0 --capture-backend v4l2 --camera-format MJPG --camera-fps 30 --width 1280 --height 720 --mask-backend jetson --jetson-segmentation-model fcn-resnet18-mhp-640x360 --segmentation-width 640 --segmentation-height 360 --background-overlay-color 0,0,255 --background-overlay-alpha 0.35 --display-mode fit --fullscreen --benchmark
 ```
 
 The first Jetson segmentation run can take longer because TensorRT may build or load an optimized engine.
+
+Run the fast baseline model:
+
+```bash
+cd ~/JONImageProcessor && LD_LIBRARY_PATH="$HOME/JONImageProcessor/jetson-inference/lib:$LD_LIBRARY_PATH" ./JONImageProcessor --device /dev/video0 --capture-backend v4l2 --camera-format MJPG --camera-fps 30 --width 1280 --height 720 --mask-backend jetson --jetson-segmentation-model fcn-resnet18-voc-320x320 --segmentation-width 320 --segmentation-height 320 --background-overlay-color 0,0,255 --background-overlay-alpha 0.35 --display-mode fit --fullscreen --benchmark
+```
 
 ## Useful Runtime Commands
 
@@ -418,6 +429,7 @@ Important options:
 - `--camera-format <MJPG|YUYV>` requests the camera pixel format.
 - `--camera-fps <fps>` requests the camera frame rate.
 - `--mask-backend <none|dummy|jetson>` selects mask generation.
+- `--jetson-segmentation-model <model>` selects the `jetson-inference` segNet model for `--mask-backend jetson`.
 - `--background-overlay-color <R,G,B>` sets background overlay color.
 - `--background-overlay-alpha <0.0..1.0>` sets overlay opacity.
 - `--display-mode <fit|fill|stretch>` controls scaling into the window/fullscreen canvas.
@@ -460,6 +472,19 @@ Supported mask backends:
 - `jetson`: TensorRT/CUDA segmentation through `jetson-inference` `segNet`.
 
 The debug visualization keeps the detected person unchanged and tints the background with the configured overlay color and alpha.
+
+For `--mask-backend jetson`, model choice directly affects mask quality:
+
+- `fcn-resnet18-voc-320x320`: default, fast baseline, coarse 10x10 output grid.
+- `fcn-resnet18-mhp-640x360`: recommended first quality test, higher-resolution human/body-part segmentation.
+
+Use the MHP model with matching input size:
+
+```bash
+~/JONImageProcessor/JONImageProcessor --device /dev/video0 --capture-backend v4l2 --camera-format MJPG --camera-fps 30 --width 1280 --height 720 --mask-backend jetson --jetson-segmentation-model fcn-resnet18-mhp-640x360 --segmentation-width 640 --segmentation-height 360
+```
+
+If a selected model does not expose a single `person` class, JONImageProcessor treats all non-background segmentation classes as person. This is used for multi-human-parsing models that classify body parts instead of returning one generic person class.
 
 ## Display Modes
 

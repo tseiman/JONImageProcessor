@@ -55,6 +55,7 @@ struct ProcessorConfig {
     int maskHeight = 144;
     int segmentationWidth = 256;
     int segmentationHeight = 144;
+    std::string jetsonSegmentationModel = "fcn-resnet18-voc-320x320";
     CameraFormat cameraFormat = CameraFormat::MJPG;
     MaskBackendType maskBackend = MaskBackendType::Dummy;
     RgbColor backgroundOverlayColor;

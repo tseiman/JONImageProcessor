@@ -5,6 +5,7 @@
 #include <opencv2/imgproc.hpp>
 
 #include <cstring>
+#include <set>
 #include <vector>
 
 #ifdef JON_WITH_JETSON_INFERENCE
@@ -24,7 +25,7 @@ struct JetsonSegmentationMaskBackend::Impl {
     unsigned char* classMaskGpu = nullptr;
     cv::Size segmentationSize;
     cv::Size classGridSize;
-    int personClassId = -1;
+    std::set<int> personClassIds;
 #endif
 };
 
@@ -42,6 +43,34 @@ bool allocateMappedBuffer(unsigned char*& cpuPtr, unsigned char*& gpuPtr, std::s
     }
 
     return true;
+}
+
+std::set<int> resolvePersonClassIds(segNet& network)
+{
+    std::set<int> ids;
+
+    const int personClassId = network.FindClassID("person");
+    if (personClassId >= 0) {
+        LOG_INFO("Jetson segmentation class mapping: using class 'person'");
+        ids.insert(personClassId);
+        return ids;
+    }
+
+    const int backgroundClassId = network.FindClassID("background");
+    if (backgroundClassId < 0) {
+        LOG_WARNING("Jetson segmentation class mapping: no 'person' or 'background' class found; treating all classes as person");
+    } else {
+        LOG_INFO("Jetson segmentation class mapping: no 'person' class found; treating all non-background classes as person");
+    }
+
+    const uint32_t classCount = network.GetNumClasses();
+    for (uint32_t classId = 0; classId < classCount; ++classId) {
+        if (static_cast<int>(classId) != backgroundClassId) {
+            ids.insert(static_cast<int>(classId));
+        }
+    }
+
+    return ids;
 }
 
 #endif
@@ -78,14 +107,14 @@ bool JetsonSegmentationMaskBackend::initialize(const ProcessorConfig& config)
 #ifdef JON_WITH_JETSON_INFERENCE
     impl_->segmentationSize = cv::Size(config.segmentationWidth, config.segmentationHeight);
     LOG_INFO("Initializing Jetson segmentation backend with jetson-inference segNet");
-    LOG_VERBOSE("Jetson segmentation network: fcn-resnet18-voc-320x320");
+    LOG_VERBOSE("Jetson segmentation network: " << config.jetsonSegmentationModel);
     LOG_VERBOSE("Jetson segmentation size: " << impl_->segmentationSize.width << "x" << impl_->segmentationSize.height);
 
     Log::SetLevel(config.verbose ? Log::INFO : Log::WARNING);
 
-    LOG_INFO("Creating Jetson segNet model: fcn-resnet18-voc-320x320, precision FP16");
+    LOG_INFO("Creating Jetson segNet model: " << config.jetsonSegmentationModel << ", precision FP16");
     impl_->network = segNet::Create(
-        "fcn-resnet18-voc-320x320",
+        config.jetsonSegmentationModel.c_str(),
         DEFAULT_MAX_BATCH_SIZE,
         TYPE_FP16,
         DEVICE_GPU,
@@ -96,9 +125,9 @@ bool JetsonSegmentationMaskBackend::initialize(const ProcessorConfig& config)
     }
     LOG_INFO("Jetson segNet model created");
 
-    impl_->personClassId = impl_->network->FindClassID("person");
-    if (impl_->personClassId < 0) {
-        LOG_ERROR("jetson-inference segNet model does not provide a 'person' class");
+    impl_->personClassIds = resolvePersonClassIds(*impl_->network);
+    if (impl_->personClassIds.empty()) {
+        LOG_ERROR("jetson-inference segNet model does not provide usable person/background classes");
         return false;
     }
 
@@ -112,8 +141,8 @@ bool JetsonSegmentationMaskBackend::initialize(const ProcessorConfig& config)
         return false;
     }
 
-    LOG_INFO("Jetson segmentation ready: person class ID "
-        << impl_->personClassId << ", grid "
+    LOG_INFO("Jetson segmentation ready: person classes "
+        << impl_->personClassIds.size() << ", grid "
         << impl_->classGridSize.width << "x" << impl_->classGridSize.height);
 
     const std::size_t inputBytes = static_cast<std::size_t>(impl_->segmentationSize.width)
@@ -184,7 +213,7 @@ bool JetsonSegmentationMaskBackend::generate(
     cv::Mat classGridMask(impl_->classGridSize, CV_8UC1);
     const int pixels = impl_->classGridSize.width * impl_->classGridSize.height;
     for (int index = 0; index < pixels; ++index) {
-        classGridMask.data[index] = impl_->classMaskCpu[index] == impl_->personClassId ? 255 : 0;
+        classGridMask.data[index] = impl_->personClassIds.count(impl_->classMaskCpu[index]) > 0 ? 255 : 0;
     }
 
     if (classGridMask.size() == impl_->segmentationSize) {

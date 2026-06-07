@@ -138,6 +138,7 @@ void logStartupInfo(const ProcessorConfig& config, const ScreenInfo& screenInfo)
     LOG_VERBOSE("Processing size: " << config.width << "x" << config.height);
     LOG_VERBOSE("Mask backend: " << maskBackendToString(config.maskBackend));
     LOG_VERBOSE("Segmentation size: " << config.segmentationWidth << "x" << config.segmentationHeight);
+    LOG_VERBOSE("Jetson segmentation model: " << config.jetsonSegmentationModel);
     LOG_VERBOSE("Background overlay color: "
         << config.backgroundOverlayColor.r << ","
         << config.backgroundOverlayColor.g << ","
