@@ -151,12 +151,14 @@ bool JetsonSegmentationMaskBackend::generate(
     const auto preprocessStartedAt = std::chrono::steady_clock::now();
     cv::Mat resized;
     cv::resize(frame, resized, impl_->segmentationSize, 0.0, 0.0, cv::INTER_LINEAR);
-    if (!resized.isContinuous()) {
-        resized = resized.clone();
+    cv::Mat resizedRgb;
+    cv::cvtColor(resized, resizedRgb, cv::COLOR_BGR2RGB);
+    if (!resizedRgb.isContinuous()) {
+        resizedRgb = resizedRgb.clone();
     }
     const std::size_t inputBytes = static_cast<std::size_t>(impl_->segmentationSize.width)
         * static_cast<std::size_t>(impl_->segmentationSize.height) * 3;
-    std::memcpy(impl_->inputCpu, resized.data, inputBytes);
+    std::memcpy(impl_->inputCpu, resizedRgb.data, inputBytes);
     timings.preprocess = std::chrono::steady_clock::now() - preprocessStartedAt;
 
     const auto inferenceStartedAt = std::chrono::steady_clock::now();
@@ -164,7 +166,7 @@ bool JetsonSegmentationMaskBackend::generate(
             impl_->inputGpu,
             static_cast<uint32_t>(impl_->segmentationSize.width),
             static_cast<uint32_t>(impl_->segmentationSize.height),
-            IMAGE_BGR8)) {
+            IMAGE_RGB8)) {
         LOG_ERROR("jetson-inference segNet Process failed");
         return false;
     }
