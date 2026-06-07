@@ -76,28 +76,47 @@ target_include_directories(JONImageProcessor PRIVATE
 target_link_libraries(JONImageProcessor PRIVATE ${OpenCV_LIBS})
 
 if (JON_ENABLE_JETSON_INFERENCE)
-    set(JON_JETSON_INFERENCE_SEARCH_PATHS
-        ${JON_JETSON_INFERENCE_ROOT}
-        /usr/local
-        /usr
-    )
-
     find_package(CUDAToolkit REQUIRED)
-    find_path(JETSON_INFERENCE_INCLUDE_DIR
-        NAMES jetson-inference/segNet.h
-        PATHS ${JON_JETSON_INFERENCE_SEARCH_PATHS}
-        PATH_SUFFIXES include
-    )
-    find_library(JETSON_INFERENCE_LIBRARY
-        NAMES jetson-inference
-        PATHS ${JON_JETSON_INFERENCE_SEARCH_PATHS}
-        PATH_SUFFIXES lib lib/aarch64-linux-gnu
-    )
-    find_library(JETSON_UTILS_LIBRARY
-        NAMES jetson-utils
-        PATHS ${JON_JETSON_INFERENCE_SEARCH_PATHS}
-        PATH_SUFFIXES lib lib/aarch64-linux-gnu
-    )
+
+    if (JON_JETSON_INFERENCE_ROOT)
+        find_path(JETSON_INFERENCE_INCLUDE_DIR
+            NAMES jetson-inference/segNet.h
+            PATHS ${JON_JETSON_INFERENCE_ROOT}
+            PATH_SUFFIXES include
+            NO_DEFAULT_PATH
+            NO_CMAKE_FIND_ROOT_PATH
+        )
+        find_library(JETSON_INFERENCE_LIBRARY
+            NAMES jetson-inference
+            PATHS ${JON_JETSON_INFERENCE_ROOT}
+            PATH_SUFFIXES lib lib/aarch64-linux-gnu
+            NO_DEFAULT_PATH
+            NO_CMAKE_FIND_ROOT_PATH
+        )
+        find_library(JETSON_UTILS_LIBRARY
+            NAMES jetson-utils
+            PATHS ${JON_JETSON_INFERENCE_ROOT}
+            PATH_SUFFIXES lib lib/aarch64-linux-gnu
+            NO_DEFAULT_PATH
+            NO_CMAKE_FIND_ROOT_PATH
+        )
+    else()
+        find_path(JETSON_INFERENCE_INCLUDE_DIR
+            NAMES jetson-inference/segNet.h
+            PATHS /usr/local /usr
+            PATH_SUFFIXES include
+        )
+        find_library(JETSON_INFERENCE_LIBRARY
+            NAMES jetson-inference
+            PATHS /usr/local /usr
+            PATH_SUFFIXES lib lib/aarch64-linux-gnu
+        )
+        find_library(JETSON_UTILS_LIBRARY
+            NAMES jetson-utils
+            PATHS /usr/local /usr
+            PATH_SUFFIXES lib lib/aarch64-linux-gnu
+        )
+    endif()
 
     if (NOT JETSON_INFERENCE_INCLUDE_DIR OR NOT JETSON_INFERENCE_LIBRARY OR NOT JETSON_UTILS_LIBRARY)
         message(FATAL_ERROR
@@ -109,11 +128,43 @@ if (JON_ENABLE_JETSON_INFERENCE)
         )
     endif()
 
+    find_library(JETSON_CUBLAS_LIBRARY
+        NAMES cublas
+        PATHS /usr/local/cuda-12.6/targets/aarch64-linux /usr/local/cuda/targets/aarch64-linux
+        PATH_SUFFIXES lib lib64
+    )
+    find_library(JETSON_NPPICC_LIBRARY
+        NAMES nppicc
+        PATHS /usr/local/cuda-12.6/targets/aarch64-linux /usr/local/cuda/targets/aarch64-linux
+        PATH_SUFFIXES lib lib64
+    )
+    find_library(JETSON_CUDLA_LIBRARY
+        NAMES cudla
+        PATHS /usr/local/cuda-12.6/targets/aarch64-linux /usr/local/cuda/targets/aarch64-linux
+        PATH_SUFFIXES lib lib64
+    )
+    find_library(JETSON_NVDLA_COMPILER_LIBRARY
+        NAMES nvdla_compiler
+        PATHS /usr/lib/aarch64-linux-gnu/nvidia /lib/aarch64-linux-gnu/nvidia
+    )
+
+    if (NOT JETSON_CUBLAS_LIBRARY OR NOT JETSON_NPPICC_LIBRARY OR NOT JETSON_CUDLA_LIBRARY OR NOT JETSON_NVDLA_COMPILER_LIBRARY)
+        message(FATAL_ERROR
+            "JON_ENABLE_JETSON_INFERENCE=ON was requested, but required transitive Jetson libraries were not found.\n"
+            "Expected libraries: libcublas, libnppicc, libcudla, libnvdla_compiler.\n"
+            "Make sure the Jetson sysroot contains CUDA/TensorRT runtime and development libraries."
+        )
+    endif()
+
     target_include_directories(JONImageProcessor PRIVATE ${JETSON_INFERENCE_INCLUDE_DIR})
     target_link_libraries(JONImageProcessor PRIVATE
         ${JETSON_INFERENCE_LIBRARY}
         ${JETSON_UTILS_LIBRARY}
         CUDA::cudart
+        ${JETSON_CUBLAS_LIBRARY}
+        ${JETSON_NPPICC_LIBRARY}
+        ${JETSON_CUDLA_LIBRARY}
+        ${JETSON_NVDLA_COMPILER_LIBRARY}
     )
     target_compile_definitions(JONImageProcessor PRIVATE JON_WITH_JETSON_INFERENCE=1)
 endif()
