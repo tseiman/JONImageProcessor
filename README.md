@@ -196,10 +196,10 @@ Clone `jetson-inference` on the build host:
 mkdir -p "$HOME/src" "$HOME/aarch64-prefixes" && git clone --recursive https://github.com/dusty-nv/jetson-inference.git "$HOME/src/jetson-inference"
 ```
 
-Start the NVIDIA cross-compile container:
+Start the NVIDIA cross-compile container from the JONImageProcessor repository root on the build host:
 
 ```bash
-docker run --rm -it -v "$HOME/src/jetson-inference:/workspace/jetson-inference" -v "$HOME/sysroots/orin-nano:/workspace/sysroot:ro" -v "$HOME/aarch64-prefixes/jetson-inference:/workspace/install" -v "$PWD/cmake/toolchains/jetson-aarch64.cmake:/workspace/jetson-aarch64.cmake:ro" -w /workspace/jetson-inference nvcr.io/nvidia/jetpack-linux-aarch64-crosscompile-x86:6.1 /bin/bash
+docker run --rm -it -v "$HOME/src/jetson-inference:/workspace/jetson-inference" -v "$HOME/sysroots/orin-nano:/workspace/sysroot:ro" -v "$HOME/aarch64-prefixes/jetson-inference:/workspace/install" -v "$PWD/cmake/toolchains/jetson-aarch64.cmake:/workspace/jetson-aarch64.cmake:ro" -v "$PWD/patches/jetson-inference:/workspace/jon-patches:ro" -w /workspace/jetson-inference nvcr.io/nvidia/jetpack-linux-aarch64-crosscompile-x86:6.1 /bin/bash
 ```
 
 Inside the container, patch `jetson-inference` so its legacy `FindCUDA.cmake` links AArch64 CUDA libraries from the mounted sysroot instead of x86_64 host CUDA:
@@ -231,10 +231,16 @@ p.write_text(s.replace(old, new))
 PY
 ```
 
+Patch `jetson-inference` for the TensorRT 10 runtime path used by JetPack 6. This sets input tensor addresses before `enqueueV3()` and fixes an unsafe TensorRT 10 fallback binding lookup:
+
+```bash
+python3 /workspace/jon-patches/apply-tensorrt10-input-address.py
+```
+
 Configure and build `jetson-inference` inside the container:
 
 ```bash
-unset PKG_CONFIG_PATH && export PKG_CONFIG_SYSROOT_DIR=/workspace/sysroot && export PKG_CONFIG_LIBDIR=/workspace/sysroot/usr/lib/aarch64-linux-gnu/pkgconfig:/workspace/sysroot/usr/lib/pkgconfig:/workspace/sysroot/usr/share/pkgconfig:/workspace/sysroot/lib/aarch64-linux-gnu/pkgconfig && cmake -B build-aarch64 -S . -DCMAKE_TOOLCHAIN_FILE=/workspace/jetson-aarch64.cmake -DCMAKE_INSTALL_PREFIX=/workspace/install -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH="/workspace/sysroot/usr;/workspace/sysroot/usr/local;/workspace/sysroot/usr/local/cuda-12.6/targets/aarch64-linux" -DCUDA_TOOLKIT_ROOT_DIR=/usr/local/cuda -DCUDA_TOOLKIT_TARGET_DIR=/workspace/sysroot/usr/local/cuda-12.6/targets/aarch64-linux -DCUDA_HOST_COMPILER=/usr/bin/aarch64-linux-gnu-g++ -DCMAKE_CXX_FLAGS="-I/workspace/sysroot/usr/include/gstreamer-1.0 -I/workspace/sysroot/usr/include/glib-2.0 -I/workspace/sysroot/usr/lib/aarch64-linux-gnu/glib-2.0/include -I/workspace/sysroot/usr/include/aarch64-linux-gnu" -DCMAKE_C_FLAGS="-I/workspace/sysroot/usr/include/gstreamer-1.0 -I/workspace/sysroot/usr/include/glib-2.0 -I/workspace/sysroot/usr/lib/aarch64-linux-gnu/glib-2.0/include -I/workspace/sysroot/usr/include/aarch64-linux-gnu"
+unset PKG_CONFIG_PATH && export PKG_CONFIG_SYSROOT_DIR=/workspace/sysroot && export PKG_CONFIG_LIBDIR=/workspace/sysroot/usr/lib/aarch64-linux-gnu/pkgconfig:/workspace/sysroot/usr/lib/pkgconfig:/workspace/sysroot/usr/share/pkgconfig:/workspace/sysroot/lib/aarch64-linux-gnu/pkgconfig && cmake -B build-aarch64 -S . -DCMAKE_TOOLCHAIN_FILE=/workspace/jetson-aarch64.cmake -DCMAKE_INSTALL_PREFIX=/workspace/install -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH="/workspace/sysroot/usr;/workspace/sysroot/usr/local;/workspace/sysroot/usr/local/cuda-12.6/targets/aarch64-linux" -DCUDA_TOOLKIT_ROOT_DIR=/usr/local/cuda -DCUDA_TOOLKIT_TARGET_DIR=/workspace/sysroot/usr/local/cuda-12.6/targets/aarch64-linux -DCUDA_HOST_COMPILER=/usr/bin/aarch64-linux-gnu-g++ -DCMAKE_CXX_FLAGS="-I/workspace/sysroot/usr/include/gstreamer-1.0 -I/workspace/sysroot/usr/include/glib-2.0 -I/workspace/sysroot/usr/lib/aarch64-linux-gnu/glib-2.0/include -I/workspace/sysroot/usr/include/aarch64-linux-gnu -I/workspace/sysroot/usr/include/libsoup-2.4 -I/workspace/sysroot/usr/include/libxml2 -I/workspace/sysroot/usr/include/json-glib-1.0" -DCMAKE_C_FLAGS="-I/workspace/sysroot/usr/include/gstreamer-1.0 -I/workspace/sysroot/usr/include/glib-2.0 -I/workspace/sysroot/usr/lib/aarch64-linux-gnu/glib-2.0/include -I/workspace/sysroot/usr/include/aarch64-linux-gnu -I/workspace/sysroot/usr/include/libsoup-2.4 -I/workspace/sysroot/usr/include/libxml2 -I/workspace/sysroot/usr/include/json-glib-1.0"
 ```
 
 ```bash
