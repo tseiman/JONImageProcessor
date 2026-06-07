@@ -30,36 +30,73 @@ namespace {
 constexpr int ExitOk = 0;
 constexpr int ExitRuntimeError = 2;
 
-cv::Scalar overlayColorBgr(const RgbColor& color)
-{
-    return cv::Scalar(color.b, color.g, color.r);
-}
-
 cv::Mat applyBackgroundOverlay(
     const cv::Mat& frame,
     const cv::Mat& personMask,
     const RgbColor& color,
     double alpha)
 {
-    cv::Mat normalizedPersonMask;
-    personMask.convertTo(normalizedPersonMask, CV_32FC1, 1.0 / 255.0);
+    if (frame.empty() || personMask.empty()) {
+        return frame;
+    }
 
-    cv::Mat backgroundAlpha = (1.0 - normalizedPersonMask) * alpha;
-    std::vector<cv::Mat> alphaChannels(frame.channels(), backgroundAlpha);
-    cv::Mat backgroundAlpha3;
-    cv::merge(alphaChannels, backgroundAlpha3);
+    cv::Mat mask;
+    if (personMask.type() == CV_8UC1 && personMask.size() == frame.size()) {
+        mask = personMask;
+    } else {
+        cv::resize(personMask, mask, frame.size(), 0.0, 0.0, cv::INTER_LINEAR);
+        if (mask.type() != CV_8UC1) {
+            cv::cvtColor(mask, mask, cv::COLOR_BGR2GRAY);
+        }
+    }
 
-    cv::Mat frameFloat;
-    frame.convertTo(frameFloat, CV_32FC3);
+    if (frame.type() != CV_8UC3 || mask.type() != CV_8UC1) {
+        cv::Mat normalizedPersonMask;
+        mask.convertTo(normalizedPersonMask, CV_32FC1, 1.0 / 255.0);
 
-    cv::Mat colorOverlay(frame.size(), frame.type(), overlayColorBgr(color));
-    cv::Mat colorFloat;
-    colorOverlay.convertTo(colorFloat, CV_32FC3);
+        cv::Mat backgroundAlpha = (1.0 - normalizedPersonMask) * alpha;
+        std::vector<cv::Mat> alphaChannels(frame.channels(), backgroundAlpha);
+        cv::Mat backgroundAlpha3;
+        cv::merge(alphaChannels, backgroundAlpha3);
 
-    cv::Mat inverseAlpha3 = cv::Scalar::all(1.0) - backgroundAlpha3;
-    cv::Mat resultFloat = frameFloat.mul(inverseAlpha3) + colorFloat.mul(backgroundAlpha3);
-    cv::Mat result;
-    resultFloat.convertTo(result, frame.type());
+        cv::Mat frameFloat;
+        frame.convertTo(frameFloat, CV_32FC3);
+
+        cv::Mat colorOverlay(frame.size(), frame.type(), cv::Scalar(color.b, color.g, color.r));
+        cv::Mat colorFloat;
+        colorOverlay.convertTo(colorFloat, CV_32FC3);
+
+        cv::Mat inverseAlpha3 = cv::Scalar::all(1.0) - backgroundAlpha3;
+        cv::Mat resultFloat = frameFloat.mul(inverseAlpha3) + colorFloat.mul(backgroundAlpha3);
+        cv::Mat result;
+        resultFloat.convertTo(result, frame.type());
+        return result;
+    }
+
+    const int alphaScale = std::clamp(static_cast<int>(std::round(alpha * 255.0)), 0, 255);
+    const int overlayB = std::clamp(color.b, 0, 255);
+    const int overlayG = std::clamp(color.g, 0, 255);
+    const int overlayR = std::clamp(color.r, 0, 255);
+
+    cv::Mat result = frame.clone();
+    for (int y = 0; y < frame.rows; ++y) {
+        const auto* source = frame.ptr<cv::Vec3b>(y);
+        const auto* maskRow = mask.ptr<unsigned char>(y);
+        auto* destination = result.ptr<cv::Vec3b>(y);
+
+        for (int x = 0; x < frame.cols; ++x) {
+            const int overlayAlpha = ((255 - static_cast<int>(maskRow[x])) * alphaScale + 127) / 255;
+            if (overlayAlpha <= 0) {
+                continue;
+            }
+
+            const int sourceAlpha = 255 - overlayAlpha;
+            destination[x][0] = static_cast<unsigned char>((source[x][0] * sourceAlpha + overlayB * overlayAlpha + 127) / 255);
+            destination[x][1] = static_cast<unsigned char>((source[x][1] * sourceAlpha + overlayG * overlayAlpha + 127) / 255);
+            destination[x][2] = static_cast<unsigned char>((source[x][2] * sourceAlpha + overlayR * overlayAlpha + 127) / 255);
+        }
+    }
+
     return result;
 }
 
