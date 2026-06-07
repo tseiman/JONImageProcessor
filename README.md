@@ -40,7 +40,7 @@ Use an x86_64 Linux VM or workstation as the build host.
 Install the required host tools:
 
 ```bash
-sudo apt update && sudo apt install -y git docker.io rsync openssh-client file
+sudo apt update && sudo apt install -y git docker.io rsync openssh-client file wget ca-certificates dialog
 ```
 
 Enable Docker and allow your user to run Docker:
@@ -255,13 +255,19 @@ test -f "$HOME/aarch64-prefixes/jetson-inference/include/jetson-inference/segNet
 file "$HOME/aarch64-prefixes/jetson-inference/lib/libjetson-inference.so" "$HOME/aarch64-prefixes/jetson-inference/lib/libjetson-utils.so"
 ```
 
-Download the segmentation model data on the build host:
+Download the segmentation model data on the build host. This step does not install anything on the Jetson yet; it only downloads the model files into the local `jetson-inference` checkout:
 
 ```bash
 cd "$HOME/src/jetson-inference/tools" && ./download-models.sh
 ```
 
 In the model selection dialog, keep `FCN-ResNet18-Pascal-VOC-320x320` selected. JONImageProcessor currently uses this model for `--mask-backend jetson`.
+
+If the tool exits with `Model selection status: 127`, install the missing host-side dialog dependencies and run it again:
+
+```bash
+sudo apt update && sudo apt install -y dialog wget ca-certificates
+```
 
 Verify that the model directory exists:
 
@@ -320,6 +326,8 @@ Copy the `jetson-inference` model manifest and model data from the build host to
 ```bash
 rsync -aHAX "$HOME/src/jetson-inference/data/networks/" tseiman@jon:~/JONImageProcessor/networks/
 ```
+
+The model download runs on the build host, but the application loads `networks/models.json` at runtime on the Jetson. The copy command above is required before running `--mask-backend jetson`.
 
 Execute these commands on the Jetson when using the `jetson` mask backend:
 
