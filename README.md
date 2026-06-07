@@ -255,6 +255,20 @@ test -f "$HOME/aarch64-prefixes/jetson-inference/include/jetson-inference/segNet
 file "$HOME/aarch64-prefixes/jetson-inference/lib/libjetson-inference.so" "$HOME/aarch64-prefixes/jetson-inference/lib/libjetson-utils.so"
 ```
 
+Download the segmentation model data on the build host:
+
+```bash
+cd "$HOME/src/jetson-inference/tools" && ./download-models.sh
+```
+
+In the model selection dialog, keep `FCN-ResNet18-Pascal-VOC-320x320` selected. JONImageProcessor currently uses this model for `--mask-backend jetson`.
+
+Verify that the model directory exists:
+
+```bash
+test -f "$HOME/src/jetson-inference/data/networks/models.json" && test -f "$HOME/src/jetson-inference/data/networks/FCN-ResNet18-Pascal-VOC-320x320/fcn_resnet18.onnx" && echo ok
+```
+
 ### Cross-Build With Jetson Inference
 
 Build JONImageProcessor with the `jetson` mask backend enabled:
@@ -301,6 +315,12 @@ Copy the AArch64 `jetson-inference` prefix to the Jetson:
 rsync -aHAX "$HOME/aarch64-prefixes/jetson-inference/" tseiman@jon:~/JONImageProcessor/jetson-inference/
 ```
 
+Copy the `jetson-inference` model manifest and model data to the Jetson:
+
+```bash
+rsync -aHAX "$HOME/src/jetson-inference/data/networks/" tseiman@jon:~/JONImageProcessor/networks/
+```
+
 Use this runtime library path when running the `jetson` mask backend:
 
 ```bash
@@ -324,7 +344,7 @@ ssh -t tseiman@jon '~/JONImageProcessor/JONImageProcessor --device /dev/video0 -
 Run with Jetson/TensorRT segmentation:
 
 ```bash
-ssh -t tseiman@jon 'LD_LIBRARY_PATH="$HOME/JONImageProcessor/jetson-inference/lib:$LD_LIBRARY_PATH" ~/JONImageProcessor/JONImageProcessor --device /dev/video0 --capture-backend v4l2 --camera-format MJPG --camera-fps 30 --width 1280 --height 720 --mask-backend jetson --background-overlay-color 0,0,255 --background-overlay-alpha 0.35 --display-mode fit --fullscreen --benchmark'
+ssh -t tseiman@jon 'cd ~/JONImageProcessor && LD_LIBRARY_PATH="$HOME/JONImageProcessor/jetson-inference/lib:$LD_LIBRARY_PATH" ./JONImageProcessor --device /dev/video0 --capture-backend v4l2 --camera-format MJPG --camera-fps 30 --width 1280 --height 720 --mask-backend jetson --background-overlay-color 0,0,255 --background-overlay-alpha 0.35 --display-mode fit --fullscreen --benchmark'
 ```
 
 The first Jetson segmentation run can take longer because TensorRT may build or load an optimized engine.
