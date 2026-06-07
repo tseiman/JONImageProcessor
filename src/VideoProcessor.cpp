@@ -16,6 +16,7 @@
 #include <opencv2/videoio.hpp>
 
 #include <algorithm>
+#include <array>
 #include <chrono>
 #include <cmath>
 #include <memory>
@@ -78,24 +79,30 @@ cv::Mat applyBackgroundOverlay(
     const int overlayG = std::clamp(color.g, 0, 255);
     const int overlayR = std::clamp(color.r, 0, 255);
 
-    cv::Mat result = frame.clone();
-    for (int y = 0; y < frame.rows; ++y) {
-        const auto* source = frame.ptr<cv::Vec3b>(y);
-        const auto* maskRow = mask.ptr<unsigned char>(y);
-        auto* destination = result.ptr<cv::Vec3b>(y);
-
-        for (int x = 0; x < frame.cols; ++x) {
-            const int overlayAlpha = ((255 - static_cast<int>(maskRow[x])) * alphaScale + 127) / 255;
-            if (overlayAlpha <= 0) {
-                continue;
-            }
-
-            const int sourceAlpha = 255 - overlayAlpha;
-            destination[x][0] = static_cast<unsigned char>((source[x][0] * sourceAlpha + overlayB * overlayAlpha + 127) / 255);
-            destination[x][1] = static_cast<unsigned char>((source[x][1] * sourceAlpha + overlayG * overlayAlpha + 127) / 255);
-            destination[x][2] = static_cast<unsigned char>((source[x][2] * sourceAlpha + overlayR * overlayAlpha + 127) / 255);
-        }
+    std::array<unsigned char, 256> overlayAlphaByMask {};
+    std::array<unsigned char, 256> sourceAlphaByMask {};
+    for (int maskValue = 0; maskValue < 256; ++maskValue) {
+        const int overlayAlpha = ((255 - maskValue) * alphaScale + 127) / 255;
+        overlayAlphaByMask[maskValue] = static_cast<unsigned char>(overlayAlpha);
+        sourceAlphaByMask[maskValue] = static_cast<unsigned char>(255 - overlayAlpha);
     }
+
+    cv::Mat result(frame.size(), frame.type());
+    cv::parallel_for_(cv::Range(0, frame.rows), [&](const cv::Range& range) {
+        for (int y = range.start; y < range.end; ++y) {
+            const auto* source = frame.ptr<cv::Vec3b>(y);
+            const auto* maskRow = mask.ptr<unsigned char>(y);
+            auto* destination = result.ptr<cv::Vec3b>(y);
+
+            for (int x = 0; x < frame.cols; ++x) {
+                const int overlayAlpha = overlayAlphaByMask[maskRow[x]];
+                const int sourceAlpha = sourceAlphaByMask[maskRow[x]];
+                destination[x][0] = static_cast<unsigned char>((source[x][0] * sourceAlpha + overlayB * overlayAlpha + 127) / 255);
+                destination[x][1] = static_cast<unsigned char>((source[x][1] * sourceAlpha + overlayG * overlayAlpha + 127) / 255);
+                destination[x][2] = static_cast<unsigned char>((source[x][2] * sourceAlpha + overlayR * overlayAlpha + 127) / 255);
+            }
+        }
+    });
 
     return result;
 }
