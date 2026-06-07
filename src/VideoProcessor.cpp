@@ -63,6 +63,60 @@ cv::Mat applyBackgroundOverlay(
     return result;
 }
 
+cv::Mat applyMaskPostprocessing(
+    const cv::Mat& mask,
+    cv::Mat& previousMask,
+    const ProcessorConfig& config)
+{
+    if (mask.empty()) {
+        previousMask.release();
+        return mask;
+    }
+
+    cv::Mat processed;
+    if (mask.type() == CV_8UC1) {
+        processed = mask.clone();
+    } else {
+        cv::cvtColor(mask, processed, cv::COLOR_BGR2GRAY);
+    }
+
+    if (config.maskMorphology != MaskMorphologyMode::Off) {
+        const int closeSize = config.maskMorphology == MaskMorphologyMode::Strong ? 9 : 5;
+        const int dilateSize = config.maskMorphology == MaskMorphologyMode::Strong ? 7 : 3;
+        const int blurSize = config.maskMorphology == MaskMorphologyMode::Strong ? 9 : 5;
+
+        cv::Mat binary;
+        cv::threshold(processed, binary, 127, 255, cv::THRESH_BINARY);
+
+        const cv::Mat closeKernel = cv::getStructuringElement(
+            cv::MORPH_ELLIPSE,
+            cv::Size(closeSize, closeSize));
+        cv::morphologyEx(binary, binary, cv::MORPH_CLOSE, closeKernel);
+
+        const cv::Mat dilateKernel = cv::getStructuringElement(
+            cv::MORPH_ELLIPSE,
+            cv::Size(dilateSize, dilateSize));
+        cv::dilate(binary, processed, dilateKernel);
+
+        cv::GaussianBlur(processed, processed, cv::Size(blurSize, blurSize), 0.0);
+    }
+
+    if (config.maskSmoothing > 0.0 && !previousMask.empty() && previousMask.size() == processed.size()) {
+        cv::Mat smoothed;
+        cv::addWeighted(
+            previousMask,
+            config.maskSmoothing,
+            processed,
+            1.0 - config.maskSmoothing,
+            0.0,
+            smoothed);
+        processed = smoothed;
+    }
+
+    previousMask = processed.clone();
+    return processed;
+}
+
 cv::Size fitSizePreservingAspect(cv::Size sourceSize, cv::Size bounds)
 {
     if (sourceSize.width <= 0 || sourceSize.height <= 0 || bounds.width <= 0 || bounds.height <= 0) {
@@ -139,6 +193,8 @@ void logStartupInfo(const ProcessorConfig& config, const ScreenInfo& screenInfo)
     LOG_VERBOSE("Mask backend: " << maskBackendToString(config.maskBackend));
     LOG_VERBOSE("Segmentation size: " << config.segmentationWidth << "x" << config.segmentationHeight);
     LOG_VERBOSE("Jetson segmentation model: " << config.jetsonSegmentationModel);
+    LOG_VERBOSE("Mask smoothing: " << config.maskSmoothing);
+    LOG_VERBOSE("Mask morphology: " << maskMorphologyModeToString(config.maskMorphology));
     LOG_VERBOSE("Background overlay color: "
         << config.backgroundOverlayColor.r << ","
         << config.backgroundOverlayColor.g << ","
@@ -289,6 +345,7 @@ int VideoProcessor::run()
     const auto startedAt = std::chrono::steady_clock::now();
     auto intervalStartedAt = startedAt;
     std::size_t intervalFrames = 0;
+    cv::Mat previousOutputMask;
 
     while (true) {
         const auto pipelineStartedAt = std::chrono::steady_clock::now();
@@ -346,6 +403,15 @@ int VideoProcessor::run()
                 BenchmarkScope timer(benchmark, BenchmarkStage::MaskUpscale);
                 cv::resize(segmentationMask, outputMask, resized.size(), 0.0, 0.0, cv::INTER_LINEAR);
             }
+
+            if (!outputMask.empty()) {
+                BenchmarkScope timer(benchmark, BenchmarkStage::MaskPostprocess);
+                outputMask = applyMaskPostprocessing(outputMask, previousOutputMask, config_);
+            } else {
+                previousOutputMask.release();
+            }
+        } else {
+            previousOutputMask.release();
         }
 
         cv::Mat outputFrame;

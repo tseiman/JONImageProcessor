@@ -26,6 +26,8 @@ enum OptionId {
     OptionSegmentationWidth,
     OptionSegmentationHeight,
     OptionJetsonSegmentationModel,
+    OptionMaskSmoothing,
+    OptionMaskMorphology,
     OptionCameraFormat,
     OptionCameraFps,
     OptionMaskBackend,
@@ -71,6 +73,8 @@ const std::vector<OptionDefinition>& optionDefinitions()
         {OptionSegmentationWidth, 0, "segmentation-width", required_argument, "pixels", "Segmentation inference width", "256"},
         {OptionSegmentationHeight, 0, "segmentation-height", required_argument, "pixels", "Segmentation inference height", "144"},
         {OptionJetsonSegmentationModel, 0, "jetson-segmentation-model", required_argument, "model", "jetson-inference segNet model", "fcn-resnet18-voc-320x320"},
+        {OptionMaskSmoothing, 0, "mask-smoothing", required_argument, "0.0..1.0", "Temporal mask smoothing strength", "0.65"},
+        {OptionMaskMorphology, 0, "mask-morphology", required_argument, "mode", "Mask morphology: off, light, or strong", "light"},
         {OptionCameraFormat, 0, "camera-format", required_argument, "format", "Camera pixel format: MJPG or YUYV", "MJPG"},
         {OptionCameraFps, 0, "camera-fps", required_argument, "fps", "Requested camera frame rate", "30"},
         {OptionMaskBackend, 0, "mask-backend", required_argument, "backend", "Mask backend: none, dummy, or jetson", "dummy"},
@@ -304,6 +308,39 @@ bool parseOverlayAlpha(const char* value, double& alpha, std::string& error)
     return true;
 }
 
+bool parseMaskSmoothing(const char* value, double& smoothing, std::string& error)
+{
+    char* end = nullptr;
+    const double parsed = std::strtod(value, &end);
+    if (end == value || *end != '\0' || parsed < 0.0 || parsed > 1.0) {
+        error = "Invalid mask smoothing: " + std::string(value);
+        return false;
+    }
+
+    smoothing = parsed;
+    return true;
+}
+
+bool parseMaskMorphology(const char* value, MaskMorphologyMode& mode, std::string& error)
+{
+    const std::string parsed(value);
+    if (parsed == "off") {
+        mode = MaskMorphologyMode::Off;
+        return true;
+    }
+    if (parsed == "light") {
+        mode = MaskMorphologyMode::Light;
+        return true;
+    }
+    if (parsed == "strong") {
+        mode = MaskMorphologyMode::Strong;
+        return true;
+    }
+
+    error = "Invalid mask morphology: " + parsed + " (allowed: off, light, strong)";
+    return false;
+}
+
 std::string formatOptionName(const OptionDefinition& definition)
 {
     std::ostringstream stream;
@@ -406,6 +443,16 @@ bool parseCommandLine(int argc, char** argv, CommandLineResult& result, std::str
             result.config.jetsonSegmentationModel = optarg;
             if (result.config.jetsonSegmentationModel.empty()) {
                 error = "--jetson-segmentation-model must not be empty.";
+                return false;
+            }
+            break;
+        case OptionMaskSmoothing:
+            if (!parseMaskSmoothing(optarg, result.config.maskSmoothing, error)) {
+                return false;
+            }
+            break;
+        case OptionMaskMorphology:
+            if (!parseMaskMorphology(optarg, result.config.maskMorphology, error)) {
                 return false;
             }
             break;
@@ -605,6 +652,20 @@ std::string maskBackendToString(MaskBackendType backend)
         return "dummy";
     case MaskBackendType::Jetson:
         return "jetson";
+    }
+
+    return "unknown";
+}
+
+std::string maskMorphologyModeToString(MaskMorphologyMode mode)
+{
+    switch (mode) {
+    case MaskMorphologyMode::Off:
+        return "off";
+    case MaskMorphologyMode::Light:
+        return "light";
+    case MaskMorphologyMode::Strong:
+        return "strong";
     }
 
     return "unknown";

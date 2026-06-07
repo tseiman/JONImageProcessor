@@ -12,6 +12,7 @@ enum class BenchmarkStage {
     SegmentationPreprocess,
     SegmentationInference,
     SegmentationPostprocess,
+    MaskPostprocess,
     MaskUpscale,
     Overlay,
     Display,

@@ -33,6 +33,12 @@ enum class MaskBackendType {
     Jetson
 };
 
+enum class MaskMorphologyMode {
+    Off,
+    Light,
+    Strong
+};
+
 struct RgbColor {
     int r = 0;
     int g = 0;
@@ -56,6 +62,8 @@ struct ProcessorConfig {
     int segmentationWidth = 256;
     int segmentationHeight = 144;
     std::string jetsonSegmentationModel = "fcn-resnet18-voc-320x320";
+    double maskSmoothing = 0.65;
+    MaskMorphologyMode maskMorphology = MaskMorphologyMode::Light;
     CameraFormat cameraFormat = CameraFormat::MJPG;
     MaskBackendType maskBackend = MaskBackendType::Dummy;
     RgbColor backgroundOverlayColor;
@@ -85,3 +93,4 @@ std::string displayBackendToString(DisplayBackendType backend);
 std::string captureBackendToString(CaptureBackendType backend);
 std::string cameraFormatToString(CameraFormat format);
 std::string maskBackendToString(MaskBackendType backend);
+std::string maskMorphologyModeToString(MaskMorphologyMode mode);

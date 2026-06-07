@@ -25,6 +25,7 @@ The intended deployment is a Jetson appliance: the Jetson boots, the application
 - [Camera Configuration](#camera-configuration)
 - [Capture Backends](#capture-backends)
 - [Mask Backends](#mask-backends)
+- [Segmentation Quality TODO](#segmentation-quality-todo)
 - [Display Modes](#display-modes)
 - [Verbose Logging](#verbose-logging)
 - [Performance Analysis](#performance-analysis)
@@ -438,6 +439,8 @@ Important options:
 - `--camera-fps <fps>` requests the camera frame rate.
 - `--mask-backend <none|dummy|jetson>` selects mask generation.
 - `--jetson-segmentation-model <model>` selects the `jetson-inference` segNet model for `--mask-backend jetson`.
+- `--mask-smoothing <0.0..1.0>` controls temporal mask smoothing.
+- `--mask-morphology <off|light|strong>` controls morphology cleanup for the mask.
 - `--background-overlay-color <R,G,B>` sets background overlay color.
 - `--background-overlay-alpha <0.0..1.0>` sets overlay opacity.
 - `--display-mode <fit|fill|stretch>` controls scaling into the window/fullscreen canvas.
@@ -481,6 +484,21 @@ Supported mask backends:
 
 The debug visualization keeps the detected person unchanged and tints the background with the configured overlay color and alpha.
 
+Mask postprocessing is enabled by default:
+
+- `--mask-smoothing 0.65`: blends the current mask with the previous frame to reduce flicker and short-lived holes.
+- `--mask-morphology light`: closes small holes, slightly expands the person area, and softens the edge.
+
+Use these options to tune or disable the postprocessing:
+
+```bash
+~/JONImageProcessor/JONImageProcessor --device /dev/video0 --capture-backend v4l2 --camera-format MJPG --camera-fps 30 --width 1280 --height 720 --mask-backend jetson --mask-smoothing 0.75 --mask-morphology strong
+```
+
+```bash
+~/JONImageProcessor/JONImageProcessor --device /dev/video0 --capture-backend v4l2 --camera-format MJPG --camera-fps 30 --width 1280 --height 720 --mask-backend jetson --mask-smoothing 0 --mask-morphology off
+```
+
 For `--mask-backend jetson`, model choice directly affects mask quality:
 
 - `fcn-resnet18-voc-320x320`: default, fast baseline, coarse 10x10 output grid.
@@ -493,6 +511,17 @@ Use the MHP model with matching input size:
 ```
 
 If a selected model does not expose a single `person` class, JONImageProcessor treats all non-background segmentation classes as person. This is used for multi-human-parsing models that classify body parts instead of returning one generic person class.
+
+## Segmentation Quality TODO
+
+The current Jetson path is a first real-time debug mask, not final virtual-background quality. Open improvement options:
+
+- Test newer person segmentation or matting models exported through ONNX and TensorRT.
+- Add a dedicated TensorRT mask backend instead of relying only on `jetson-inference` segNet.
+- Evaluate higher input resolutions such as 768x432 or 1024x576 if the selected model supports them.
+- Add edge-aware refinement so hair, hands, and arm boundaries are less blocky.
+- Add confidence-aware blending when the model output exposes usable probabilities.
+- Compare quality and FPS on macOS development, Linux VM, and Jetson Orin Nano with the same benchmark commands.
 
 ## Display Modes
 

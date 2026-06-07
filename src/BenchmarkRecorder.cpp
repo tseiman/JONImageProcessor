@@ -37,6 +37,8 @@ const char* stageName(BenchmarkStage stage)
         return "Segmentation inference";
     case BenchmarkStage::SegmentationPostprocess:
         return "Segmentation postprocess";
+    case BenchmarkStage::MaskPostprocess:
+        return "Mask postprocess";
     case BenchmarkStage::MaskUpscale:
         return "Mask upscale";
     case BenchmarkStage::Overlay:
@@ -172,6 +174,7 @@ void BenchmarkRecorder::logSummary() const
     logAverageLine(BenchmarkStage::SegmentationPreprocess, averageMilliseconds(BenchmarkStage::SegmentationPreprocess));
     logAverageLine(BenchmarkStage::SegmentationInference, averageMilliseconds(BenchmarkStage::SegmentationInference));
     logAverageLine(BenchmarkStage::SegmentationPostprocess, averageMilliseconds(BenchmarkStage::SegmentationPostprocess));
+    logAverageLine(BenchmarkStage::MaskPostprocess, averageMilliseconds(BenchmarkStage::MaskPostprocess));
     logAverageLine(BenchmarkStage::MaskUpscale, averageMilliseconds(BenchmarkStage::MaskUpscale));
     logAverageLine(BenchmarkStage::Overlay, averageMilliseconds(BenchmarkStage::Overlay));
     logAverageLine(BenchmarkStage::Display, averageMilliseconds(BenchmarkStage::Display));
@@ -187,6 +190,7 @@ void BenchmarkRecorder::logSummary() const
     logDistributionLine("Segmentation preprocess", percentOfTotal(BenchmarkStage::SegmentationPreprocess));
     logDistributionLine("Segmentation inference", percentOfTotal(BenchmarkStage::SegmentationInference));
     logDistributionLine("Segmentation postprocess", percentOfTotal(BenchmarkStage::SegmentationPostprocess));
+    logDistributionLine("Mask postprocess", percentOfTotal(BenchmarkStage::MaskPostprocess));
     logDistributionLine("Mask upscale", percentOfTotal(BenchmarkStage::MaskUpscale));
     logDistributionLine("Overlay", percentOfTotal(BenchmarkStage::Overlay));
     logDistributionLine("Display", percentOfTotal(BenchmarkStage::Display));
@@ -229,6 +233,7 @@ std::chrono::steady_clock::duration BenchmarkRecorder::measuredStageTotal() cons
     total += stages_[stageIndex(BenchmarkStage::SegmentationPreprocess)].total;
     total += stages_[stageIndex(BenchmarkStage::SegmentationInference)].total;
     total += stages_[stageIndex(BenchmarkStage::SegmentationPostprocess)].total;
+    total += stages_[stageIndex(BenchmarkStage::MaskPostprocess)].total;
     total += stages_[stageIndex(BenchmarkStage::MaskUpscale)].total;
     total += stages_[stageIndex(BenchmarkStage::Overlay)].total;
     total += stages_[stageIndex(BenchmarkStage::Display)].total;
