@@ -190,7 +190,7 @@ bool JetsonSegmentationMaskBackend::generate(
     if (classGridMask.size() == impl_->segmentationSize) {
         personMask = classGridMask;
     } else {
-        cv::resize(classGridMask, personMask, impl_->segmentationSize, 0.0, 0.0, cv::INTER_NEAREST);
+        cv::resize(classGridMask, personMask, impl_->segmentationSize, 0.0, 0.0, cv::INTER_LINEAR);
     }
     timings.postprocess = std::chrono::steady_clock::now() - postprocessStartedAt;
     return true;

@@ -41,20 +41,25 @@ cv::Mat applyBackgroundOverlay(
     const RgbColor& color,
     double alpha)
 {
+    cv::Mat normalizedPersonMask;
+    personMask.convertTo(normalizedPersonMask, CV_32FC1, 1.0 / 255.0);
+
+    cv::Mat backgroundAlpha = (1.0 - normalizedPersonMask) * alpha;
+    std::vector<cv::Mat> alphaChannels(frame.channels(), backgroundAlpha);
+    cv::Mat backgroundAlpha3;
+    cv::merge(alphaChannels, backgroundAlpha3);
+
+    cv::Mat frameFloat;
+    frame.convertTo(frameFloat, CV_32FC3);
+
     cv::Mat colorOverlay(frame.size(), frame.type(), overlayColorBgr(color));
-    cv::Mat blended;
-    cv::addWeighted(frame, 1.0 - alpha, colorOverlay, alpha, 0.0, blended);
+    cv::Mat colorFloat;
+    colorOverlay.convertTo(colorFloat, CV_32FC3);
 
-    cv::Mat backgroundMask;
-    cv::bitwise_not(personMask, backgroundMask);
-
-    cv::Mat result = frame.clone();
-    blended.copyTo(result, backgroundMask);
-
-    std::vector<std::vector<cv::Point>> contours;
-    cv::findContours(personMask, contours, cv::RETR_EXTERNAL, cv::CHAIN_APPROX_SIMPLE);
-    cv::drawContours(result, contours, -1, cv::Scalar(255, 255, 255), 2, cv::LINE_AA);
-
+    cv::Mat inverseAlpha3 = cv::Scalar::all(1.0) - backgroundAlpha3;
+    cv::Mat resultFloat = frameFloat.mul(inverseAlpha3) + colorFloat.mul(backgroundAlpha3);
+    cv::Mat result;
+    resultFloat.convertTo(result, frame.type());
     return result;
 }
 
@@ -338,7 +343,7 @@ int VideoProcessor::run()
 
             if (!segmentationMask.empty()) {
                 BenchmarkScope timer(benchmark, BenchmarkStage::MaskUpscale);
-                cv::resize(segmentationMask, outputMask, resized.size(), 0.0, 0.0, cv::INTER_NEAREST);
+                cv::resize(segmentationMask, outputMask, resized.size(), 0.0, 0.0, cv::INTER_LINEAR);
             }
         }
 
