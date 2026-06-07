@@ -83,11 +83,18 @@ bool JetsonSegmentationMaskBackend::initialize(const ProcessorConfig& config)
 
     Log::SetLevel(config.verbose ? Log::INFO : Log::WARNING);
 
-    impl_->network = segNet::Create("fcn-resnet18-voc-320x320");
+    LOG_INFO("Creating Jetson segNet model: fcn-resnet18-voc-320x320, precision FP16");
+    impl_->network = segNet::Create(
+        "fcn-resnet18-voc-320x320",
+        DEFAULT_MAX_BATCH_SIZE,
+        TYPE_FP16,
+        DEVICE_GPU,
+        true);
     if (impl_->network == nullptr) {
         LOG_ERROR("Failed to create jetson-inference segNet");
         return false;
     }
+    LOG_INFO("Jetson segNet model created");
 
     impl_->personClassId = impl_->network->FindClassID("person");
     if (impl_->personClassId < 0) {
