@@ -287,41 +287,41 @@ file build-jetson-cross/JONImageProcessor
 
 ### Install the Binary
 
-Create an application directory on the Jetson:
+Execute these commands on the Jetson:
 
 ```bash
-ssh tseiman@jon 'mkdir -p ~/JONImageProcessor'
+mkdir -p ~/JONImageProcessor
 ```
 
-Copy the AArch64 binary:
+Copy the AArch64 binary from the build host to the Jetson:
 
 ```bash
 scp build-jetson-cross/JONImageProcessor tseiman@jon:~/JONImageProcessor/JONImageProcessor
 ```
 
-Verify the binary on the Jetson:
+Execute these commands on the Jetson:
 
 ```bash
-ssh tseiman@jon 'chmod +x ~/JONImageProcessor/JONImageProcessor && file ~/JONImageProcessor/JONImageProcessor && ~/JONImageProcessor/JONImageProcessor --version'
+chmod +x ~/JONImageProcessor/JONImageProcessor && file ~/JONImageProcessor/JONImageProcessor && ~/JONImageProcessor/JONImageProcessor --version
 ```
 
 ### Install jetson-inference Runtime Libraries
 
 Only do this if the binary was built with `ENABLE_JETSON_INFERENCE=ON`.
 
-Copy the AArch64 `jetson-inference` prefix to the Jetson:
+Copy the AArch64 `jetson-inference` prefix from the build host to the Jetson:
 
 ```bash
 rsync -aHAX "$HOME/aarch64-prefixes/jetson-inference/" tseiman@jon:~/JONImageProcessor/jetson-inference/
 ```
 
-Copy the `jetson-inference` model manifest and model data to the Jetson:
+Copy the `jetson-inference` model manifest and model data from the build host to the Jetson:
 
 ```bash
 rsync -aHAX "$HOME/src/jetson-inference/data/networks/" tseiman@jon:~/JONImageProcessor/networks/
 ```
 
-Use this runtime library path when running the `jetson` mask backend:
+Execute these commands on the Jetson when using the `jetson` mask backend:
 
 ```bash
 export LD_LIBRARY_PATH="$HOME/JONImageProcessor/jetson-inference/lib:$LD_LIBRARY_PATH"
@@ -330,26 +330,30 @@ export LD_LIBRARY_PATH="$HOME/JONImageProcessor/jetson-inference/lib:$LD_LIBRARY
 Check missing libraries on the Jetson:
 
 ```bash
-ssh tseiman@jon 'LD_LIBRARY_PATH="$HOME/JONImageProcessor/jetson-inference/lib:$LD_LIBRARY_PATH" ldd ~/JONImageProcessor/JONImageProcessor | grep "not found" || true'
+LD_LIBRARY_PATH="$HOME/JONImageProcessor/jetson-inference/lib:$LD_LIBRARY_PATH" ldd ~/JONImageProcessor/JONImageProcessor | grep "not found" || true
 ```
 
 ### Run the Application
 
+Execute these commands on the Jetson.
+
 Run with the dummy mask backend:
 
 ```bash
-ssh -t tseiman@jon '~/JONImageProcessor/JONImageProcessor --device /dev/video0 --capture-backend v4l2 --camera-format MJPG --camera-fps 30 --width 1280 --height 720 --mask-backend dummy --display-mode fit --fullscreen --benchmark'
+~/JONImageProcessor/JONImageProcessor --device /dev/video0 --capture-backend v4l2 --camera-format MJPG --camera-fps 30 --width 1280 --height 720 --mask-backend dummy --display-mode fit --fullscreen --benchmark
 ```
 
 Run with Jetson/TensorRT segmentation:
 
 ```bash
-ssh -t tseiman@jon 'cd ~/JONImageProcessor && LD_LIBRARY_PATH="$HOME/JONImageProcessor/jetson-inference/lib:$LD_LIBRARY_PATH" ./JONImageProcessor --device /dev/video0 --capture-backend v4l2 --camera-format MJPG --camera-fps 30 --width 1280 --height 720 --mask-backend jetson --background-overlay-color 0,0,255 --background-overlay-alpha 0.35 --display-mode fit --fullscreen --benchmark'
+cd ~/JONImageProcessor && LD_LIBRARY_PATH="$HOME/JONImageProcessor/jetson-inference/lib:$LD_LIBRARY_PATH" ./JONImageProcessor --device /dev/video0 --capture-backend v4l2 --camera-format MJPG --camera-fps 30 --width 1280 --height 720 --mask-backend jetson --background-overlay-color 0,0,255 --background-overlay-alpha 0.35 --display-mode fit --fullscreen --benchmark
 ```
 
 The first Jetson segmentation run can take longer because TensorRT may build or load an optimized engine.
 
 ## Useful Runtime Commands
+
+Execute these commands on the Jetson.
 
 Show help on the Jetson:
 
