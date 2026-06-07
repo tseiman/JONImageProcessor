@@ -47,7 +47,7 @@ fi
 
 perl -0pi -e "s/${OLD_HASH}/${NEW_HASH}/g" "${BINARY}"
 
-if ! strings "${BINARY}" | grep -qx "${NEW_HASH}"; then
+if ! grep -a -q "${NEW_HASH}" "${BINARY}"; then
     echo "[ERROR] Failed to patch git hash in ${BINARY}" >&2
     exit 2
 fi
