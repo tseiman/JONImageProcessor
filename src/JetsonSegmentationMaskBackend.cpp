@@ -9,6 +9,7 @@
 
 #ifdef JON_WITH_JETSON_INFERENCE
 #include <cuda_runtime.h>
+#include <jetson-utils/cudaMappedMemory.h>
 #include <jetson-inference/segNet.h>
 #include <jetson-utils/imageFormat.h>
 #include <jetson-utils/logging.h>
@@ -22,6 +23,7 @@ struct JetsonSegmentationMaskBackend::Impl {
     unsigned char* classMaskCpu = nullptr;
     unsigned char* classMaskGpu = nullptr;
     cv::Size segmentationSize;
+    cv::Size classGridSize;
     int personClassId = -1;
 #endif
 };
@@ -30,28 +32,12 @@ namespace {
 
 #ifdef JON_WITH_JETSON_INFERENCE
 
-bool cudaOk(cudaError_t result, const char* operation)
-{
-    if (result == cudaSuccess) {
-        return true;
-    }
-
-    LOG_ERROR(operation << " failed: " << cudaGetErrorString(result));
-    return false;
-}
-
 bool allocateMappedBuffer(unsigned char*& cpuPtr, unsigned char*& gpuPtr, std::size_t bytes, const char* label)
 {
     cpuPtr = nullptr;
     gpuPtr = nullptr;
-    if (!cudaOk(cudaHostAlloc(reinterpret_cast<void**>(&cpuPtr), bytes, cudaHostAllocMapped), label)) {
-        return false;
-    }
-
-    if (!cudaOk(cudaHostGetDevicePointer(reinterpret_cast<void**>(&gpuPtr), cpuPtr, 0), label)) {
-        cudaFreeHost(cpuPtr);
-        cpuPtr = nullptr;
-        gpuPtr = nullptr;
+    if (!cudaAllocMapped(reinterpret_cast<void**>(&cpuPtr), reinterpret_cast<void**>(&gpuPtr), bytes)) {
+        LOG_ERROR(label << " failed");
         return false;
     }
 
@@ -108,12 +94,25 @@ bool JetsonSegmentationMaskBackend::initialize(const ProcessorConfig& config)
         LOG_ERROR("jetson-inference segNet model does not provide a 'person' class");
         return false;
     }
-    LOG_VERBOSE("Jetson segmentation person class ID: " << impl_->personClassId);
+
+    impl_->classGridSize = cv::Size(
+        static_cast<int>(impl_->network->GetGridWidth()),
+        static_cast<int>(impl_->network->GetGridHeight()));
+
+    if (impl_->classGridSize.width <= 0 || impl_->classGridSize.height <= 0) {
+        LOG_ERROR("jetson-inference segNet reported an invalid class grid size: "
+            << impl_->classGridSize.width << "x" << impl_->classGridSize.height);
+        return false;
+    }
+
+    LOG_INFO("Jetson segmentation ready: person class ID "
+        << impl_->personClassId << ", grid "
+        << impl_->classGridSize.width << "x" << impl_->classGridSize.height);
 
     const std::size_t inputBytes = static_cast<std::size_t>(impl_->segmentationSize.width)
         * static_cast<std::size_t>(impl_->segmentationSize.height) * 3;
-    const std::size_t maskBytes = static_cast<std::size_t>(impl_->segmentationSize.width)
-        * static_cast<std::size_t>(impl_->segmentationSize.height);
+    const std::size_t maskBytes = static_cast<std::size_t>(impl_->classGridSize.width)
+        * static_cast<std::size_t>(impl_->classGridSize.height);
 
     if (!allocateMappedBuffer(impl_->inputCpu, impl_->inputGpu, inputBytes, "cudaHostAlloc input")) {
         return false;
@@ -167,16 +166,22 @@ bool JetsonSegmentationMaskBackend::generate(
     const auto postprocessStartedAt = std::chrono::steady_clock::now();
     if (!impl_->network->Mask(
             impl_->classMaskCpu,
-            static_cast<uint32_t>(impl_->segmentationSize.width),
-            static_cast<uint32_t>(impl_->segmentationSize.height))) {
+            static_cast<uint32_t>(impl_->classGridSize.width),
+            static_cast<uint32_t>(impl_->classGridSize.height))) {
         LOG_ERROR("jetson-inference segNet Mask failed");
         return false;
     }
 
-    personMask.create(impl_->segmentationSize, CV_8UC1);
-    const int pixels = impl_->segmentationSize.width * impl_->segmentationSize.height;
+    cv::Mat classGridMask(impl_->classGridSize, CV_8UC1);
+    const int pixels = impl_->classGridSize.width * impl_->classGridSize.height;
     for (int index = 0; index < pixels; ++index) {
-        personMask.data[index] = impl_->classMaskCpu[index] == impl_->personClassId ? 255 : 0;
+        classGridMask.data[index] = impl_->classMaskCpu[index] == impl_->personClassId ? 255 : 0;
+    }
+
+    if (classGridMask.size() == impl_->segmentationSize) {
+        personMask = classGridMask;
+    } else {
+        cv::resize(classGridMask, personMask, impl_->segmentationSize, 0.0, 0.0, cv::INTER_NEAREST);
     }
     timings.postprocess = std::chrono::steady_clock::now() - postprocessStartedAt;
     return true;
