@@ -11,6 +11,8 @@ std::unique_ptr<IMaskBackend> MaskBackendFactory::create(MaskBackendType type)
         return std::make_unique<DummyMaskBackend>();
     case MaskBackendType::Jetson:
         return std::make_unique<JetsonSegmentationMaskBackend>();
+    case MaskBackendType::TensorRt:
+        return std::make_unique<TensorRtMaskBackend>();
     }
 
     return nullptr;

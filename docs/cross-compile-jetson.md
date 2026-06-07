@@ -105,6 +105,7 @@ This default build uses:
 
 ```text
 JON_ENABLE_JETSON_INFERENCE=OFF
+JON_ENABLE_TENSORRT_MASK=OFF
 ```
 
 It should not require `jetson-inference` or `jetson-utils`.
@@ -145,6 +146,18 @@ With a separate AArch64 `jetson-inference` install prefix:
 JETSON_SYSROOT=/path/to/jetson-sysroot JETSON_INFERENCE_ROOT=/path/to/aarch64/jetson-inference-prefix ENABLE_JETSON_INFERENCE=ON ./scripts/build-jetson-cross.sh
 ```
 
+When `ENABLE_JETSON_INFERENCE=ON`, the script also enables the generic TensorRT mask backend by default:
+
+```text
+ENABLE_TENSORRT_MASK=ON
+```
+
+The TensorRT mask backend requires `NvInfer.h`, `NvOnnxParser.h`, `libnvinfer`, and `libnvonnxparser` in the Jetson sysroot. Disable it explicitly if you only want the `jetson-inference` segNet path:
+
+```bash
+JETSON_SYSROOT=/path/to/jetson-sysroot JETSON_INFERENCE_ROOT=/path/to/aarch64/jetson-inference-prefix ENABLE_JETSON_INFERENCE=ON ENABLE_TENSORRT_MASK=OFF ./scripts/build-jetson-cross.sh
+```
+
 If the dependencies are missing, the script fails before CMake with a clear error:
 
 ```text
@@ -173,7 +186,7 @@ cmake --build build-jetson-cross -- -j$(nproc)
 For Jetson inference:
 
 ```bash
-cmake -B build-jetson-cross -S . -DCMAKE_TOOLCHAIN_FILE=cmake/toolchains/jetson-aarch64.cmake -DJON_ENABLE_JETSON_INFERENCE=ON -DJON_JETSON_INFERENCE_ROOT=/path/to/aarch64/prefix
+cmake -B build-jetson-cross -S . -DCMAKE_TOOLCHAIN_FILE=cmake/toolchains/jetson-aarch64.cmake -DJON_ENABLE_JETSON_INFERENCE=ON -DJON_ENABLE_TENSORRT_MASK=ON -DJON_JETSON_INFERENCE_ROOT=/path/to/aarch64/prefix
 ```
 
 ## 7. Runtime Validation

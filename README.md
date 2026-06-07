@@ -437,8 +437,10 @@ Important options:
 - `--width <pixels>` and `--height <pixels>` set processing size and requested camera size.
 - `--camera-format <MJPG|YUYV>` requests the camera pixel format.
 - `--camera-fps <fps>` requests the camera frame rate.
-- `--mask-backend <none|dummy|jetson>` selects mask generation.
+- `--mask-backend <none|dummy|jetson|tensorrt>` selects mask generation.
 - `--jetson-segmentation-model <model>` selects the `jetson-inference` segNet model for `--mask-backend jetson`.
+- `--mask-model <path>` selects an ONNX or TensorRT engine file for `--mask-backend tensorrt`.
+- `--mask-threshold <0.0..1.0>` sets the foreground threshold for single-channel TensorRT mask outputs.
 - `--mask-smoothing <0.0..1.0>` controls temporal mask smoothing.
 - `--mask-morphology <off|light|strong>` controls morphology cleanup for the mask.
 - `--background-overlay-color <R,G,B>` sets background overlay color.
@@ -481,6 +483,7 @@ Supported mask backends:
 - `none`: no mask.
 - `dummy`: moving-circle debug mask.
 - `jetson`: TensorRT/CUDA segmentation through `jetson-inference` `segNet`.
+- `tensorrt`: generic TensorRT/ONNX mask backend for future person segmentation or matting models.
 
 The debug visualization keeps the detected person unchanged and tints the background with the configured overlay color and alpha.
 
@@ -512,12 +515,20 @@ Use the MHP model with matching input size:
 
 If a selected model does not expose a single `person` class, JONImageProcessor treats all non-background segmentation classes as person. This is used for multi-human-parsing models that classify body parts instead of returning one generic person class.
 
+The generic TensorRT backend is prepared for denser person masks than `jetson-inference` segNet can provide. It loads either an ONNX model or a serialized TensorRT engine:
+
+```bash
+~/JONImageProcessor/JONImageProcessor --device /dev/video0 --capture-backend v4l2 --camera-format MJPG --camera-fps 30 --width 1280 --height 720 --mask-backend tensorrt --mask-model ~/JONImageProcessor/models/person-mask.onnx --segmentation-width 512 --segmentation-height 512 --mask-threshold 0.5
+```
+
+The first implementation expects FP32 input/output tensors and common segmentation output layouts: one foreground-probability channel, two foreground/background classes, or multi-class output where class `0` is background. The next quality step is selecting and validating a concrete ONNX model that produces a dense mask suitable for virtual-background use.
+
 ## Segmentation Quality TODO
 
 The current Jetson path is a first real-time debug mask, not final virtual-background quality. Open improvement options:
 
-- Test newer person segmentation or matting models exported through ONNX and TensorRT.
-- Add a dedicated TensorRT mask backend instead of relying only on `jetson-inference` segNet.
+- Select and validate a newer person segmentation or matting model exported through ONNX and TensorRT.
+- Add model-specific preprocessing and normalization presets when the selected model requires them.
 - Evaluate higher input resolutions such as 768x432 or 1024x576 if the selected model supports them.
 - Add edge-aware refinement so hair, hands, and arm boundaries are less blocky.
 - Add confidence-aware blending when the model output exposes usable probabilities.

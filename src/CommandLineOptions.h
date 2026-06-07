@@ -30,7 +30,8 @@ enum class CameraFormat {
 enum class MaskBackendType {
     None,
     Dummy,
-    Jetson
+    Jetson,
+    TensorRt
 };
 
 enum class MaskMorphologyMode {
@@ -62,6 +63,8 @@ struct ProcessorConfig {
     int segmentationWidth = 256;
     int segmentationHeight = 144;
     std::string jetsonSegmentationModel = "fcn-resnet18-voc-320x320";
+    std::string maskModelPath;
+    double maskThreshold = 0.5;
     double maskSmoothing = 0.65;
     MaskMorphologyMode maskMorphology = MaskMorphologyMode::Light;
     CameraFormat cameraFormat = CameraFormat::MJPG;

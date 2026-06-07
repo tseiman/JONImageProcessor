@@ -13,6 +13,7 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 find_package(OpenCV REQUIRED COMPONENTS core imgproc imgcodecs highgui videoio)
 
 option(JON_ENABLE_JETSON_INFERENCE "Enable jetson-inference/TensorRT segmentation backend" OFF)
+option(JON_ENABLE_TENSORRT_MASK "Enable generic TensorRT/ONNX mask backend" OFF)
 set(JON_JETSON_INFERENCE_ROOT "" CACHE PATH "Optional root/prefix containing jetson-inference and jetson-utils for cross builds")
 
 execute_process(
@@ -62,6 +63,7 @@ add_executable(JONImageProcessor
     src/MaskBackendFactory.cpp
     src/MaskBackends.cpp
     src/JetsonSegmentationMaskBackend.cpp
+    src/TensorRtMaskBackend.cpp
     src/OpenCvDisplayBackend.cpp
     src/OpenCvCaptureBackends.cpp
     src/V4L2CameraCaptureBackend.cpp
@@ -167,6 +169,43 @@ if (JON_ENABLE_JETSON_INFERENCE)
         ${JETSON_NVDLA_COMPILER_LIBRARY}
     )
     target_compile_definitions(JONImageProcessor PRIVATE JON_WITH_JETSON_INFERENCE=1)
+endif()
+
+if (JON_ENABLE_TENSORRT_MASK)
+    find_package(CUDAToolkit REQUIRED)
+
+    find_path(TENSORRT_INCLUDE_DIR
+        NAMES NvInfer.h NvOnnxParser.h
+        PATHS /usr /usr/local
+        PATH_SUFFIXES include include/aarch64-linux-gnu
+    )
+    find_library(TENSORRT_INFER_LIBRARY
+        NAMES nvinfer
+        PATHS /usr /usr/local
+        PATH_SUFFIXES lib lib64 lib/aarch64-linux-gnu
+    )
+    find_library(TENSORRT_ONNX_PARSER_LIBRARY
+        NAMES nvonnxparser
+        PATHS /usr /usr/local
+        PATH_SUFFIXES lib lib64 lib/aarch64-linux-gnu
+    )
+
+    if (NOT TENSORRT_INCLUDE_DIR OR NOT TENSORRT_INFER_LIBRARY OR NOT TENSORRT_ONNX_PARSER_LIBRARY)
+        message(FATAL_ERROR
+            "JON_ENABLE_TENSORRT_MASK=ON was requested, but TensorRT development files were not found.\n"
+            "Expected headers: NvInfer.h and NvOnnxParser.h\n"
+            "Expected libraries: libnvinfer and libnvonnxparser\n"
+            "Provide them from the Jetson sysroot or the NVIDIA cross-compile container."
+        )
+    endif()
+
+    target_include_directories(JONImageProcessor PRIVATE ${TENSORRT_INCLUDE_DIR})
+    target_link_libraries(JONImageProcessor PRIVATE
+        CUDA::cudart
+        ${TENSORRT_INFER_LIBRARY}
+        ${TENSORRT_ONNX_PARSER_LIBRARY}
+    )
+    target_compile_definitions(JONImageProcessor PRIVATE JON_WITH_TENSORRT_MASK=1)
 endif()
 
 target_compile_definitions(JONImageProcessor PRIVATE

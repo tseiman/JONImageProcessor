@@ -26,6 +26,8 @@ enum OptionId {
     OptionSegmentationWidth,
     OptionSegmentationHeight,
     OptionJetsonSegmentationModel,
+    OptionMaskModel,
+    OptionMaskThreshold,
     OptionMaskSmoothing,
     OptionMaskMorphology,
     OptionCameraFormat,
@@ -73,11 +75,13 @@ const std::vector<OptionDefinition>& optionDefinitions()
         {OptionSegmentationWidth, 0, "segmentation-width", required_argument, "pixels", "Segmentation inference width", "256"},
         {OptionSegmentationHeight, 0, "segmentation-height", required_argument, "pixels", "Segmentation inference height", "144"},
         {OptionJetsonSegmentationModel, 0, "jetson-segmentation-model", required_argument, "model", "jetson-inference segNet model", "fcn-resnet18-voc-320x320"},
+        {OptionMaskModel, 0, "mask-model", required_argument, "path", "TensorRT mask model path (.onnx or .engine)", ""},
+        {OptionMaskThreshold, 0, "mask-threshold", required_argument, "0.0..1.0", "TensorRT foreground threshold", "0.5"},
         {OptionMaskSmoothing, 0, "mask-smoothing", required_argument, "0.0..1.0", "Temporal mask smoothing strength", "0.65"},
         {OptionMaskMorphology, 0, "mask-morphology", required_argument, "mode", "Mask morphology: off, light, or strong", "light"},
         {OptionCameraFormat, 0, "camera-format", required_argument, "format", "Camera pixel format: MJPG or YUYV", "MJPG"},
         {OptionCameraFps, 0, "camera-fps", required_argument, "fps", "Requested camera frame rate", "30"},
-        {OptionMaskBackend, 0, "mask-backend", required_argument, "backend", "Mask backend: none, dummy, or jetson", "dummy"},
+        {OptionMaskBackend, 0, "mask-backend", required_argument, "backend", "Mask backend: none, dummy, jetson, or tensorrt", "dummy"},
         {OptionBackgroundOverlayColor, 0, "background-overlay-color", required_argument, "R,G,B", "Background overlay color", "0,0,255"},
         {OptionBackgroundOverlayAlpha, 0, "background-overlay-alpha", required_argument, "0.0..1.0", "Background overlay alpha", "0.35"},
         {OptionFullscreen, 0, "fullscreen", no_argument, "", "Show the window fullscreen when using window output", ""},
@@ -257,8 +261,12 @@ bool parseMaskBackend(const char* value, MaskBackendType& backend, std::string& 
         backend = MaskBackendType::Jetson;
         return true;
     }
+    if (parsed == "tensorrt") {
+        backend = MaskBackendType::TensorRt;
+        return true;
+    }
 
-    error = "Invalid mask backend: " + parsed + " (allowed: none, dummy, jetson)";
+    error = "Invalid mask backend: " + parsed + " (allowed: none, dummy, jetson, tensorrt)";
     return false;
 }
 
@@ -318,6 +326,19 @@ bool parseMaskSmoothing(const char* value, double& smoothing, std::string& error
     }
 
     smoothing = parsed;
+    return true;
+}
+
+bool parseMaskThreshold(const char* value, double& threshold, std::string& error)
+{
+    char* end = nullptr;
+    const double parsed = std::strtod(value, &end);
+    if (end == value || *end != '\0' || parsed < 0.0 || parsed > 1.0) {
+        error = "Invalid mask threshold: " + std::string(value);
+        return false;
+    }
+
+    threshold = parsed;
     return true;
 }
 
@@ -446,6 +467,18 @@ bool parseCommandLine(int argc, char** argv, CommandLineResult& result, std::str
                 return false;
             }
             break;
+        case OptionMaskModel:
+            result.config.maskModelPath = optarg;
+            if (result.config.maskModelPath.empty()) {
+                error = "--mask-model must not be empty.";
+                return false;
+            }
+            break;
+        case OptionMaskThreshold:
+            if (!parseMaskThreshold(optarg, result.config.maskThreshold, error)) {
+                return false;
+            }
+            break;
         case OptionMaskSmoothing:
             if (!parseMaskSmoothing(optarg, result.config.maskSmoothing, error)) {
                 return false;
@@ -560,6 +593,11 @@ bool parseCommandLine(int argc, char** argv, CommandLineResult& result, std::str
         return false;
     }
 
+    if (result.config.maskBackend == MaskBackendType::TensorRt && result.config.maskModelPath.empty()) {
+        error = "--mask-model is required when using --mask-backend tensorrt.";
+        return false;
+    }
+
     return true;
 }
 
@@ -652,6 +690,8 @@ std::string maskBackendToString(MaskBackendType backend)
         return "dummy";
     case MaskBackendType::Jetson:
         return "jetson";
+    case MaskBackendType::TensorRt:
+        return "tensorrt";
     }
 
     return "unknown";

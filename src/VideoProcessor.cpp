@@ -193,6 +193,8 @@ void logStartupInfo(const ProcessorConfig& config, const ScreenInfo& screenInfo)
     LOG_VERBOSE("Mask backend: " << maskBackendToString(config.maskBackend));
     LOG_VERBOSE("Segmentation size: " << config.segmentationWidth << "x" << config.segmentationHeight);
     LOG_VERBOSE("Jetson segmentation model: " << config.jetsonSegmentationModel);
+    LOG_VERBOSE("Mask model: " << (config.maskModelPath.empty() ? "none" : config.maskModelPath));
+    LOG_VERBOSE("Mask threshold: " << config.maskThreshold);
     LOG_VERBOSE("Mask smoothing: " << config.maskSmoothing);
     LOG_VERBOSE("Mask morphology: " << maskMorphologyModeToString(config.maskMorphology));
     LOG_VERBOSE("Background overlay color: "
