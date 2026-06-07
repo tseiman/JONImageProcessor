@@ -173,6 +173,35 @@ bool inferInputShape(const nvinfer1::Dims& dims, int& channels, int& height, int
     return false;
 }
 
+nvinfer1::Dims resolveDynamicInputDims(nvinfer1::Dims dims, int targetWidth, int targetHeight)
+{
+    for (int index = 0; index < dims.nbDims; ++index) {
+        if (dims.d[index] >= 0) {
+            continue;
+        }
+
+        if (index == 0 && dims.nbDims == 4) {
+            dims.d[index] = 1;
+        } else if (index == dims.nbDims - 2) {
+            dims.d[index] = targetHeight;
+        } else if (index == dims.nbDims - 1) {
+            dims.d[index] = targetWidth;
+        }
+    }
+
+    return dims;
+}
+
+bool hasDynamicDimension(const nvinfer1::Dims& dims)
+{
+    for (int index = 0; index < dims.nbDims; ++index) {
+        if (dims.d[index] < 0) {
+            return true;
+        }
+    }
+    return false;
+}
+
 bool convertOutputToMask(
     const std::vector<float>& output,
     const nvinfer1::Dims& dims,
@@ -327,6 +356,41 @@ bool TensorRtMaskBackend::initialize(const ProcessorConfig& config)
             LOG_ERROR("Failed to parse ONNX mask model: " << config.maskModelPath);
             return false;
         }
+        for (int inputIndex = 0; inputIndex < network->getNbInputs(); ++inputIndex) {
+            nvinfer1::ITensor* inputTensor = network->getInput(inputIndex);
+            if (inputTensor == nullptr) {
+                continue;
+            }
+
+            const nvinfer1::Dims modelDims = inputTensor->getDimensions();
+            if (!hasDynamicDimension(modelDims)) {
+                continue;
+            }
+
+            const nvinfer1::Dims fixedDims = resolveDynamicInputDims(
+                modelDims,
+                config.segmentationWidth,
+                config.segmentationHeight);
+            if (elementCount(fixedDims) == 0) {
+                LOG_ERROR("Cannot resolve dynamic TensorRT input dimensions for "
+                    << inputTensor->getName() << ": " << dimsToString(modelDims));
+                return false;
+            }
+
+            nvinfer1::IOptimizationProfile* profile = builder->createOptimizationProfile();
+            if (profile == nullptr
+                || !profile->setDimensions(inputTensor->getName(), nvinfer1::OptProfileSelector::kMIN, fixedDims)
+                || !profile->setDimensions(inputTensor->getName(), nvinfer1::OptProfileSelector::kOPT, fixedDims)
+                || !profile->setDimensions(inputTensor->getName(), nvinfer1::OptProfileSelector::kMAX, fixedDims)) {
+                LOG_ERROR("Failed to create TensorRT optimization profile for "
+                    << inputTensor->getName() << ": " << dimsToString(fixedDims));
+                return false;
+            }
+
+            builderConfig->addOptimizationProfile(profile);
+            LOG_INFO("TensorRT optimization profile: " << inputTensor->getName()
+                << "=" << dimsToString(fixedDims));
+        }
         builderConfig->setFlag(nvinfer1::BuilderFlag::kFP16);
         TrtUniquePtr<nvinfer1::IHostMemory> serializedEngine(builder->buildSerializedNetwork(*network, *builderConfig));
         if (!serializedEngine) {
@@ -369,18 +433,10 @@ bool TensorRtMaskBackend::initialize(const ProcessorConfig& config)
         return false;
     }
 
-    impl_->inputDims = impl_->engine->getTensorShape(impl_->inputName.c_str());
-    for (int index = 0; index < impl_->inputDims.nbDims; ++index) {
-        if (impl_->inputDims.d[index] < 0) {
-            if (index == 0) {
-                impl_->inputDims.d[index] = 1;
-            } else if (index == impl_->inputDims.nbDims - 2) {
-                impl_->inputDims.d[index] = config.segmentationHeight;
-            } else if (index == impl_->inputDims.nbDims - 1) {
-                impl_->inputDims.d[index] = config.segmentationWidth;
-            }
-        }
-    }
+    impl_->inputDims = resolveDynamicInputDims(
+        impl_->engine->getTensorShape(impl_->inputName.c_str()),
+        config.segmentationWidth,
+        config.segmentationHeight);
 
     if (!inferInputShape(impl_->inputDims, impl_->inputChannels, impl_->inputHeight, impl_->inputWidth)) {
         LOG_ERROR("Unsupported TensorRT mask input dimensions: " << dimsToString(impl_->inputDims));
