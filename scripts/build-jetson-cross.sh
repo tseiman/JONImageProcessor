@@ -101,6 +101,10 @@ if [[ "${ENABLE_JETSON_INFERENCE}" == "ON" ]]; then
     fi
 fi
 
+if command -v git >/dev/null 2>&1; then
+    git config --global --add safe.directory /workspace/JONImageProcessor
+fi
+
 rm -rf "${BUILD_DIR_NAME}/CMakeCache.txt" "${BUILD_DIR_NAME}/CMakeFiles"
 
 cmake \
