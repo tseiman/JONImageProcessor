@@ -11,6 +11,7 @@
 #include <cuda_runtime.h>
 #include <jetson-inference/segNet.h>
 #include <jetson-utils/imageFormat.h>
+#include <jetson-utils/logging.h>
 #endif
 
 struct JetsonSegmentationMaskBackend::Impl {
@@ -94,6 +95,8 @@ bool JetsonSegmentationMaskBackend::initialize(const ProcessorConfig& config)
     LOG_VERBOSE("Jetson segmentation network: fcn-resnet18-voc-320x320");
     LOG_VERBOSE("Jetson segmentation size: " << impl_->segmentationSize.width << "x" << impl_->segmentationSize.height);
 
+    Log::SetLevel(config.verbose ? Log::INFO : Log::WARNING);
+
     impl_->network = segNet::Create("fcn-resnet18-voc-320x320");
     if (impl_->network == nullptr) {
         LOG_ERROR("Failed to create jetson-inference segNet");
@@ -163,13 +166,10 @@ bool JetsonSegmentationMaskBackend::generate(
 
     const auto postprocessStartedAt = std::chrono::steady_clock::now();
     if (!impl_->network->Mask(
-            impl_->classMaskGpu,
+            impl_->classMaskCpu,
             static_cast<uint32_t>(impl_->segmentationSize.width),
             static_cast<uint32_t>(impl_->segmentationSize.height))) {
         LOG_ERROR("jetson-inference segNet Mask failed");
-        return false;
-    }
-    if (!cudaOk(cudaDeviceSynchronize(), "cudaDeviceSynchronize")) {
         return false;
     }
 
