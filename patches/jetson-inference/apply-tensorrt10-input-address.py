@@ -63,6 +63,19 @@ replace_once(
 )
 
 replace_once(
+    "#if NV_TENSORRT_MAJOR >= 10\n"
+    "        nvinfer1::Dims outputDims = engine->getTensorShape(output_blobs[n].c_str());\n"
+    "\t#elif NV_TENSORRT_MAJOR > 1",
+    "#if NV_TENSORRT_MAJOR >= 10\n"
+    "        nvinfer1::Dims outputDims = engine->getTensorShape(output_blobs[n].c_str());\n"
+    "\n"
+    "        if( mModelType == MODEL_ONNX )\n"
+    "            outputDims = shiftDims(outputDims);  // change NCHW to CHW if EXPLICIT_BATCH set\n"
+    "\t#elif NV_TENSORRT_MAJOR > 1",
+    required=False,
+)
+
+replace_once(
     "const size_t bindingSize = sizeDims(validateDims(engine->getTensorShape(output_blobs[n].c_str()))) * mMaxBatchSize * sizeof(float);",
     "const char* bindingName = engine->getIOTensorName(n);\n"
     "        const size_t bindingSize = sizeDims(validateDims(engine->getTensorShape(bindingName))) * mMaxBatchSize * sizeof(float);",
@@ -103,6 +116,7 @@ required_fragments = [
     "if( !context->setTensorAddress(output_blobs[n].c_str(), outputCUDA) )",
     "const char* bindingName = engine->getIOTensorName(n);",
     "if( !context->setTensorAddress(bindingName, mBindings[n]) )",
+    "outputDims = shiftDims(outputDims);",
 ]
 
 for fragment in required_fragments:
