@@ -180,6 +180,12 @@ Verify the output:
 file build-jetson-cross/JONImageProcessor
 ```
 
+If the source was committed after this cross-build and only the embedded 7-character Git version needs to be updated, patch the already built binary instead of rebuilding:
+
+```bash
+./scripts/patch-binary-git-version.sh build-jetson-cross/JONImageProcessor
+```
+
 Expected architecture:
 
 ```text
@@ -293,6 +299,12 @@ Verify the output:
 
 ```bash
 file build-jetson-cross/JONImageProcessor
+```
+
+If the source was committed after this cross-build and only the embedded 7-character Git version needs to be updated, patch the already built binary instead of rebuilding:
+
+```bash
+./scripts/patch-binary-git-version.sh build-jetson-cross/JONImageProcessor
 ```
 
 ## Install and Run on Jetson
