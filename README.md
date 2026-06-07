@@ -292,6 +292,14 @@ Verify that the model directories exist:
 test -f "$HOME/src/jetson-inference/data/networks/models.json" && test -f "$HOME/src/jetson-inference/data/networks/FCN-ResNet18-Pascal-VOC-320x320/fcn_resnet18.onnx" && test -f "$HOME/src/jetson-inference/data/networks/FCN-ResNet18-MHP-640x360/fcn_resnet18.onnx" && echo ok
 ```
 
+Copy the downloaded model manifest and model directories from the build host to the Jetson runtime directory:
+
+```bash
+rsync -aHAX "$HOME/src/jetson-inference/data/networks/" tseiman@jon:~/JONImageProcessor/networks/
+```
+
+Run this copy again whenever a new model was selected with `download-models.sh`. JONImageProcessor loads `networks/models.json` and the model files at runtime from `~/JONImageProcessor/networks/` on the Jetson.
+
 ### Cross-Build With Jetson Inference
 
 Build JONImageProcessor with the `jetson` mask backend enabled:
