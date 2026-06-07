@@ -81,6 +81,17 @@ std::vector<char> readBinaryFile(const std::string& path)
     return data;
 }
 
+bool writeBinaryFile(const std::string& path, const void* data, std::size_t bytes)
+{
+    std::ofstream file(path, std::ios::binary);
+    if (!file) {
+        return false;
+    }
+
+    file.write(static_cast<const char*>(data), static_cast<std::streamsize>(bytes));
+    return static_cast<bool>(file);
+}
+
 bool hasSuffix(const std::string& value, const std::string& suffix)
 {
     return value.size() >= suffix.size()
@@ -200,6 +211,15 @@ bool hasDynamicDimension(const nvinfer1::Dims& dims)
         }
     }
     return false;
+}
+
+std::string engineCachePath(const std::string& onnxPath, int width, int height)
+{
+    std::ostringstream stream;
+    stream << onnxPath << "."
+           << width << "x" << height
+           << ".fp16.engine";
+    return stream.str();
 }
 
 bool convertOutputToMask(
@@ -326,6 +346,7 @@ bool TensorRtMaskBackend::initialize(const ProcessorConfig& config)
     TrtUniquePtr<nvinfer1::INetworkDefinition> network;
     TrtUniquePtr<nvonnxparser::IParser> parser;
     TrtUniquePtr<nvinfer1::IBuilderConfig> builderConfig;
+    std::string generatedEngineCachePath;
 
     if (hasSuffix(config.maskModelPath, ".engine") || hasSuffix(config.maskModelPath, ".plan")) {
         const std::vector<char> engineData = readBinaryFile(config.maskModelPath);
@@ -340,6 +361,26 @@ bool TensorRtMaskBackend::initialize(const ProcessorConfig& config)
         }
         impl_->engine.reset(impl_->runtime->deserializeCudaEngine(engineData.data(), engineData.size()));
     } else if (hasSuffix(config.maskModelPath, ".onnx")) {
+        generatedEngineCachePath = engineCachePath(config.maskModelPath, config.segmentationWidth, config.segmentationHeight);
+        const std::vector<char> cachedEngineData = readBinaryFile(generatedEngineCachePath);
+        if (!cachedEngineData.empty()) {
+            LOG_INFO("Loading cached TensorRT engine: " << generatedEngineCachePath);
+            impl_->runtime.reset(nvinfer1::createInferRuntime(tensorRtLogger()));
+            if (!impl_->runtime) {
+                LOG_ERROR("Failed to create TensorRT runtime");
+                return false;
+            }
+            impl_->engine.reset(impl_->runtime->deserializeCudaEngine(cachedEngineData.data(), cachedEngineData.size()));
+            if (!impl_->engine) {
+                LOG_WARNING("Failed to deserialize cached TensorRT engine, rebuilding from ONNX");
+            }
+        }
+    }
+
+    if (!impl_->engine && hasSuffix(config.maskModelPath, ".onnx")) {
+        LOG_INFO("No reusable TensorRT engine cache found");
+        LOG_INFO("Building TensorRT engine from ONNX. This can take several minutes on the first run.");
+        LOG_INFO("Engine cache will be saved to: " << generatedEngineCachePath);
         builder.reset(nvinfer1::createInferBuilder(tensorRtLogger()));
         if (!builder) {
             LOG_ERROR("Failed to create TensorRT builder");
@@ -356,6 +397,7 @@ bool TensorRtMaskBackend::initialize(const ProcessorConfig& config)
             LOG_ERROR("Failed to parse ONNX mask model: " << config.maskModelPath);
             return false;
         }
+        LOG_INFO("TensorRT ONNX parse complete");
         for (int inputIndex = 0; inputIndex < network->getNbInputs(); ++inputIndex) {
             nvinfer1::ITensor* inputTensor = network->getInput(inputIndex);
             if (inputTensor == nullptr) {
@@ -392,10 +434,17 @@ bool TensorRtMaskBackend::initialize(const ProcessorConfig& config)
                 << "=" << dimsToString(fixedDims));
         }
         builderConfig->setFlag(nvinfer1::BuilderFlag::kFP16);
+        LOG_INFO("TensorRT engine build started");
         TrtUniquePtr<nvinfer1::IHostMemory> serializedEngine(builder->buildSerializedNetwork(*network, *builderConfig));
         if (!serializedEngine) {
             LOG_ERROR("Failed to build serialized TensorRT engine from ONNX model");
             return false;
+        }
+        LOG_INFO("TensorRT engine build complete");
+        if (writeBinaryFile(generatedEngineCachePath, serializedEngine->data(), serializedEngine->size())) {
+            LOG_INFO("Saved TensorRT engine cache: " << generatedEngineCachePath);
+        } else {
+            LOG_WARNING("Failed to save TensorRT engine cache: " << generatedEngineCachePath);
         }
         impl_->runtime.reset(nvinfer1::createInferRuntime(tensorRtLogger()));
         if (!impl_->runtime) {
@@ -403,7 +452,7 @@ bool TensorRtMaskBackend::initialize(const ProcessorConfig& config)
             return false;
         }
         impl_->engine.reset(impl_->runtime->deserializeCudaEngine(serializedEngine->data(), serializedEngine->size()));
-    } else {
+    } else if (!impl_->engine) {
         LOG_ERROR("Unsupported TensorRT mask model extension: " << config.maskModelPath);
         return false;
     }

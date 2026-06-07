@@ -15,6 +15,7 @@ find_package(OpenCV REQUIRED COMPONENTS core imgproc imgcodecs highgui videoio)
 option(JON_ENABLE_JETSON_INFERENCE "Enable jetson-inference/TensorRT segmentation backend" OFF)
 option(JON_ENABLE_TENSORRT_MASK "Enable generic TensorRT/ONNX mask backend" OFF)
 set(JON_JETSON_INFERENCE_ROOT "" CACHE PATH "Optional root/prefix containing jetson-inference and jetson-utils for cross builds")
+set(JON_IMAGE_PROCESSOR_BUILD_HOST_OVERRIDE "" CACHE STRING "Optional build host name override, useful for containerized cross builds")
 
 execute_process(
     COMMAND git rev-parse --short=7 HEAD
@@ -41,7 +42,11 @@ if (JON_IMAGE_PROCESSOR_RELEASE_TAG MATCHES "^v?[0-9]+\\.[0-9]+\\.[0-9]+([-+][A-
     string(REGEX REPLACE "^v" "" JON_IMAGE_PROCESSOR_RELEASE_VERSION "${JON_IMAGE_PROCESSOR_RELEASE_TAG}")
 endif()
 
-cmake_host_system_information(RESULT JON_IMAGE_PROCESSOR_BUILD_HOST QUERY HOSTNAME)
+if (JON_IMAGE_PROCESSOR_BUILD_HOST_OVERRIDE)
+    set(JON_IMAGE_PROCESSOR_BUILD_HOST "${JON_IMAGE_PROCESSOR_BUILD_HOST_OVERRIDE}")
+else()
+    cmake_host_system_information(RESULT JON_IMAGE_PROCESSOR_BUILD_HOST QUERY HOSTNAME)
+endif()
 if (NOT JON_IMAGE_PROCESSOR_BUILD_HOST)
     set(JON_IMAGE_PROCESSOR_BUILD_HOST "unknown")
 endif()
