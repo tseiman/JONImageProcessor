@@ -554,6 +554,8 @@ sudo usermod -aG video,render "$USER"
 
 Log out and back in after changing group membership.
 
+The DRM backend must also be the DRM master for the display. If a desktop compositor or display manager already owns HDMI/DisplayPort, startup can fail with `drmModeSetCrtc failed: Permission denied`. For production, start JONImageProcessor before the desktop session or stop the display manager for the appliance profile.
+
 ## Display Modes
 
 Default: `fit`.

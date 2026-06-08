@@ -59,6 +59,13 @@ std::string drmError(const std::string& action)
     return action + ": " + std::strerror(errno);
 }
 
+void logDrmMasterHint()
+{
+    if (errno == EACCES || errno == EPERM) {
+        LOG_ERROR("DRM/KMS permission denied. The display may be owned by a desktop compositor/display manager; stop it or run JONImageProcessor as the boot-time display owner.");
+    }
+}
+
 bool hasStdinQuitRequest()
 {
     pollfd descriptor {};
@@ -691,6 +698,7 @@ bool DrmKmsDisplayBackend::present()
     if (currentFrameBuffer_.fbId == 0) {
         if (drmModeSetCrtc(drmFd_, crtcId_, nextFrameBuffer.fbId, 0, 0, &connectorId_, 1, &mode_) != 0) {
             LOG_ERROR(drmError("drmModeSetCrtc failed"));
+            logDrmMasterHint();
             destroyFrameBuffer(nextFrameBuffer);
             return false;
         }
@@ -698,6 +706,7 @@ bool DrmKmsDisplayBackend::present()
         bool waitingForFlip = true;
         if (drmModePageFlip(drmFd_, crtcId_, nextFrameBuffer.fbId, DRM_MODE_PAGE_FLIP_EVENT, &waitingForFlip) != 0) {
             LOG_ERROR(drmError("drmModePageFlip failed"));
+            logDrmMasterHint();
             destroyFrameBuffer(nextFrameBuffer);
             return false;
         }
@@ -728,6 +737,7 @@ bool DrmKmsDisplayBackend::presentDumbBuffer(DumbBuffer& nextBuffer)
     if (currentDumbBufferIndex_ < 0) {
         if (drmModeSetCrtc(drmFd_, crtcId_, nextBuffer.fbId, 0, 0, &connectorId_, 1, &mode_) != 0) {
             LOG_ERROR(drmError("drmModeSetCrtc failed"));
+            logDrmMasterHint();
             return false;
         }
         return true;
@@ -736,6 +746,7 @@ bool DrmKmsDisplayBackend::presentDumbBuffer(DumbBuffer& nextBuffer)
     bool waitingForFlip = true;
     if (drmModePageFlip(drmFd_, crtcId_, nextBuffer.fbId, DRM_MODE_PAGE_FLIP_EVENT, &waitingForFlip) != 0) {
         LOG_ERROR(drmError("drmModePageFlip failed"));
+        logDrmMasterHint();
         return false;
     }
 
