@@ -345,12 +345,34 @@ bool DrmKmsDisplayBackend::initializeEgl()
         return false;
     }
 
-    gbmSurface_ = gbm_surface_create(
-        gbmDevice_,
-        mode_.hdisplay,
-        mode_.vdisplay,
+    const std::vector<uint32_t> formats = {
         GBM_FORMAT_XRGB8888,
-        GBM_BO_USE_SCANOUT | GBM_BO_USE_RENDERING);
+        GBM_FORMAT_ARGB8888
+    };
+    const std::vector<uint32_t> usageFlags = {
+        GBM_BO_USE_SCANOUT | GBM_BO_USE_RENDERING,
+        GBM_BO_USE_RENDERING | GBM_BO_USE_LINEAR,
+        GBM_BO_USE_SCANOUT,
+        GBM_BO_USE_RENDERING
+    };
+
+    for (const uint32_t format : formats) {
+        for (const uint32_t usage : usageFlags) {
+            gbmSurface_ = gbm_surface_create(
+                gbmDevice_,
+                mode_.hdisplay,
+                mode_.vdisplay,
+                format,
+                usage);
+            if (gbmSurface_) {
+                LOG_VERBOSE("DRM/KMS GBM surface created: format=0x" << std::hex << format << std::dec << " usage=0x" << std::hex << usage << std::dec);
+                break;
+            }
+        }
+        if (gbmSurface_) {
+            break;
+        }
+    }
     if (!gbmSurface_) {
         LOG_ERROR("gbm_surface_create failed");
         return false;
