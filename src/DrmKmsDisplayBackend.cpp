@@ -157,6 +157,82 @@ cv::Rect2d fitDestinationRect(cv::Size sourceSize, cv::Size canvasSize)
         height);
 }
 
+cv::Rect calculateTargetRect(cv::Size sourceSize, cv::Size targetSize, DisplayMode mode)
+{
+    if (mode == DisplayMode::Stretch) {
+        return cv::Rect(0, 0, targetSize.width, targetSize.height);
+    }
+
+    const double sourceAspect = static_cast<double>(sourceSize.width) / sourceSize.height;
+    const double targetAspect = static_cast<double>(targetSize.width) / targetSize.height;
+    const bool fitByWidth = mode == DisplayMode::Fit ? sourceAspect > targetAspect : sourceAspect < targetAspect;
+
+    int width = targetSize.width;
+    int height = targetSize.height;
+    if (fitByWidth) {
+        height = std::max(1, static_cast<int>(std::round(targetSize.width / sourceAspect)));
+    } else {
+        width = std::max(1, static_cast<int>(std::round(targetSize.height * sourceAspect)));
+    }
+
+    const int x = (targetSize.width - width) / 2;
+    const int y = (targetSize.height - height) / 2;
+    return cv::Rect(x, y, width, height);
+}
+
+cv::Rect calculateFillSourceRect(cv::Size sourceSize, cv::Size targetSize)
+{
+    const double sourceAspect = static_cast<double>(sourceSize.width) / sourceSize.height;
+    const double targetAspect = static_cast<double>(targetSize.width) / targetSize.height;
+
+    if (sourceAspect > targetAspect) {
+        const int width = std::max(1, static_cast<int>(std::round(sourceSize.height * targetAspect)));
+        const int x = std::max(0, (sourceSize.width - width) / 2);
+        return cv::Rect(x, 0, std::min(width, sourceSize.width - x), sourceSize.height);
+    }
+
+    const int height = std::max(1, static_cast<int>(std::round(sourceSize.width / targetAspect)));
+    const int y = std::max(0, (sourceSize.height - height) / 2);
+    return cv::Rect(0, y, sourceSize.width, std::min(height, sourceSize.height - y));
+}
+
+void clearDumbBufferBars(cv::Mat& canvas, const cv::Rect& destinationRect)
+{
+    if (destinationRect.x > 0) {
+        canvas(cv::Rect(0, 0, destinationRect.x, canvas.rows)).setTo(cv::Scalar(0, 0, 0, 0));
+    }
+    const int rightWidth = canvas.cols - (destinationRect.x + destinationRect.width);
+    if (rightWidth > 0) {
+        canvas(cv::Rect(destinationRect.x + destinationRect.width, 0, rightWidth, canvas.rows)).setTo(cv::Scalar(0, 0, 0, 0));
+    }
+    if (destinationRect.y > 0) {
+        canvas(cv::Rect(destinationRect.x, 0, destinationRect.width, destinationRect.y)).setTo(cv::Scalar(0, 0, 0, 0));
+    }
+    const int bottomHeight = canvas.rows - (destinationRect.y + destinationRect.height);
+    if (bottomHeight > 0) {
+        canvas(cv::Rect(destinationRect.x, destinationRect.y + destinationRect.height, destinationRect.width, bottomHeight)).setTo(cv::Scalar(0, 0, 0, 0));
+    }
+}
+
+void convertToBgra(const cv::Mat& source, cv::Mat& destination)
+{
+    if (source.type() == CV_8UC3) {
+        cv::cvtColor(source, destination, cv::COLOR_BGR2BGRA);
+    } else if (source.type() == CV_8UC4) {
+        source.copyTo(destination);
+    } else if (source.type() == CV_8UC1) {
+        cv::cvtColor(source, destination, cv::COLOR_GRAY2BGRA);
+    } else {
+        cv::Mat converted;
+        source.convertTo(converted, CV_8U);
+        if (converted.channels() == 1) {
+            cv::cvtColor(converted, destination, cv::COLOR_GRAY2BGRA);
+        } else {
+            cv::cvtColor(converted, destination, cv::COLOR_BGR2BGRA);
+        }
+    }
+}
+
 void calculateRenderGeometry(
     cv::Size sourceSize,
     cv::Size canvasSize,
@@ -645,25 +721,30 @@ bool DrmKmsDisplayBackend::renderDumbBuffer(const cv::Mat& frame)
 
     DumbBuffer& targetBuffer = dumbBuffers_[nextDumbBufferIndex_];
     const cv::Size canvasSize(mode_.hdisplay, mode_.vdisplay);
-    const DisplayRenderResult displayResult = renderForDisplay(frame, canvasSize, config_.displayMode);
+    cv::Mat canvas(canvasSize.height, canvasSize.width, CV_8UC4, targetBuffer.map, targetBuffer.pitch);
 
-    cv::Mat bgrFrame;
-    if (displayResult.frame.type() == CV_8UC3) {
-        bgrFrame = displayResult.frame.isContinuous() ? displayResult.frame : displayResult.frame.clone();
-    } else {
-        cv::cvtColor(displayResult.frame, bgrFrame, cv::COLOR_GRAY2BGR);
+    const cv::Rect fullCanvas(0, 0, canvasSize.width, canvasSize.height);
+    cv::Rect destinationRect = calculateTargetRect(frame.size(), canvasSize, config_.displayMode);
+    cv::Rect sourceRect(0, 0, frame.cols, frame.rows);
+
+    if (config_.displayMode == DisplayMode::Fill) {
+        destinationRect = fullCanvas;
+        sourceRect = calculateFillSourceRect(frame.size(), canvasSize);
     }
 
-    auto* destinationBase = static_cast<unsigned char*>(targetBuffer.map);
-    for (int y = 0; y < bgrFrame.rows; ++y) {
-        const auto* source = bgrFrame.ptr<cv::Vec3b>(y);
-        auto* destination = destinationBase + static_cast<std::size_t>(y) * targetBuffer.pitch;
-        for (int x = 0; x < bgrFrame.cols; ++x) {
-            destination[x * 4 + 0] = source[x][0];
-            destination[x * 4 + 1] = source[x][1];
-            destination[x * 4 + 2] = source[x][2];
-            destination[x * 4 + 3] = 0;
+    const cv::Rect visibleDestination = destinationRect & fullCanvas;
+    if (visibleDestination.empty()) {
+        canvas.setTo(cv::Scalar(0, 0, 0, 0));
+    } else {
+        if (config_.displayMode == DisplayMode::Fit) {
+            clearDumbBufferBars(canvas, visibleDestination);
         }
+
+        cv::Mat sourceView = frame(sourceRect);
+        cv::Mat resized;
+        cv::resize(sourceView, resized, visibleDestination.size(), 0.0, 0.0, cv::INTER_LINEAR);
+        cv::Mat destinationView = canvas(visibleDestination);
+        convertToBgra(resized, destinationView);
     }
 
     if (!presentDumbBuffer(targetBuffer)) {
