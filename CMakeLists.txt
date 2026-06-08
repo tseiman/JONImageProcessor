@@ -14,6 +14,7 @@ find_package(OpenCV REQUIRED COMPONENTS core imgproc imgcodecs highgui videoio)
 
 option(JON_ENABLE_JETSON_INFERENCE "Enable jetson-inference/TensorRT segmentation backend" OFF)
 option(JON_ENABLE_TENSORRT_MASK "Enable generic TensorRT/ONNX mask backend" OFF)
+option(JON_ENABLE_DRM_DISPLAY "Enable Linux DRM/KMS display backend" OFF)
 set(JON_JETSON_INFERENCE_ROOT "" CACHE PATH "Optional root/prefix containing jetson-inference and jetson-utils for cross builds")
 set(JON_IMAGE_PROCESSOR_BUILD_HOST_OVERRIDE "" CACHE STRING "Optional build host name override, useful for containerized cross builds")
 
@@ -63,6 +64,7 @@ add_executable(JONImageProcessor
     src/DisplayBackendFactory.cpp
     src/DisplayEnvironment.cpp
     src/DisplayRenderer.cpp
+    src/DrmKmsDisplayBackend.cpp
     src/Logger.cpp
     src/LowLatencyFrameCapture.cpp
     src/MaskBackendFactory.cpp
@@ -211,6 +213,61 @@ if (JON_ENABLE_TENSORRT_MASK)
         ${TENSORRT_ONNX_PARSER_LIBRARY}
     )
     target_compile_definitions(JONImageProcessor PRIVATE JON_WITH_TENSORRT_MASK=1)
+endif()
+
+if (JON_ENABLE_DRM_DISPLAY)
+    find_path(DRM_MODE_INCLUDE_DIR
+        NAMES xf86drmMode.h
+        PATH_SUFFIXES include include/libdrm
+    )
+    find_path(DRM_CORE_INCLUDE_DIR
+        NAMES drm.h
+        PATH_SUFFIXES include/libdrm include/drm include
+    )
+    find_path(GBM_INCLUDE_DIR
+        NAMES gbm.h
+        PATH_SUFFIXES include
+    )
+    find_path(EGL_INCLUDE_DIR
+        NAMES EGL/egl.h
+        PATH_SUFFIXES include
+    )
+    find_path(GLES2_INCLUDE_DIR
+        NAMES GLES2/gl2.h
+        PATH_SUFFIXES include
+    )
+    set(JON_DRM_LIBRARY_SEARCH_PATHS
+        /usr/lib/aarch64-linux-gnu
+        /lib/aarch64-linux-gnu
+        /usr/lib
+        /lib
+    )
+    find_library(DRM_LIBRARY NAMES drm PATHS ${JON_DRM_LIBRARY_SEARCH_PATHS})
+    find_library(GBM_LIBRARY NAMES gbm PATHS ${JON_DRM_LIBRARY_SEARCH_PATHS})
+    find_library(EGL_LIBRARY NAMES EGL PATHS ${JON_DRM_LIBRARY_SEARCH_PATHS})
+    find_library(GLES2_LIBRARY NAMES GLESv2 PATHS ${JON_DRM_LIBRARY_SEARCH_PATHS})
+
+    if (NOT DRM_MODE_INCLUDE_DIR OR NOT DRM_CORE_INCLUDE_DIR OR NOT GBM_INCLUDE_DIR OR NOT EGL_INCLUDE_DIR OR NOT GLES2_INCLUDE_DIR
+        OR NOT DRM_LIBRARY OR NOT GBM_LIBRARY OR NOT EGL_LIBRARY OR NOT GLES2_LIBRARY)
+        message(FATAL_ERROR
+            "JON_ENABLE_DRM_DISPLAY=ON, but DRM/KMS dependencies were not found. "
+            "Required: libdrm headers/library, gbm, EGL, GLESv2.")
+    endif()
+
+    target_compile_definitions(JONImageProcessor PRIVATE JON_ENABLE_DRM_DISPLAY=1)
+    target_include_directories(JONImageProcessor PRIVATE
+        ${DRM_MODE_INCLUDE_DIR}
+        ${DRM_CORE_INCLUDE_DIR}
+        ${GBM_INCLUDE_DIR}
+        ${EGL_INCLUDE_DIR}
+        ${GLES2_INCLUDE_DIR}
+    )
+    target_link_libraries(JONImageProcessor PRIVATE
+        ${DRM_LIBRARY}
+        ${GBM_LIBRARY}
+        ${EGL_LIBRARY}
+        ${GLES2_LIBRARY}
+    )
 endif()
 
 target_compile_definitions(JONImageProcessor PRIVATE

@@ -1,6 +1,6 @@
 # JONImageProcessor
 
-JONImageProcessor is a C++17 image-processing base application for NVIDIA Jetson Orin Nano. It reads video from a file or camera, processes the image, renders a debug mask/overlay, and displays the result through an OpenCV HighGUI window or writes it to MP4.
+JONImageProcessor is a C++17 image-processing application for NVIDIA Jetson Orin Nano. It reads video from a camera, creates a TensorRT-based person mask, renders a background overlay, and displays the result fullscreen. OpenCV HighGUI remains available for development; the production display path is moving to Linux DRM/KMS through GBM/EGL/GLES.
 
 The intended deployment is a Jetson appliance: the Jetson boots, the application starts automatically later through systemd, reads the camera, and renders fullscreen to HDMI or DisplayPort. This repository currently focuses on the application binary and reproducible cross-builds.
 
@@ -26,6 +26,7 @@ The intended deployment is a Jetson appliance: the Jetson boots, the application
 - [Capture Backends](#capture-backends)
 - [Mask Backends](#mask-backends)
 - [Segmentation Quality TODO](#segmentation-quality-todo)
+- [Display Backends](#display-backends)
 - [Display Modes](#display-modes)
 - [Verbose Logging](#verbose-logging)
 - [Performance Analysis](#performance-analysis)
@@ -98,7 +99,7 @@ Log out and back in after changing group membership.
 Install the target packages on the Jetson before syncing the sysroot:
 
 ```bash
-sudo apt update && sudo apt install -y rsync openssh-server v4l-utils libopencv-dev libglew-dev libglu1-mesa-dev libgstrtspserver-1.0-dev libjson-glib-dev libsoup2.4-dev
+sudo apt update && sudo apt install -y rsync openssh-server v4l-utils libopencv-dev libdrm-dev libgbm-dev libegl1-mesa-dev libgles2-mesa-dev libglew-dev libglu1-mesa-dev libgstrtspserver-1.0-dev libjson-glib-dev libsoup2.4-dev
 ```
 
 JetPack provides CUDA and TensorRT. The package list above adds the development files that were needed for this cross-build path and for the `jetson-inference` prefix.
@@ -303,11 +304,13 @@ Run this copy again whenever a new model was selected with `download-models.sh`.
 
 ### Cross-Build With Jetson Inference
 
-Build JONImageProcessor with the `jetson` mask backend enabled:
+Build JONImageProcessor with the TensorRT mask backend and DRM/KMS display backend enabled:
 
 ```bash
-ENABLE_JETSON_INFERENCE=ON JETSON_SYSROOT="$HOME/sysroots/orin-nano" JETSON_INFERENCE_ROOT="$HOME/aarch64-prefixes/jetson-inference" ./scripts/build-jetson-cross.sh
+ENABLE_JETSON_INFERENCE=ON ENABLE_DRM_DISPLAY=ON JETSON_SYSROOT="$HOME/sysroots/orin-nano" JETSON_INFERENCE_ROOT="$HOME/aarch64-prefixes/jetson-inference" ./scripts/build-jetson-cross.sh
 ```
+
+`ENABLE_DRM_DISPLAY` defaults to `ON` in the cross-build script. Set `ENABLE_DRM_DISPLAY=OFF` only for development builds that should not link against DRM/GBM/EGL/GLES.
 
 Verify the output:
 
@@ -383,18 +386,18 @@ Run with the dummy mask backend:
 ~/JONImageProcessor/JONImageProcessor --device /dev/video0 --capture-backend v4l2 --camera-format MJPG --camera-fps 30 --width 1280 --height 720 --mask-backend dummy --display-mode fit --fullscreen --benchmark
 ```
 
-Run with Jetson/TensorRT segmentation:
+Run the current production-oriented TensorRT matting path with the DRM/KMS display backend:
 
 ```bash
-cd ~/JONImageProcessor && LD_LIBRARY_PATH="$HOME/JONImageProcessor/jetson-inference/lib:$LD_LIBRARY_PATH" ./JONImageProcessor --device /dev/video0 --capture-backend v4l2 --camera-format MJPG --camera-fps 30 --width 1280 --height 720 --mask-backend jetson --jetson-segmentation-model fcn-resnet18-mhp-640x360 --segmentation-width 640 --segmentation-height 360 --background-overlay-color 0,0,255 --background-overlay-alpha 0.35 --display-mode fit --fullscreen --benchmark
+cd ~/JONImageProcessor && LD_LIBRARY_PATH="$HOME/JONImageProcessor/jetson-inference/lib:$LD_LIBRARY_PATH" ./JONImageProcessor --device /dev/video0 --capture-backend v4l2 --camera-format MJPG --camera-fps 30 --width 1280 --height 720 --mask-backend tensorrt --mask-model "$HOME/JONImageProcessor/models/modnet_photographic_portrait_matting.onnx" --segmentation-width 384 --segmentation-height 384 --mask-threshold 0.5 --mask-smoothing 0.65 --mask-morphology light --background-overlay-color 0,0,255 --background-overlay-alpha 0.35 --display-backend drm --display-mode fit --fullscreen --benchmark
 ```
 
-The first Jetson segmentation run can take longer because TensorRT may build or load an optimized engine.
+The first TensorRT run for a new model/input size can take longer because TensorRT builds an optimized engine. Later starts load the cached `.engine` file next to the ONNX model.
 
-Run the fast baseline model:
+Run the same path through OpenCV HighGUI for development/debug comparison:
 
 ```bash
-cd ~/JONImageProcessor && LD_LIBRARY_PATH="$HOME/JONImageProcessor/jetson-inference/lib:$LD_LIBRARY_PATH" ./JONImageProcessor --device /dev/video0 --capture-backend v4l2 --camera-format MJPG --camera-fps 30 --width 1280 --height 720 --mask-backend jetson --jetson-segmentation-model fcn-resnet18-voc-320x320 --segmentation-width 320 --segmentation-height 320 --background-overlay-color 0,0,255 --background-overlay-alpha 0.35 --display-mode fit --fullscreen --benchmark
+cd ~/JONImageProcessor && LD_LIBRARY_PATH="$HOME/JONImageProcessor/jetson-inference/lib:$LD_LIBRARY_PATH" ./JONImageProcessor --device /dev/video0 --capture-backend v4l2 --camera-format MJPG --camera-fps 30 --width 1280 --height 720 --mask-backend tensorrt --mask-model "$HOME/JONImageProcessor/models/modnet_photographic_portrait_matting.onnx" --segmentation-width 384 --segmentation-height 384 --mask-threshold 0.5 --mask-smoothing 0.65 --mask-morphology light --background-overlay-color 0,0,255 --background-overlay-alpha 0.35 --display-backend highgui --display-mode fit --fullscreen --benchmark
 ```
 
 ## Useful Runtime Commands
@@ -448,7 +451,7 @@ Important options:
 - `--display-mode <fit|fill|stretch>` controls scaling into the window/fullscreen canvas.
 - `--fullscreen` requests fullscreen window output.
 - `--output-width <pixels>` and `--output-height <pixels>` explicitly define the render canvas.
-- `--display-backend highgui` selects the current OpenCV display backend.
+- `--display-backend <highgui|drm>` selects the display backend.
 - `--benchmark` enables timing output.
 - `--max-frames <n>` exits after n processed frames.
 - `--no-display`, `--no-mask`, and `--no-overlay` disable pipeline stages for diagnostics.
@@ -534,6 +537,23 @@ The current Jetson path is a first real-time debug mask, not final virtual-backg
 - Add confidence-aware blending when the model output exposes usable probabilities.
 - Compare quality and FPS on macOS development, Linux VM, and Jetson Orin Nano with the same benchmark commands.
 
+## Display Backends
+
+Supported display backends:
+
+- `highgui`: OpenCV HighGUI window output for development and debugging.
+- `drm`: Linux DRM/KMS output through GBM/EGL/GLES, intended for Jetson appliance operation on a directly attached HDMI/DisplayPort display.
+
+Use `highgui` when working from a desktop session or comparing behavior with earlier builds. Use `drm` for the production path where JONImageProcessor should own the display directly after boot. The DRM backend uses the active connector mode and does not change the monitor resolution.
+
+For systemd production use, the runtime user must have access to `/dev/dri/card*` and `/dev/dri/renderD*`. On Jetson this usually means membership in the `video` and `render` groups:
+
+```bash
+sudo usermod -aG video,render "$USER"
+```
+
+Log out and back in after changing group membership.
+
 ## Display Modes
 
 Default: `fit`.
@@ -542,7 +562,7 @@ Default: `fit`.
 - `fill`: preserve aspect ratio, fill the whole canvas, center it, and crop overflow.
 - `stretch`: ignore aspect ratio and scale exactly to the canvas.
 
-Use `--output-width` and `--output-height` when OpenCV HighGUI reports unreliable fullscreen dimensions.
+With `--display-backend drm`, the canvas is the active DRM/KMS display mode. With `--display-backend highgui`, use `--output-width` and `--output-height` when OpenCV HighGUI reports unreliable fullscreen dimensions.
 
 ## Verbose Logging
 

@@ -14,7 +14,8 @@ enum class DisplayMode {
 };
 
 enum class DisplayBackendType {
-    HighGui
+    HighGui,
+    Drm
 };
 
 enum class CaptureBackendType {

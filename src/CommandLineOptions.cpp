@@ -86,7 +86,7 @@ const std::vector<OptionDefinition>& optionDefinitions()
         {OptionBackgroundOverlayAlpha, 0, "background-overlay-alpha", required_argument, "0.0..1.0", "Background overlay alpha", "0.35"},
         {OptionFullscreen, 0, "fullscreen", no_argument, "", "Show the window fullscreen when using window output", ""},
         {OptionDisplayMode, 0, "display-mode", required_argument, "mode", "Display mode: fit, fill, or stretch", "fit"},
-        {OptionDisplayBackend, 0, "display-backend", required_argument, "backend", "Display backend: highgui", "highgui"},
+        {OptionDisplayBackend, 0, "display-backend", required_argument, "backend", "Display backend: highgui or drm", "highgui"},
         {OptionCaptureBackend, 0, "capture-backend", required_argument, "backend", "Capture backend for camera input: opencv or v4l2", "opencv"},
         {OptionBenchmark, 0, "benchmark", no_argument, "", "Enable benchmark mode", ""},
         {OptionLowLatency, 0, "low-latency", no_argument, "", "Enable low-latency live camera capture", ""},
@@ -195,8 +195,12 @@ bool parseDisplayBackend(const char* value, DisplayBackendType& backend, std::st
         backend = DisplayBackendType::HighGui;
         return true;
     }
+    if (parsed == "drm") {
+        backend = DisplayBackendType::Drm;
+        return true;
+    }
 
-    error = "Invalid display backend: " + parsed + " (allowed: highgui)";
+    error = "Invalid display backend: " + parsed + " (allowed: highgui, drm)";
     return false;
 }
 
@@ -652,6 +656,8 @@ std::string displayBackendToString(DisplayBackendType backend)
     switch (backend) {
     case DisplayBackendType::HighGui:
         return "highgui";
+    case DisplayBackendType::Drm:
+        return "drm";
     }
 
     return "unknown";
