@@ -8,6 +8,7 @@
 #include "Logger.h"
 #include "LowLatencyFrameCapture.h"
 #include "MaskBackendFactory.h"
+#include "ShutdownSignal.h"
 #include "Version.h"
 
 #include <opencv2/core.hpp>
@@ -393,7 +394,13 @@ int VideoProcessor::run()
     std::size_t intervalFrames = 0;
     cv::Mat previousOutputMask;
 
+    bool stoppedBySignal = false;
     while (true) {
+        if (shutdownRequested()) {
+            stoppedBySignal = true;
+            break;
+        }
+
         const auto pipelineStartedAt = std::chrono::steady_clock::now();
         bool readOk = false;
         if (lowLatencyMode) {
@@ -414,6 +421,9 @@ int VideoProcessor::run()
         }
 
         if (!readOk) {
+            if (shutdownRequested()) {
+                stoppedBySignal = true;
+            }
             break;
         }
 
@@ -510,6 +520,10 @@ int VideoProcessor::run()
         }
     }
 
+    if (shutdownRequested()) {
+        stoppedBySignal = true;
+    }
+
     if (lowLatencyMode) {
         lowLatencyCapture.stop();
         const auto stats = lowLatencyCapture.stats();
@@ -520,7 +534,11 @@ int VideoProcessor::run()
         benchmark.setCaptureStats(stats.capturedFrames, droppedFrames, stats.elapsed);
     }
 
-    if (frameIndex == 0) {
+    if (stoppedBySignal) {
+        LOG_INFO("Shutdown requested, stopping JONImageProcessor");
+    }
+
+    if (frameIndex == 0 && !stoppedBySignal) {
         LOG_ERROR("No frames could be read");
         return ExitRuntimeError;
     }

@@ -1,5 +1,6 @@
 #include "CommandLineOptions.h"
 #include "Logger.h"
+#include "ShutdownSignal.h"
 #include "Version.h"
 #include "VideoProcessor.h"
 
@@ -14,6 +15,8 @@ constexpr int ExitUsageError = 1;
 
 int main(int argc, char** argv)
 {
+    installShutdownSignalHandlers();
+
     CommandLineResult commandLine;
     std::string error;
 

@@ -69,6 +69,7 @@ add_executable(JONImageProcessor
     src/LowLatencyFrameCapture.cpp
     src/MaskBackendFactory.cpp
     src/MaskBackends.cpp
+    src/ShutdownSignal.cpp
     src/JetsonSegmentationMaskBackend.cpp
     src/TensorRtMaskBackend.cpp
     src/OpenCvDisplayBackend.cpp

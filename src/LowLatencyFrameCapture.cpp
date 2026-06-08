@@ -1,6 +1,7 @@
 #include "LowLatencyFrameCapture.h"
 
 #include "Logger.h"
+#include "ShutdownSignal.h"
 
 LowLatencyFrameCapture::~LowLatencyFrameCapture()
 {
@@ -55,9 +56,9 @@ bool LowLatencyFrameCapture::waitForLatestFrame(
 {
     const auto waitStartedAt = std::chrono::steady_clock::now();
     std::unique_lock<std::mutex> lock(mutex_);
-    frameAvailable_.wait(lock, [this] {
-        return stopped_ || latestSequence_ != deliveredSequence_;
-    });
+    while (!stopped_ && latestSequence_ == deliveredSequence_ && !shutdownRequested()) {
+        frameAvailable_.wait_for(lock, std::chrono::milliseconds(100));
+    }
     const auto waitEndedAt = std::chrono::steady_clock::now();
     waitDuration = waitEndedAt - waitStartedAt;
 
