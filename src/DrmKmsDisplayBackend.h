@@ -43,6 +43,7 @@ private:
     bool present();
     bool renderDumbBuffer(const cv::Mat& frame);
     bool presentDumbBuffer(DumbBuffer& nextBuffer);
+    bool waitForPendingDumbFlip(bool block);
     void destroyFrameBuffer(FrameBuffer& frameBuffer);
     void destroyDumbBuffer(DumbBuffer& buffer);
     void logDisplayState(const cv::Mat& frame);
@@ -72,6 +73,8 @@ private:
     std::vector<DumbBuffer> dumbBuffers_;
     int nextDumbBufferIndex_ = 0;
     int currentDumbBufferIndex_ = -1;
+    int pendingDumbBufferIndex_ = -1;
+    bool pendingDumbFlip_ = false;
     bool useDumbBuffers_ = false;
     bool initialized_ = false;
     bool hasLoggedDisplayState_ = false;

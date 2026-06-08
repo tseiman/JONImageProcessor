@@ -4,6 +4,7 @@
 
 #include "DisplayRenderer.h"
 #include "Logger.h"
+#include "ShutdownSignal.h"
 
 #include <opencv2/imgproc.hpp>
 
@@ -718,6 +719,9 @@ bool DrmKmsDisplayBackend::renderDumbBuffer(const cv::Mat& frame)
         LOG_ERROR("DRM dumb buffers are not initialized");
         return false;
     }
+    if (!waitForPendingDumbFlip(true)) {
+        return false;
+    }
 
     DumbBuffer& targetBuffer = dumbBuffers_[nextDumbBufferIndex_];
     const cv::Size canvasSize(mode_.hdisplay, mode_.vdisplay);
@@ -751,7 +755,6 @@ bool DrmKmsDisplayBackend::renderDumbBuffer(const cv::Mat& frame)
         return false;
     }
 
-    currentDumbBufferIndex_ = nextDumbBufferIndex_;
     nextDumbBufferIndex_ = (nextDumbBufferIndex_ + 1) % static_cast<int>(dumbBuffers_.size());
     logDisplayState(frame);
     return !hasStdinQuitRequest();
@@ -821,28 +824,68 @@ bool DrmKmsDisplayBackend::presentDumbBuffer(DumbBuffer& nextBuffer)
             logDrmMasterHint();
             return false;
         }
+        currentDumbBufferIndex_ = nextDumbBufferIndex_;
         return true;
     }
 
-    bool waitingForFlip = true;
-    if (drmModePageFlip(drmFd_, crtcId_, nextBuffer.fbId, DRM_MODE_PAGE_FLIP_EVENT, &waitingForFlip) != 0) {
+    pendingDumbFlip_ = true;
+    pendingDumbBufferIndex_ = nextDumbBufferIndex_;
+    if (drmModePageFlip(drmFd_, crtcId_, nextBuffer.fbId, DRM_MODE_PAGE_FLIP_EVENT, &pendingDumbFlip_) != 0) {
         LOG_ERROR(drmError("drmModePageFlip failed"));
         logDrmMasterHint();
+        pendingDumbFlip_ = false;
+        pendingDumbBufferIndex_ = -1;
         return false;
+    }
+
+    return true;
+}
+
+bool DrmKmsDisplayBackend::waitForPendingDumbFlip(bool block)
+{
+    if (!pendingDumbFlip_) {
+        return true;
     }
 
     drmEventContext eventContext {};
     eventContext.version = DRM_EVENT_CONTEXT_VERSION;
     eventContext.page_flip_handler = pageFlipHandler;
-    while (waitingForFlip) {
+
+    while (pendingDumbFlip_) {
         fd_set fds;
         FD_ZERO(&fds);
         FD_SET(drmFd_, &fds);
-        if (select(drmFd_ + 1, &fds, nullptr, nullptr, nullptr) < 0) {
+
+        timeval timeout {};
+        timeout.tv_sec = 0;
+        timeout.tv_usec = block ? 100000 : 0;
+
+        const int ready = select(drmFd_ + 1, &fds, nullptr, nullptr, &timeout);
+        if (ready < 0) {
+            if (errno == EINTR && shutdownRequested()) {
+                return false;
+            }
             LOG_ERROR(drmError("select failed while waiting for DRM page flip"));
             return false;
         }
-        drmHandleEvent(drmFd_, &eventContext);
+        if (ready == 0) {
+            return !block;
+        }
+
+        if (drmHandleEvent(drmFd_, &eventContext) != 0) {
+            LOG_ERROR(drmError("drmHandleEvent failed while waiting for DRM page flip"));
+            return false;
+        }
+
+        if (shutdownRequested()) {
+            return false;
+        }
+    }
+
+    currentDumbBufferIndex_ = pendingDumbBufferIndex_;
+    pendingDumbBufferIndex_ = -1;
+    if (currentDumbBufferIndex_ >= 0 && dumbBuffers_.size() > 1) {
+        nextDumbBufferIndex_ = (currentDumbBufferIndex_ + 1) % static_cast<int>(dumbBuffers_.size());
     }
 
     return true;
@@ -905,6 +948,7 @@ void DrmKmsDisplayBackend::shutdown()
     }
 
     destroyFrameBuffer(currentFrameBuffer_);
+    waitForPendingDumbFlip(true);
     for (auto& buffer : dumbBuffers_) {
         destroyDumbBuffer(buffer);
     }
@@ -952,6 +996,8 @@ void DrmKmsDisplayBackend::shutdown()
     drmFd_ = -1;
     nextDumbBufferIndex_ = 0;
     currentDumbBufferIndex_ = -1;
+    pendingDumbBufferIndex_ = -1;
+    pendingDumbFlip_ = false;
     useDumbBuffers_ = false;
     initialized_ = false;
 }
