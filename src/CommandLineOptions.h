@@ -41,6 +41,11 @@ enum class MaskMorphologyMode {
     Strong
 };
 
+enum class BackgroundEffect {
+    Color,
+    Blur
+};
+
 struct RgbColor {
     int r = 0;
     int g = 0;
@@ -70,8 +75,10 @@ struct ProcessorConfig {
     MaskMorphologyMode maskMorphology = MaskMorphologyMode::Light;
     CameraFormat cameraFormat = CameraFormat::MJPG;
     MaskBackendType maskBackend = MaskBackendType::Dummy;
+    BackgroundEffect backgroundEffect = BackgroundEffect::Color;
     RgbColor backgroundOverlayColor;
     double backgroundOverlayAlpha = 0.35;
+    int blurStrength = 15;
     int cameraFps = 30;
     int maxFrames = 0;
     bool fullscreen = false;
@@ -98,3 +105,4 @@ std::string captureBackendToString(CaptureBackendType backend);
 std::string cameraFormatToString(CameraFormat format);
 std::string maskBackendToString(MaskBackendType backend);
 std::string maskMorphologyModeToString(MaskMorphologyMode mode);
+std::string backgroundEffectToString(BackgroundEffect effect);

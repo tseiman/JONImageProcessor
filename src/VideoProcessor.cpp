@@ -32,6 +32,13 @@ namespace {
 constexpr int ExitOk = 0;
 constexpr int ExitRuntimeError = 2;
 
+struct BackgroundEffectBuffers {
+    cv::Mat downscaledFrame;
+    cv::Mat downscaledBlurredFrame;
+    cv::Mat blurredFrame;
+    cv::Mat result;
+};
+
 cv::Mat applyBackgroundOverlay(
     const cv::Mat& frame,
     const cv::Mat& personMask,
@@ -106,6 +113,73 @@ cv::Mat applyBackgroundOverlay(
     });
 
     return result;
+}
+
+int blurKernelSize(int blurStrength)
+{
+    const int radius = std::clamp(blurStrength, 1, 100);
+    return radius * 2 + 1;
+}
+
+int blurDownscaleFactor(int blurStrength)
+{
+    if (blurStrength >= 32) {
+        return 4;
+    }
+    if (blurStrength >= 12) {
+        return 2;
+    }
+    return 1;
+}
+
+cv::Mat applyBackgroundBlur(
+    const cv::Mat& frame,
+    const cv::Mat& personMask,
+    int blurStrength,
+    BackgroundEffectBuffers& buffers)
+{
+    if (frame.empty() || personMask.empty()) {
+        return frame;
+    }
+
+    cv::Mat mask;
+    if (personMask.type() == CV_8UC1 && personMask.size() == frame.size()) {
+        mask = personMask;
+    } else {
+        cv::resize(personMask, mask, frame.size(), 0.0, 0.0, cv::INTER_LINEAR);
+        if (mask.type() != CV_8UC1) {
+            cv::cvtColor(mask, mask, cv::COLOR_BGR2GRAY);
+        }
+    }
+
+    if (frame.type() != CV_8UC3 || mask.type() != CV_8UC1) {
+        return frame;
+    }
+
+    const int downscaleFactor = blurDownscaleFactor(blurStrength);
+    if (downscaleFactor > 1) {
+        const cv::Size downscaledSize(
+            std::max(1, frame.cols / downscaleFactor),
+            std::max(1, frame.rows / downscaleFactor));
+        cv::resize(frame, buffers.downscaledFrame, downscaledSize, 0.0, 0.0, cv::INTER_AREA);
+
+        const int downscaledKernel = blurKernelSize(std::max(1, blurStrength / downscaleFactor));
+        cv::GaussianBlur(
+            buffers.downscaledFrame,
+            buffers.downscaledBlurredFrame,
+            cv::Size(downscaledKernel, downscaledKernel),
+            0.0);
+        cv::resize(buffers.downscaledBlurredFrame, buffers.blurredFrame, frame.size(), 0.0, 0.0, cv::INTER_LINEAR);
+    } else {
+        const int kernelSize = blurKernelSize(blurStrength);
+        cv::GaussianBlur(frame, buffers.blurredFrame, cv::Size(kernelSize, kernelSize), 0.0);
+    }
+
+    buffers.result.create(frame.size(), frame.type());
+    buffers.blurredFrame.copyTo(buffers.result);
+    frame.copyTo(buffers.result, mask);
+
+    return buffers.result;
 }
 
 cv::Mat applyMaskPostprocessing(
@@ -242,11 +316,13 @@ void logStartupInfo(const ProcessorConfig& config, const ScreenInfo& screenInfo)
     LOG_VERBOSE("Mask threshold: " << config.maskThreshold);
     LOG_VERBOSE("Mask smoothing: " << config.maskSmoothing);
     LOG_VERBOSE("Mask morphology: " << maskMorphologyModeToString(config.maskMorphology));
+    LOG_VERBOSE("Background effect: " << backgroundEffectToString(config.backgroundEffect));
     LOG_VERBOSE("Background overlay color: "
         << config.backgroundOverlayColor.r << ","
         << config.backgroundOverlayColor.g << ","
         << config.backgroundOverlayColor.b);
     LOG_VERBOSE("Background overlay alpha: " << config.backgroundOverlayAlpha);
+    LOG_VERBOSE("Blur strength: " << config.blurStrength);
     LOG_VERBOSE("Camera format: " << cameraFormatToString(config.cameraFormat));
     LOG_VERBOSE("Camera FPS: " << config.cameraFps);
     LOG_VERBOSE("Fullscreen: " << (config.fullscreen ? "true" : "false"));
@@ -393,6 +469,7 @@ int VideoProcessor::run()
     auto intervalStartedAt = startedAt;
     std::size_t intervalFrames = 0;
     cv::Mat previousOutputMask;
+    BackgroundEffectBuffers backgroundEffectBuffers;
 
     bool stoppedBySignal = false;
     while (true) {
@@ -472,12 +549,21 @@ int VideoProcessor::run()
 
         cv::Mat outputFrame;
         if (overlayEnabled && !outputMask.empty()) {
-            BenchmarkScope timer(benchmark, BenchmarkStage::Overlay);
-            outputFrame = applyBackgroundOverlay(
-                resized,
-                outputMask,
-                config_.backgroundOverlayColor,
-                config_.backgroundOverlayAlpha);
+            if (config_.backgroundEffect == BackgroundEffect::Blur) {
+                BenchmarkScope timer(benchmark, BenchmarkStage::BackgroundBlur);
+                outputFrame = applyBackgroundBlur(
+                    resized,
+                    outputMask,
+                    config_.blurStrength,
+                    backgroundEffectBuffers);
+            } else {
+                BenchmarkScope timer(benchmark, BenchmarkStage::Overlay);
+                outputFrame = applyBackgroundOverlay(
+                    resized,
+                    outputMask,
+                    config_.backgroundOverlayColor,
+                    config_.backgroundOverlayAlpha);
+            }
         } else {
             outputFrame = resized;
         }

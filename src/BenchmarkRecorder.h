@@ -14,6 +14,7 @@ enum class BenchmarkStage {
     SegmentationPostprocess,
     MaskPostprocess,
     MaskUpscale,
+    BackgroundBlur,
     Overlay,
     Display,
     ProcessingTotal,

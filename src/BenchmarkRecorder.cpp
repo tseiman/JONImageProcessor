@@ -41,6 +41,8 @@ const char* stageName(BenchmarkStage stage)
         return "Mask postprocess";
     case BenchmarkStage::MaskUpscale:
         return "Mask upscale";
+    case BenchmarkStage::BackgroundBlur:
+        return "Background blur";
     case BenchmarkStage::Overlay:
         return "Overlay";
     case BenchmarkStage::Display:
@@ -176,6 +178,7 @@ void BenchmarkRecorder::logSummary() const
     logAverageLine(BenchmarkStage::SegmentationPostprocess, averageMilliseconds(BenchmarkStage::SegmentationPostprocess));
     logAverageLine(BenchmarkStage::MaskPostprocess, averageMilliseconds(BenchmarkStage::MaskPostprocess));
     logAverageLine(BenchmarkStage::MaskUpscale, averageMilliseconds(BenchmarkStage::MaskUpscale));
+    logAverageLine(BenchmarkStage::BackgroundBlur, averageMilliseconds(BenchmarkStage::BackgroundBlur));
     logAverageLine(BenchmarkStage::Overlay, averageMilliseconds(BenchmarkStage::Overlay));
     logAverageLine(BenchmarkStage::Display, averageMilliseconds(BenchmarkStage::Display));
     logAverageLine(BenchmarkStage::ProcessingTotal, averageMilliseconds(BenchmarkStage::ProcessingTotal));
@@ -192,6 +195,7 @@ void BenchmarkRecorder::logSummary() const
     logDistributionLine("Segmentation postprocess", percentOfTotal(BenchmarkStage::SegmentationPostprocess));
     logDistributionLine("Mask postprocess", percentOfTotal(BenchmarkStage::MaskPostprocess));
     logDistributionLine("Mask upscale", percentOfTotal(BenchmarkStage::MaskUpscale));
+    logDistributionLine("Background blur", percentOfTotal(BenchmarkStage::BackgroundBlur));
     logDistributionLine("Overlay", percentOfTotal(BenchmarkStage::Overlay));
     logDistributionLine("Display", percentOfTotal(BenchmarkStage::Display));
     const double totalMs = milliseconds(stages_[stageIndex(BenchmarkStage::PipelineTotal)].total);
@@ -235,6 +239,7 @@ std::chrono::steady_clock::duration BenchmarkRecorder::measuredStageTotal() cons
     total += stages_[stageIndex(BenchmarkStage::SegmentationPostprocess)].total;
     total += stages_[stageIndex(BenchmarkStage::MaskPostprocess)].total;
     total += stages_[stageIndex(BenchmarkStage::MaskUpscale)].total;
+    total += stages_[stageIndex(BenchmarkStage::BackgroundBlur)].total;
     total += stages_[stageIndex(BenchmarkStage::Overlay)].total;
     total += stages_[stageIndex(BenchmarkStage::Display)].total;
     return total;

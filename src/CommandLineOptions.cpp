@@ -33,8 +33,10 @@ enum OptionId {
     OptionCameraFormat,
     OptionCameraFps,
     OptionMaskBackend,
+    OptionBackgroundEffect,
     OptionBackgroundOverlayColor,
     OptionBackgroundOverlayAlpha,
+    OptionBlurStrength,
     OptionFullscreen,
     OptionDisplayMode,
     OptionDisplayBackend,
@@ -82,8 +84,10 @@ const std::vector<OptionDefinition>& optionDefinitions()
         {OptionCameraFormat, 0, "camera-format", required_argument, "format", "Camera pixel format: MJPG or YUYV", "MJPG"},
         {OptionCameraFps, 0, "camera-fps", required_argument, "fps", "Requested camera frame rate", "30"},
         {OptionMaskBackend, 0, "mask-backend", required_argument, "backend", "Mask backend: none, dummy, jetson, or tensorrt", "dummy"},
-        {OptionBackgroundOverlayColor, 0, "background-overlay-color", required_argument, "R,G,B", "Background overlay color", "0,0,255"},
-        {OptionBackgroundOverlayAlpha, 0, "background-overlay-alpha", required_argument, "0.0..1.0", "Background overlay alpha", "0.35"},
+        {OptionBackgroundEffect, 0, "background-effect", required_argument, "effect", "Background effect: color or blur", "color"},
+        {OptionBackgroundOverlayColor, 0, "background-overlay-color", required_argument, "R,G,B", "Background overlay color for --background-effect color; ignored for blur", "0,0,255"},
+        {OptionBackgroundOverlayAlpha, 0, "background-overlay-alpha", required_argument, "0.0..1.0", "Background overlay alpha for --background-effect color; ignored for blur", "0.35"},
+        {OptionBlurStrength, 0, "blur-strength", required_argument, "value", "Blur strength for --background-effect blur", "15"},
         {OptionFullscreen, 0, "fullscreen", no_argument, "", "Show the window fullscreen when using window output", ""},
         {OptionDisplayMode, 0, "display-mode", required_argument, "mode", "Display mode: fit, fill, or stretch", "fit"},
         {OptionDisplayBackend, 0, "display-backend", required_argument, "backend", "Display backend: highgui or drm", "highgui"},
@@ -274,6 +278,22 @@ bool parseMaskBackend(const char* value, MaskBackendType& backend, std::string& 
     return false;
 }
 
+bool parseBackgroundEffect(const char* value, BackgroundEffect& effect, std::string& error)
+{
+    const std::string parsed(value);
+    if (parsed == "color") {
+        effect = BackgroundEffect::Color;
+        return true;
+    }
+    if (parsed == "blur") {
+        effect = BackgroundEffect::Blur;
+        return true;
+    }
+
+    error = "Invalid background effect: " + parsed + " (allowed: color, blur)";
+    return false;
+}
+
 bool parseOverlayColor(const char* value, RgbColor& color, std::string& error)
 {
     int parsed[3] {};
@@ -317,6 +337,19 @@ bool parseOverlayAlpha(const char* value, double& alpha, std::string& error)
     }
 
     alpha = parsed;
+    return true;
+}
+
+bool parseBlurStrength(const char* value, int& strength, std::string& error)
+{
+    char* end = nullptr;
+    const long parsed = std::strtol(value, &end, 10);
+    if (end == value || *end != '\0' || parsed <= 0 || parsed > 100) {
+        error = "Invalid blur strength: " + std::string(value) + " (allowed: 1..100)";
+        return false;
+    }
+
+    strength = static_cast<int>(parsed);
     return true;
 }
 
@@ -508,6 +541,11 @@ bool parseCommandLine(int argc, char** argv, CommandLineResult& result, std::str
                 return false;
             }
             break;
+        case OptionBackgroundEffect:
+            if (!parseBackgroundEffect(optarg, result.config.backgroundEffect, error)) {
+                return false;
+            }
+            break;
         case OptionBackgroundOverlayColor:
             if (!parseOverlayColor(optarg, result.config.backgroundOverlayColor, error)) {
                 return false;
@@ -515,6 +553,11 @@ bool parseCommandLine(int argc, char** argv, CommandLineResult& result, std::str
             break;
         case OptionBackgroundOverlayAlpha:
             if (!parseOverlayAlpha(optarg, result.config.backgroundOverlayAlpha, error)) {
+                return false;
+            }
+            break;
+        case OptionBlurStrength:
+            if (!parseBlurStrength(optarg, result.config.blurStrength, error)) {
                 return false;
             }
             break;
@@ -712,6 +755,18 @@ std::string maskMorphologyModeToString(MaskMorphologyMode mode)
         return "light";
     case MaskMorphologyMode::Strong:
         return "strong";
+    }
+
+    return "unknown";
+}
+
+std::string backgroundEffectToString(BackgroundEffect effect)
+{
+    switch (effect) {
+    case BackgroundEffect::Color:
+        return "color";
+    case BackgroundEffect::Blur:
+        return "blur";
     }
 
     return "unknown";

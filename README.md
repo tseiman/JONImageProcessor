@@ -386,10 +386,16 @@ Run with the dummy mask backend:
 ~/JONImageProcessor/JONImageProcessor --device /dev/video0 --capture-backend v4l2 --camera-format MJPG --camera-fps 30 --width 1280 --height 720 --mask-backend dummy --display-mode fit --fullscreen --benchmark
 ```
 
-Run the current production-oriented TensorRT matting path with the DRM/KMS display backend:
+Run the current production-oriented TensorRT matting path with the DRM/KMS display backend and the color background effect:
 
 ```bash
-cd ~/JONImageProcessor && LD_LIBRARY_PATH="$HOME/JONImageProcessor/jetson-inference/lib:$LD_LIBRARY_PATH" ./JONImageProcessor --device /dev/video0 --capture-backend v4l2 --camera-format MJPG --camera-fps 30 --width 1280 --height 720 --mask-backend tensorrt --mask-model "$HOME/JONImageProcessor/models/modnet_photographic_portrait_matting.onnx" --segmentation-width 384 --segmentation-height 384 --mask-threshold 0.5 --mask-smoothing 0.65 --mask-morphology light --background-overlay-color 0,0,255 --background-overlay-alpha 0.35 --display-backend drm --display-mode fit --fullscreen --benchmark
+cd ~/JONImageProcessor && LD_LIBRARY_PATH="$HOME/JONImageProcessor/jetson-inference/lib:$LD_LIBRARY_PATH" ./JONImageProcessor --device /dev/video0 --capture-backend v4l2 --camera-format MJPG --camera-fps 30 --width 1280 --height 720 --mask-backend tensorrt --mask-model "$HOME/JONImageProcessor/models/modnet_photographic_portrait_matting.onnx" --segmentation-width 384 --segmentation-height 384 --mask-threshold 0.5 --mask-smoothing 0.65 --mask-morphology light --background-effect color --background-overlay-color 0,0,255 --background-overlay-alpha 0.35 --display-backend drm --display-mode fit --fullscreen --benchmark
+```
+
+Run the same TensorRT path with a blurred background:
+
+```bash
+cd ~/JONImageProcessor && LD_LIBRARY_PATH="$HOME/JONImageProcessor/jetson-inference/lib:$LD_LIBRARY_PATH" ./JONImageProcessor --device /dev/video0 --capture-backend v4l2 --camera-format MJPG --camera-fps 30 --width 1280 --height 720 --mask-backend tensorrt --mask-model "$HOME/JONImageProcessor/models/modnet_photographic_portrait_matting.onnx" --segmentation-width 384 --segmentation-height 384 --mask-threshold 0.5 --mask-smoothing 0.65 --mask-morphology light --background-effect blur --blur-strength 15 --display-backend drm --display-mode fit --fullscreen --benchmark
 ```
 
 The first TensorRT run for a new model/input size can take longer because TensorRT builds an optimized engine. Later starts load the cached `.engine` file next to the ONNX model.
@@ -446,8 +452,10 @@ Important options:
 - `--mask-threshold <0.0..1.0>` sets the foreground threshold for single-channel TensorRT mask outputs.
 - `--mask-smoothing <0.0..1.0>` controls temporal mask smoothing.
 - `--mask-morphology <off|light|strong>` controls morphology cleanup for the mask.
-- `--background-overlay-color <R,G,B>` sets background overlay color.
-- `--background-overlay-alpha <0.0..1.0>` sets overlay opacity.
+- `--background-effect <color|blur>` selects the background effect. Default: `color`.
+- `--background-overlay-color <R,G,B>` sets background overlay color for `--background-effect color`; ignored for `blur`.
+- `--background-overlay-alpha <0.0..1.0>` sets overlay opacity for `--background-effect color`; ignored for `blur`.
+- `--blur-strength <value>` sets blur strength for `--background-effect blur`. Default: `15`.
 - `--display-mode <fit|fill|stretch>` controls scaling into the window/fullscreen canvas.
 - `--fullscreen` requests fullscreen window output.
 - `--output-width <pixels>` and `--output-height <pixels>` explicitly define the render canvas.
@@ -488,7 +496,7 @@ Supported mask backends:
 - `jetson`: TensorRT/CUDA segmentation through `jetson-inference` `segNet`.
 - `tensorrt`: generic TensorRT/ONNX mask backend for future person segmentation or matting models.
 
-The debug visualization keeps the detected person unchanged and tints the background with the configured overlay color and alpha.
+The background effect uses the generated person mask. With `--background-effect color`, the detected person stays unchanged and the background is tinted with the configured overlay color and alpha. With `--background-effect blur`, the detected person stays sharp and the background is blurred; `--background-overlay-color` and `--background-overlay-alpha` are ignored.
 
 Mask postprocessing is enabled by default:
 
