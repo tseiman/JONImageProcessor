@@ -176,8 +176,23 @@ cv::Mat applyBackgroundBlur(
     }
 
     buffers.result.create(frame.size(), frame.type());
-    buffers.blurredFrame.copyTo(buffers.result);
-    frame.copyTo(buffers.result, mask);
+
+    cv::parallel_for_(cv::Range(0, frame.rows), [&](const cv::Range& range) {
+        for (int y = range.start; y < range.end; ++y) {
+            const auto* source = frame.ptr<cv::Vec3b>(y);
+            const auto* blurred = buffers.blurredFrame.ptr<cv::Vec3b>(y);
+            const auto* maskRow = mask.ptr<unsigned char>(y);
+            auto* destination = buffers.result.ptr<cv::Vec3b>(y);
+
+            for (int x = 0; x < frame.cols; ++x) {
+                const int personAlpha = maskRow[x];
+                const int backgroundAlpha = 255 - personAlpha;
+                destination[x][0] = static_cast<unsigned char>((source[x][0] * personAlpha + blurred[x][0] * backgroundAlpha + 127) / 255);
+                destination[x][1] = static_cast<unsigned char>((source[x][1] * personAlpha + blurred[x][1] * backgroundAlpha + 127) / 255);
+                destination[x][2] = static_cast<unsigned char>((source[x][2] * personAlpha + blurred[x][2] * backgroundAlpha + 127) / 255);
+            }
+        }
+    });
 
     return buffers.result;
 }
