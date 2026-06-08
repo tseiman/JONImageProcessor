@@ -11,6 +11,7 @@
 #include <xf86drmMode.h>
 
 #include <cstdint>
+#include <vector>
 #include <string>
 
 class DrmKmsDisplayBackend : public IDisplayBackend {
@@ -25,13 +26,25 @@ private:
         uint32_t fbId = 0;
     };
 
+    struct DumbBuffer {
+        uint32_t handle = 0;
+        uint32_t fbId = 0;
+        uint32_t pitch = 0;
+        uint64_t size = 0;
+        void* map = nullptr;
+    };
+
     bool openDrmDevice();
     bool initializeDrmMode();
     bool initializeEgl();
     bool initializeGl();
+    bool initializeDumbBuffers();
     bool updateTexture(const cv::Mat& frame);
     bool present();
+    bool renderDumbBuffer(const cv::Mat& frame);
+    bool presentDumbBuffer(DumbBuffer& nextBuffer);
     void destroyFrameBuffer(FrameBuffer& frameBuffer);
+    void destroyDumbBuffer(DumbBuffer& buffer);
     void logDisplayState(const cv::Mat& frame);
 
     DisplayBackendConfig config_;
@@ -56,6 +69,10 @@ private:
     cv::Size textureSize_;
 
     FrameBuffer currentFrameBuffer_;
+    std::vector<DumbBuffer> dumbBuffers_;
+    int nextDumbBufferIndex_ = 0;
+    int currentDumbBufferIndex_ = -1;
+    bool useDumbBuffers_ = false;
     bool initialized_ = false;
     bool hasLoggedDisplayState_ = false;
 };

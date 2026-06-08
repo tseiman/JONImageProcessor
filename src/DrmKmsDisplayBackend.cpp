@@ -2,6 +2,7 @@
 
 #if defined(JON_ENABLE_DRM_DISPLAY)
 
+#include "DisplayRenderer.h"
 #include "Logger.h"
 
 #include <opencv2/imgproc.hpp>
@@ -11,6 +12,8 @@
 #include <fcntl.h>
 #include <poll.h>
 #include <sstream>
+#include <sys/ioctl.h>
+#include <sys/mman.h>
 #include <sys/select.h>
 #include <unistd.h>
 #include <vector>
@@ -221,9 +224,49 @@ bool DrmKmsDisplayBackend::initialize(const DisplayBackendConfig& config)
 {
     config_ = config;
 
-    if (!openDrmDevice() || !initializeDrmMode() || !initializeEgl() || !initializeGl()) {
+    if (!openDrmDevice() || !initializeDrmMode()) {
         shutdown();
         return false;
+    }
+
+    if (!initializeEgl() || !initializeGl()) {
+        LOG_WARNING("DRM/KMS GBM/EGL path is unavailable, falling back to DRM dumb buffers");
+        if (texture_ != 0) {
+            glDeleteTextures(1, &texture_);
+            texture_ = 0;
+        }
+        if (program_ != 0) {
+            glDeleteProgram(program_);
+            program_ = 0;
+        }
+        if (eglDisplay_ != EGL_NO_DISPLAY) {
+            eglMakeCurrent(eglDisplay_, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT);
+            if (eglSurface_ != EGL_NO_SURFACE) {
+                eglDestroySurface(eglDisplay_, eglSurface_);
+            }
+            if (eglContext_ != EGL_NO_CONTEXT) {
+                eglDestroyContext(eglDisplay_, eglContext_);
+            }
+            eglTerminate(eglDisplay_);
+        }
+        if (gbmSurface_) {
+            gbm_surface_destroy(gbmSurface_);
+        }
+        if (gbmDevice_) {
+            gbm_device_destroy(gbmDevice_);
+        }
+
+        eglDisplay_ = EGL_NO_DISPLAY;
+        eglSurface_ = EGL_NO_SURFACE;
+        eglContext_ = EGL_NO_CONTEXT;
+        gbmSurface_ = nullptr;
+        gbmDevice_ = nullptr;
+
+        if (!initializeDumbBuffers()) {
+            shutdown();
+            return false;
+        }
+        useDumbBuffers_ = true;
     }
 
     initialized_ = true;
@@ -454,6 +497,50 @@ bool DrmKmsDisplayBackend::initializeGl()
     return true;
 }
 
+bool DrmKmsDisplayBackend::initializeDumbBuffers()
+{
+    dumbBuffers_.resize(2);
+    for (auto& buffer : dumbBuffers_) {
+        drm_mode_create_dumb createRequest {};
+        createRequest.width = mode_.hdisplay;
+        createRequest.height = mode_.vdisplay;
+        createRequest.bpp = 32;
+
+        if (ioctl(drmFd_, DRM_IOCTL_MODE_CREATE_DUMB, &createRequest) != 0) {
+            LOG_ERROR(drmError("DRM_IOCTL_MODE_CREATE_DUMB failed"));
+            return false;
+        }
+
+        buffer.handle = createRequest.handle;
+        buffer.pitch = createRequest.pitch;
+        buffer.size = createRequest.size;
+
+        if (drmModeAddFB(drmFd_, mode_.hdisplay, mode_.vdisplay, 24, 32, buffer.pitch, buffer.handle, &buffer.fbId) != 0) {
+            LOG_ERROR(drmError("drmModeAddFB failed for DRM dumb buffer"));
+            return false;
+        }
+
+        drm_mode_map_dumb mapRequest {};
+        mapRequest.handle = buffer.handle;
+        if (ioctl(drmFd_, DRM_IOCTL_MODE_MAP_DUMB, &mapRequest) != 0) {
+            LOG_ERROR(drmError("DRM_IOCTL_MODE_MAP_DUMB failed"));
+            return false;
+        }
+
+        buffer.map = mmap(nullptr, buffer.size, PROT_READ | PROT_WRITE, MAP_SHARED, drmFd_, mapRequest.offset);
+        if (buffer.map == MAP_FAILED) {
+            buffer.map = nullptr;
+            LOG_ERROR(drmError("mmap failed for DRM dumb buffer"));
+            return false;
+        }
+
+        std::memset(buffer.map, 0, buffer.size);
+    }
+
+    LOG_INFO("DRM/KMS dumb-buffer display path initialized");
+    return true;
+}
+
 bool DrmKmsDisplayBackend::updateTexture(const cv::Mat& frame)
 {
     cv::Mat uploadFrame;
@@ -502,6 +589,9 @@ bool DrmKmsDisplayBackend::render(const cv::Mat& frame)
     if (frame.empty()) {
         return true;
     }
+    if (useDumbBuffers_) {
+        return renderDumbBuffer(frame);
+    }
 
     if (!updateTexture(frame)) {
         LOG_ERROR("DRM display texture upload failed");
@@ -535,6 +625,46 @@ bool DrmKmsDisplayBackend::render(const cv::Mat& frame)
         return false;
     }
 
+    logDisplayState(frame);
+    return !hasStdinQuitRequest();
+}
+
+bool DrmKmsDisplayBackend::renderDumbBuffer(const cv::Mat& frame)
+{
+    if (dumbBuffers_.empty()) {
+        LOG_ERROR("DRM dumb buffers are not initialized");
+        return false;
+    }
+
+    DumbBuffer& targetBuffer = dumbBuffers_[nextDumbBufferIndex_];
+    const cv::Size canvasSize(mode_.hdisplay, mode_.vdisplay);
+    const DisplayRenderResult displayResult = renderForDisplay(frame, canvasSize, config_.displayMode);
+
+    cv::Mat bgrFrame;
+    if (displayResult.frame.type() == CV_8UC3) {
+        bgrFrame = displayResult.frame.isContinuous() ? displayResult.frame : displayResult.frame.clone();
+    } else {
+        cv::cvtColor(displayResult.frame, bgrFrame, cv::COLOR_GRAY2BGR);
+    }
+
+    auto* destinationBase = static_cast<unsigned char*>(targetBuffer.map);
+    for (int y = 0; y < bgrFrame.rows; ++y) {
+        const auto* source = bgrFrame.ptr<cv::Vec3b>(y);
+        auto* destination = destinationBase + static_cast<std::size_t>(y) * targetBuffer.pitch;
+        for (int x = 0; x < bgrFrame.cols; ++x) {
+            destination[x * 4 + 0] = source[x][0];
+            destination[x * 4 + 1] = source[x][1];
+            destination[x * 4 + 2] = source[x][2];
+            destination[x * 4 + 3] = 0;
+        }
+    }
+
+    if (!presentDumbBuffer(targetBuffer)) {
+        return false;
+    }
+
+    currentDumbBufferIndex_ = nextDumbBufferIndex_;
+    nextDumbBufferIndex_ = (nextDumbBufferIndex_ + 1) % static_cast<int>(dumbBuffers_.size());
     logDisplayState(frame);
     return !hasStdinQuitRequest();
 }
@@ -593,6 +723,39 @@ bool DrmKmsDisplayBackend::present()
     return true;
 }
 
+bool DrmKmsDisplayBackend::presentDumbBuffer(DumbBuffer& nextBuffer)
+{
+    if (currentDumbBufferIndex_ < 0) {
+        if (drmModeSetCrtc(drmFd_, crtcId_, nextBuffer.fbId, 0, 0, &connectorId_, 1, &mode_) != 0) {
+            LOG_ERROR(drmError("drmModeSetCrtc failed"));
+            return false;
+        }
+        return true;
+    }
+
+    bool waitingForFlip = true;
+    if (drmModePageFlip(drmFd_, crtcId_, nextBuffer.fbId, DRM_MODE_PAGE_FLIP_EVENT, &waitingForFlip) != 0) {
+        LOG_ERROR(drmError("drmModePageFlip failed"));
+        return false;
+    }
+
+    drmEventContext eventContext {};
+    eventContext.version = DRM_EVENT_CONTEXT_VERSION;
+    eventContext.page_flip_handler = pageFlipHandler;
+    while (waitingForFlip) {
+        fd_set fds;
+        FD_ZERO(&fds);
+        FD_SET(drmFd_, &fds);
+        if (select(drmFd_ + 1, &fds, nullptr, nullptr, nullptr) < 0) {
+            LOG_ERROR(drmError("select failed while waiting for DRM page flip"));
+            return false;
+        }
+        drmHandleEvent(drmFd_, &eventContext);
+    }
+
+    return true;
+}
+
 void DrmKmsDisplayBackend::destroyFrameBuffer(FrameBuffer& frameBuffer)
 {
     if (frameBuffer.fbId != 0 && drmFd_ >= 0) {
@@ -602,6 +765,22 @@ void DrmKmsDisplayBackend::destroyFrameBuffer(FrameBuffer& frameBuffer)
         gbm_surface_release_buffer(gbmSurface_, frameBuffer.bo);
     }
     frameBuffer = FrameBuffer {};
+}
+
+void DrmKmsDisplayBackend::destroyDumbBuffer(DumbBuffer& buffer)
+{
+    if (buffer.map) {
+        munmap(buffer.map, buffer.size);
+    }
+    if (buffer.fbId != 0 && drmFd_ >= 0) {
+        drmModeRmFB(drmFd_, buffer.fbId);
+    }
+    if (buffer.handle != 0 && drmFd_ >= 0) {
+        drm_mode_destroy_dumb destroyRequest {};
+        destroyRequest.handle = buffer.handle;
+        ioctl(drmFd_, DRM_IOCTL_MODE_DESTROY_DUMB, &destroyRequest);
+    }
+    buffer = DumbBuffer {};
 }
 
 void DrmKmsDisplayBackend::logDisplayState(const cv::Mat& frame)
@@ -615,7 +794,7 @@ void DrmKmsDisplayBackend::logDisplayState(const cv::Mat& frame)
     LOG_VERBOSE("Screen size: " << mode_.hdisplay << "x" << mode_.vdisplay);
     LOG_VERBOSE("Canvas size: " << mode_.hdisplay << "x" << mode_.vdisplay);
     LOG_VERBOSE("Display mode: " << displayModeName(config_.displayMode));
-    LOG_VERBOSE("Display backend render path: DRM/KMS + GBM/EGL/GLES2");
+    LOG_VERBOSE("Display backend render path: " << (useDumbBuffers_ ? "DRM/KMS dumb buffers" : "DRM/KMS + GBM/EGL/GLES2"));
     hasLoggedDisplayState_ = true;
 }
 
@@ -634,6 +813,10 @@ void DrmKmsDisplayBackend::shutdown()
     }
 
     destroyFrameBuffer(currentFrameBuffer_);
+    for (auto& buffer : dumbBuffers_) {
+        destroyDumbBuffer(buffer);
+    }
+    dumbBuffers_.clear();
 
     if (texture_ != 0) {
         glDeleteTextures(1, &texture_);
@@ -675,6 +858,9 @@ void DrmKmsDisplayBackend::shutdown()
     gbmDevice_ = nullptr;
     originalCrtc_ = nullptr;
     drmFd_ = -1;
+    nextDumbBufferIndex_ = 0;
+    currentDumbBufferIndex_ = -1;
+    useDumbBuffers_ = false;
     initialized_ = false;
 }
 
