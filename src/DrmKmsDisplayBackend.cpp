@@ -236,13 +236,38 @@ bool DrmKmsDisplayBackend::openDrmDevice()
     for (int index = 0; index < 8; ++index) {
         const std::string path = "/dev/dri/card" + std::to_string(index);
         drmFd_ = open(path.c_str(), O_RDWR | O_CLOEXEC);
-        if (drmFd_ >= 0) {
+        if (drmFd_ < 0) {
+            continue;
+        }
+
+        drmModeRes* resources = drmModeGetResources(drmFd_);
+        bool hasConnectedDisplay = false;
+        if (resources) {
+            for (int connectorIndex = 0; connectorIndex < resources->count_connectors; ++connectorIndex) {
+                drmModeConnector* connector = drmModeGetConnector(drmFd_, resources->connectors[connectorIndex]);
+                if (connector && connector->connection == DRM_MODE_CONNECTED && connector->count_modes > 0) {
+                    hasConnectedDisplay = true;
+                }
+                if (connector) {
+                    drmModeFreeConnector(connector);
+                }
+                if (hasConnectedDisplay) {
+                    break;
+                }
+            }
+            drmModeFreeResources(resources);
+        }
+
+        if (hasConnectedDisplay) {
             LOG_INFO("Opening DRM/KMS display device: " << path);
             return true;
         }
+
+        close(drmFd_);
+        drmFd_ = -1;
     }
 
-    LOG_ERROR("Failed to open DRM/KMS device under /dev/dri/card*");
+    LOG_ERROR("Failed to find a DRM/KMS device with a connected display under /dev/dri/card*");
     return false;
 }
 
