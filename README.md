@@ -175,6 +175,12 @@ MODEL_PATH="$HOME/JONImageProcessor/models/modnet_photographic_portrait_matting.
 ./JONImageProcessor --device /dev/video0 --width 1280 --height 720 --mask-model "$MODEL_PATH" --segmentation-width 384 --segmentation-height 384 --mask-threshold 0.5 --mask-smoothing 0.65 --mask-morphology light --background-effect color --background-overlay-color 0,255,0 --background-overlay-alpha 1.0 --display-backend drm --fullscreen --benchmark
 ```
 
+### Image Background
+
+```bash
+./JONImageProcessor --device /dev/video0 --width 1280 --height 720 --mask-model "$MODEL_PATH" --segmentation-width 384 --segmentation-height 384 --mask-threshold 0.7 --mask-smoothing 0.65 --mask-morphology light --background-effect image --background-image "$HOME/JONImageProcessor/background.jpg" --display-backend drm --fullscreen --benchmark
+```
+
 ### HighGUI Window
 
 ```bash
@@ -205,9 +211,10 @@ MODEL_PATH="$HOME/JONImageProcessor/models/modnet_photographic_portrait_matting.
 - `--mask-threshold <0.0..1.0>`: foreground threshold. Default: `0.5`.
 - `--mask-smoothing <0.0..1.0>`: temporal mask smoothing. Default: `0.65`.
 - `--mask-morphology <off|light|strong>`: mask cleanup mode. Default: `light`.
-- `--background-effect <color|blur>`: background effect. Default: `color`.
-- `--background-overlay-color <R,G,B>`: color used by `--background-effect color`. Ignored for blur. Default: `0,255,0`.
-- `--background-overlay-alpha <0.0..1.0>`: alpha used by `--background-effect color`. Ignored for blur. Default: `0.35`.
+- `--background-effect <color|blur|image>`: background effect. Default: `color`.
+- `--background-image <path>`: JPEG or PNG image used by `--background-effect image`.
+- `--background-overlay-color <R,G,B>`: color used by `--background-effect color`. Ignored for blur/image. Default: `0,255,0`.
+- `--background-overlay-alpha <0.0..1.0>`: alpha used by `--background-effect color`. Ignored for blur/image. Default: `0.35`.
 - `--blur-strength <1..100>`: blur strength used by `--background-effect blur`. Default: `15`.
 - `--display-backend <highgui|drm>`: display backend. Default: `highgui`.
 - `--fullscreen`: request fullscreen display output.

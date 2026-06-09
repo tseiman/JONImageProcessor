@@ -27,6 +27,7 @@ enum OptionId {
     OptionMaskMorphology,
     OptionCameraFormat,
     OptionBackgroundEffect,
+    OptionBackgroundImage,
     OptionBackgroundOverlayColor,
     OptionBackgroundOverlayAlpha,
     OptionBlurStrength,
@@ -66,9 +67,10 @@ const std::vector<OptionDefinition>& optionDefinitions()
         {OptionMaskSmoothing, 0, "mask-smoothing", required_argument, "0.0..1.0", "Temporal mask smoothing strength", "0.65"},
         {OptionMaskMorphology, 0, "mask-morphology", required_argument, "mode", "Mask morphology: off, light, or strong", "light"},
         {OptionCameraFormat, 0, "camera-format", required_argument, "format", "Camera pixel format: MJPG or YUYV", "MJPG"},
-        {OptionBackgroundEffect, 0, "background-effect", required_argument, "effect", "Background effect: color or blur", "color"},
-        {OptionBackgroundOverlayColor, 0, "background-overlay-color", required_argument, "R,G,B", "Background color for --background-effect color; ignored for blur", "0,255,0"},
-        {OptionBackgroundOverlayAlpha, 0, "background-overlay-alpha", required_argument, "0.0..1.0", "Background alpha for --background-effect color; ignored for blur", "0.35"},
+        {OptionBackgroundEffect, 0, "background-effect", required_argument, "effect", "Background effect: color, blur, or image", "color"},
+        {OptionBackgroundImage, 0, "background-image", required_argument, "path", "JPEG/PNG image for --background-effect image", ""},
+        {OptionBackgroundOverlayColor, 0, "background-overlay-color", required_argument, "R,G,B", "Background color for --background-effect color; ignored for blur/image", "0,255,0"},
+        {OptionBackgroundOverlayAlpha, 0, "background-overlay-alpha", required_argument, "0.0..1.0", "Background alpha for --background-effect color; ignored for blur/image", "0.35"},
         {OptionBlurStrength, 0, "blur-strength", required_argument, "value", "Blur strength for --background-effect blur", "15"},
         {OptionDisplayBackend, 0, "display-backend", required_argument, "backend", "Display backend: highgui or drm", "highgui"},
         {OptionFullscreen, 0, "fullscreen", no_argument, "", "Show fullscreen when display output is enabled", ""},
@@ -173,7 +175,11 @@ bool parseBackgroundEffect(const char* value, BackgroundEffect& effect, std::str
         effect = BackgroundEffect::Blur;
         return true;
     }
-    error = "Invalid background effect: " + parsed + " (allowed: color, blur)";
+    if (parsed == "image") {
+        effect = BackgroundEffect::Image;
+        return true;
+    }
+    error = "Invalid background effect: " + parsed + " (allowed: color, blur, image)";
     return false;
 }
 
@@ -318,6 +324,13 @@ bool parseCommandLine(int argc, char** argv, CommandLineResult& result, std::str
         case OptionBackgroundEffect:
             if (!parseBackgroundEffect(optarg, result.config.backgroundEffect, error)) return false;
             break;
+        case OptionBackgroundImage:
+            result.config.backgroundImagePath = optarg;
+            if (result.config.backgroundImagePath.empty()) {
+                error = "--background-image must not be empty.";
+                return false;
+            }
+            break;
         case OptionBackgroundOverlayColor:
             if (!parseOverlayColor(optarg, result.config.backgroundOverlayColor, error)) return false;
             break;
@@ -379,6 +392,10 @@ bool parseCommandLine(int argc, char** argv, CommandLineResult& result, std::str
     }
     if (!result.config.noMask && result.config.maskModelPath.empty()) {
         error = "--mask-model is required unless --no-mask is used.";
+        return false;
+    }
+    if (result.config.backgroundEffect == BackgroundEffect::Image && result.config.backgroundImagePath.empty()) {
+        error = "--background-image is required when --background-effect image is used.";
         return false;
     }
     return true;
@@ -455,6 +472,8 @@ std::string backgroundEffectToString(BackgroundEffect effect)
         return "color";
     case BackgroundEffect::Blur:
         return "blur";
+    case BackgroundEffect::Image:
+        return "image";
     }
     return "unknown";
 }

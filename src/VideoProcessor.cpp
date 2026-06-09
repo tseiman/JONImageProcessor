@@ -13,6 +13,7 @@
 
 #include <opencv2/core.hpp>
 #include <opencv2/core/utils/logger.hpp>
+#include <opencv2/imgcodecs.hpp>
 #include <opencv2/imgproc.hpp>
 
 #include <algorithm>
@@ -35,6 +36,7 @@ struct BackgroundEffectBuffers {
     cv::Mat downscaledFrame;
     cv::Mat downscaledBlurredFrame;
     cv::Mat blurredFrame;
+    cv::Mat scaledBackgroundImage;
     cv::Mat result;
 };
 
@@ -196,6 +198,57 @@ cv::Mat applyBackgroundBlur(
     return buffers.result;
 }
 
+cv::Mat applyBackgroundImage(
+    const cv::Mat& frame,
+    const cv::Mat& personMask,
+    const cv::Mat& backgroundImage,
+    BackgroundEffectBuffers& buffers)
+{
+    if (frame.empty() || personMask.empty() || backgroundImage.empty()) {
+        return frame;
+    }
+
+    cv::Mat mask;
+    if (personMask.type() == CV_8UC1 && personMask.size() == frame.size()) {
+        mask = personMask;
+    } else {
+        cv::resize(personMask, mask, frame.size(), 0.0, 0.0, cv::INTER_LINEAR);
+        if (mask.type() != CV_8UC1) {
+            cv::cvtColor(mask, mask, cv::COLOR_BGR2GRAY);
+        }
+    }
+
+    if (frame.type() != CV_8UC3 || mask.type() != CV_8UC1) {
+        return frame;
+    }
+
+    if (buffers.scaledBackgroundImage.size() != frame.size()
+        || buffers.scaledBackgroundImage.type() != frame.type()) {
+        cv::resize(backgroundImage, buffers.scaledBackgroundImage, frame.size(), 0.0, 0.0, cv::INTER_LINEAR);
+    }
+
+    buffers.result.create(frame.size(), frame.type());
+
+    cv::parallel_for_(cv::Range(0, frame.rows), [&](const cv::Range& range) {
+        for (int y = range.start; y < range.end; ++y) {
+            const auto* source = frame.ptr<cv::Vec3b>(y);
+            const auto* background = buffers.scaledBackgroundImage.ptr<cv::Vec3b>(y);
+            const auto* maskRow = mask.ptr<unsigned char>(y);
+            auto* destination = buffers.result.ptr<cv::Vec3b>(y);
+
+            for (int x = 0; x < frame.cols; ++x) {
+                const int personAlpha = maskRow[x];
+                const int backgroundAlpha = 255 - personAlpha;
+                destination[x][0] = static_cast<unsigned char>((source[x][0] * personAlpha + background[x][0] * backgroundAlpha + 127) / 255);
+                destination[x][1] = static_cast<unsigned char>((source[x][1] * personAlpha + background[x][1] * backgroundAlpha + 127) / 255);
+                destination[x][2] = static_cast<unsigned char>((source[x][2] * personAlpha + background[x][2] * backgroundAlpha + 127) / 255);
+            }
+        }
+    });
+
+    return buffers.result;
+}
+
 cv::Mat applyMaskPostprocessing(
     const cv::Mat& mask,
     cv::Mat& previousMask,
@@ -328,6 +381,7 @@ void logStartupInfo(const ProcessorConfig& config, const ScreenInfo& screenInfo)
     LOG_VERBOSE("Mask smoothing: " << config.maskSmoothing);
     LOG_VERBOSE("Mask morphology: " << maskMorphologyModeToString(config.maskMorphology));
     LOG_VERBOSE("Background effect: " << backgroundEffectToString(config.backgroundEffect));
+    LOG_VERBOSE("Background image: " << (config.backgroundImagePath.empty() ? "none" : config.backgroundImagePath));
     LOG_VERBOSE("Background overlay color: "
         << config.backgroundOverlayColor.r << ","
         << config.backgroundOverlayColor.g << ","
@@ -455,6 +509,15 @@ int VideoProcessor::run()
     std::size_t intervalFrames = 0;
     cv::Mat previousOutputMask;
     BackgroundEffectBuffers backgroundEffectBuffers;
+    cv::Mat backgroundImage;
+    if (config_.backgroundEffect == BackgroundEffect::Image && overlayEnabled) {
+        backgroundImage = cv::imread(config_.backgroundImagePath, cv::IMREAD_COLOR);
+        if (backgroundImage.empty()) {
+            LOG_ERROR("Cannot read background image: " << config_.backgroundImagePath);
+            return ExitRuntimeError;
+        }
+        LOG_INFO("Background image loaded: " << config_.backgroundImagePath);
+    }
 
     bool stoppedBySignal = false;
     while (true) {
@@ -540,6 +603,13 @@ int VideoProcessor::run()
                     resized,
                     outputMask,
                     config_.blurStrength,
+                    backgroundEffectBuffers);
+            } else if (config_.backgroundEffect == BackgroundEffect::Image) {
+                BenchmarkScope timer(benchmark, BenchmarkStage::Overlay);
+                outputFrame = applyBackgroundImage(
+                    resized,
+                    outputMask,
+                    backgroundImage,
                     backgroundEffectBuffers);
             } else {
                 BenchmarkScope timer(benchmark, BenchmarkStage::Overlay);

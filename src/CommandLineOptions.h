@@ -26,7 +26,8 @@ enum class MaskMorphologyMode {
 
 enum class BackgroundEffect {
     Color,
-    Blur
+    Blur,
+    Image
 };
 
 struct RgbColor {
@@ -52,6 +53,7 @@ struct ProcessorConfig {
     MaskMorphologyMode maskMorphology = MaskMorphologyMode::Light;
     CameraFormat cameraFormat = CameraFormat::MJPG;
     BackgroundEffect backgroundEffect = BackgroundEffect::Color;
+    std::string backgroundImagePath;
     RgbColor backgroundOverlayColor;
     double backgroundOverlayAlpha = 0.35;
     int blurStrength = 15;
