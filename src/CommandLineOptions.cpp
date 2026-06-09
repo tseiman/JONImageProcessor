@@ -1,8 +1,12 @@
 #include "CommandLineOptions.h"
 
+#include "ConfigFile.h"
+#include "Logger.h"
+
 #include <getopt.h>
 
 #include <cstdlib>
+#include <cstring>
 #include <iomanip>
 #include <sstream>
 #include <string_view>
@@ -12,6 +16,7 @@ namespace {
 
 enum OptionId {
     OptionHelp = 'h',
+    OptionConfig = 'c',
     OptionInput = 'i',
     OptionDevice = 'd',
     OptionNoDaemon = 'n',
@@ -53,6 +58,7 @@ const std::vector<OptionDefinition>& optionDefinitions()
 {
     static const std::vector<OptionDefinition> definitions = {
         {OptionHelp, 'h', "help", no_argument, "", "Show help", ""},
+        {OptionConfig, 'c', "config", required_argument, "path", "Read configuration from JSON file", ""},
         {OptionInput, 'i', "input", required_argument, "path", "Use a video file as input", ""},
         {OptionDevice, 'd', "device", required_argument, "path", "Use a V4L2 camera device", "/dev/video0"},
         {OptionNoDaemon, 'n', "no-daemon", no_argument, "", "Run as foreground process instead of daemon mode", ""},
@@ -263,6 +269,24 @@ bool parseBlurStrength(const char* value, int& strength, std::string& error)
     return true;
 }
 
+std::string requestedConfigPath(int argc, char** argv, bool& explicitConfig)
+{
+    explicitConfig = false;
+    for (int index = 1; index < argc; ++index) {
+        const std::string arg(argv[index]);
+        if (arg == "-c" || arg == "--config") {
+            explicitConfig = true;
+            return index + 1 < argc ? argv[index + 1] : "";
+        }
+        constexpr const char* longPrefix = "--config=";
+        if (arg.rfind(longPrefix, 0) == 0) {
+            explicitConfig = true;
+            return arg.substr(std::strlen(longPrefix));
+        }
+    }
+    return {};
+}
+
 std::string formatOptionName(const OptionDefinition& definition)
 {
     std::ostringstream stream;
@@ -282,6 +306,20 @@ std::string formatOptionName(const OptionDefinition& definition)
 
 bool parseCommandLine(int argc, char** argv, CommandLineResult& result, std::string& error)
 {
+    bool explicitConfig = false;
+    std::string configPath = requestedConfigPath(argc, argv, explicitConfig);
+    ConfigLoadResult configLoad;
+    if (explicitConfig) {
+        if (configPath.empty()) {
+            error = "--config requires a path.";
+            return false;
+        }
+        if (!loadJsonConfigFile(configPath, result.config, configLoad, error)) return false;
+    } else {
+        configPath = findDefaultConfigPath(argv[0]);
+        if (!configPath.empty() && !loadJsonConfigFile(configPath, result.config, configLoad, error)) return false;
+    }
+
     const std::vector<option> longOptions = buildLongOptions();
     const std::string shortOptions = buildShortOptions();
     opterr = 0;
@@ -297,6 +335,8 @@ bool parseCommandLine(int argc, char** argv, CommandLineResult& result, std::str
         switch (option) {
         case OptionHelp:
             result.showHelp = true;
+            break;
+        case OptionConfig:
             break;
         case OptionInput:
             result.config.inputPath = optarg;
@@ -406,6 +446,13 @@ bool parseCommandLine(int argc, char** argv, CommandLineResult& result, std::str
     }
     if (result.showHelp || result.showVersion) {
         return true;
+    }
+    if (!result.config.noDaemon) {
+        if (configLoad.displayConfigured) {
+            LOG_WARNING("Ignoring JSON display settings in daemon mode; using fullscreen DRM output");
+        }
+        result.config.displayBackend = DisplayBackendType::Drm;
+        result.config.fullscreen = true;
     }
     if (!result.config.noMask && result.config.maskModelPath.empty()) {
         error = "--mask-model is required unless --no-mask is used.";

@@ -21,6 +21,7 @@ JONImageProcessor is a C++17 video processing prototype for NVIDIA Jetson Orin N
 - [Running As Daemon](#running-as-daemon)
 - [Running As Systemd Service](#running-as-systemd-service)
 - [Command Line Options](#command-line-options)
+- [JSON Configuration](#json-configuration)
 - [Runtime Behavior](#runtime-behavior)
 - [Benchmarking](#benchmarking)
 - [IPC Control Interface](#ipc-control-interface)
@@ -276,6 +277,7 @@ journalctl -u JONImageProcessor.service -f
 ## Command Line Options
 
 - `-h`, `--help`: show help.
+- `-c`, `--config <path>`: read configuration from JSON file.
 - `--version`: show release/git version.
 - `-n`, `--no-daemon`: run as foreground process instead of daemon mode.
 - `-v`, `--verbose`: enable detailed logs.
@@ -301,6 +303,71 @@ journalctl -u JONImageProcessor.service -f
 - `--no-mask`: disable TensorRT mask generation.
 - `--no-overlay`: disable background effect rendering.
 - `--ipc-socket <path>`: Unix domain socket path for runtime control. Use `none` to disable IPC. Default: `/tmp/jonimageprocessor.sock`.
+
+## JSON Configuration
+
+JONImageProcessor can read grouped JSON configuration before parsing CLI options. CLI options always override JSON values. If no config is provided and no default config exists, built-in defaults are used.
+
+Default filename: `jonimageprocessor.json`
+
+Default search order:
+
+- `/etc/jonimageprocessor.json`
+- `jonimageprocessor.json` next to the executable
+
+Example config:
+
+```bash
+./JONImageProcessor --config ./etc/jonimageprocessor.json
+```
+
+CLI override example:
+
+```bash
+./JONImageProcessor --config ./etc/jonimageprocessor.json --mask-threshold 0.6
+```
+
+The project example is [etc/jonimageprocessor.json](/home/tseiman/agent-work/JONImageProcessor/etc/jonimageprocessor.json).
+
+Supported JSON groups:
+
+```json
+{
+  "camera": {
+    "device": "/dev/video0",
+    "format": "MJPG"
+  },
+  "processing": {
+    "size": "1920x1080"
+  },
+  "segmentation": {
+    "size": "384x384",
+    "maskModel": "/opt/JONImageProcessor/models/model.engine",
+    "threshold": 0.5,
+    "smoothing": 0.65,
+    "morphology": "light"
+  },
+  "background": {
+    "effect": "color",
+    "image": "/opt/JONImageProcessor/backgrounds/background.png",
+    "overlayColor": "0,255,0",
+    "overlayAlpha": 0.35,
+    "blurStrength": 15
+  },
+  "output": {
+    "size": "auto"
+  },
+  "ipc": {
+    "socket": "/tmp/jonimageprocessor.sock"
+  },
+  "display": {
+    "backend": "drm",
+    "mode": "fullscreen"
+  }
+}
+```
+
+All fields are optional. Unknown JSON fields log warnings and are ignored. Invalid JSON, invalid types, and invalid values stop startup with an error. In daemon mode, display output is forced to fullscreen DRM; JSON `display` settings are ignored with a warning. In `--no-daemon` mode, `display.backend` can be used and `display.mode: "fullscreen"` enables fullscreen.
 
 ## Runtime Behavior
 

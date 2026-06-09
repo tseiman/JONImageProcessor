@@ -1,0 +1,25 @@
+{
+  "camera": {
+    "device": "/dev/video0",
+    "format": "MJPG"
+  },
+  "processing": {
+    "size": "1280x720"
+  },
+  "segmentation": {
+    "size": "384x384",
+    "maskModel": "models/modnet_photographic_portrait_matting.onnx",
+    "threshold": 0.5,
+    "smoothing": 0.65,
+    "morphology": "light"
+  },
+  "background": {
+    "effect": "color",
+    "overlayColor": "0,255,0",
+    "overlayAlpha": 1.0
+  },
+  "display": {
+    "backend": "drm",
+    "mode": "fullscreen"
+  }
+}
