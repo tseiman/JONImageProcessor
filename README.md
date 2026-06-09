@@ -21,6 +21,7 @@ JONImageProcessor is a C++17 video processing prototype for NVIDIA Jetson Orin N
 - [Runtime Behavior](#runtime-behavior)
 - [Benchmarking](#benchmarking)
 - [Notes](#notes)
+- [Architecture](docs/architecture.md)
 
 ## Current Scope
 
