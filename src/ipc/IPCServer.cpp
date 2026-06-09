@@ -2,6 +2,8 @@
 
 #include "Logger.h"
 
+#include <opencv2/imgcodecs.hpp>
+
 #include <sys/socket.h>
 #include <sys/un.h>
 #include <unistd.h>
@@ -208,6 +210,19 @@ bool knownKey(const std::string& key)
         || key == "no_overlay" || key == "benchmark";
 }
 
+std::string validateRuntimeConfig(const ProcessorConfig& config)
+{
+    if (config.backgroundEffect == BackgroundEffect::Image) {
+        if (config.backgroundImagePath.empty()) {
+            return "background_image is required for background_effect image";
+        }
+        if (cv::imread(config.backgroundImagePath, cv::IMREAD_COLOR).empty()) {
+            return "background_image cannot be read";
+        }
+    }
+    return {};
+}
+
 } // namespace
 
 IPCServer::IPCServer(RuntimeState& runtimeState, std::string socketPath)
@@ -361,6 +376,10 @@ std::string IPCServer::handleLine(const std::string& line)
         if (value.type != JsonValue::Type::Boolean) return errorResponse("invalid value type");
         if (key == "no_mask") updated.noMask = value.boolean;
         else updated.noOverlay = value.boolean;
+    }
+    const std::string configError = validateRuntimeConfig(updated);
+    if (!configError.empty()) {
+        return errorResponse(configError);
     }
     runtimeState_.updateConfig(updated);
     return "{\"ok\":true}\n";

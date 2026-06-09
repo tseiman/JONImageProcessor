@@ -643,6 +643,9 @@ int VideoProcessor::run()
                     outputMask,
                     backgroundImage,
                     backgroundEffectBuffers);
+                if (backgroundImage.empty()) {
+                    outputFrame = resized;
+                }
             } else {
                 BenchmarkScope timer(benchmark, BenchmarkStage::Overlay);
                 outputFrame = applyBackgroundOverlay(
