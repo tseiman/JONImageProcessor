@@ -13,6 +13,7 @@ public:
     TensorRtMaskBackend& operator=(const TensorRtMaskBackend&) = delete;
 
     bool initialize(const ProcessorConfig& config) override;
+    void updateConfig(const ProcessorConfig& config) override;
     bool generate(const cv::Mat& frame, std::size_t frameIndex, cv::Mat& personMask, MaskTimings& timings) override;
     std::string name() const override;
 

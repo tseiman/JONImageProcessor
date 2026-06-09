@@ -10,6 +10,8 @@
 #include "MaskBackends.h"
 #include "ShutdownSignal.h"
 #include "Version.h"
+#include "ipc/IPCServer.h"
+#include "ipc/RuntimeState.h"
 
 #include <opencv2/core.hpp>
 #include <opencv2/core/utils/logger.hpp>
@@ -430,6 +432,11 @@ int VideoProcessor::run()
 {
     const ScreenInfo screenInfo = detectPrimaryScreen();
     logStartupInfo(config_, screenInfo);
+    RuntimeState runtimeState(config_);
+    IPCServer ipcServer(runtimeState, config_.ipcSocketPath);
+    if (!ipcServer.start()) {
+        return ExitRuntimeError;
+    }
     LOG_INFO("Display backend: " << displayBackendToString(config_.displayBackend));
     const bool usingCamera = config_.inputPath.empty();
     LOG_INFO("Capture backend: " << (usingCamera ? "v4l2" : "opencv-file"));
@@ -510,12 +517,14 @@ int VideoProcessor::run()
     cv::Mat previousOutputMask;
     BackgroundEffectBuffers backgroundEffectBuffers;
     cv::Mat backgroundImage;
+    std::string loadedBackgroundImagePath;
     if (config_.backgroundEffect == BackgroundEffect::Image && overlayEnabled) {
         backgroundImage = cv::imread(config_.backgroundImagePath, cv::IMREAD_COLOR);
         if (backgroundImage.empty()) {
             LOG_ERROR("Cannot read background image: " << config_.backgroundImagePath);
             return ExitRuntimeError;
         }
+        loadedBackgroundImagePath = config_.backgroundImagePath;
         LOG_INFO("Background image loaded: " << config_.backgroundImagePath);
     }
 
@@ -555,6 +564,7 @@ int VideoProcessor::run()
         if (frame.empty()) {
             continue;
         }
+        ProcessorConfig runtimeConfig = runtimeState.configSnapshot();
 
         const auto processingStartedAt = std::chrono::steady_clock::now();
 
@@ -569,7 +579,19 @@ int VideoProcessor::run()
         }
 
         cv::Mat outputMask;
-        if (maskEnabled) {
+        const bool runtimeMaskEnabled = !runtimeConfig.noMask;
+        const bool runtimeOverlayEnabled = !runtimeConfig.noOverlay && runtimeMaskEnabled;
+        if (runtimeMaskEnabled && !maskBackend) {
+            maskBackend = std::make_unique<TensorRtMaskBackend>();
+            if (!maskBackend->initialize(runtimeConfig)) {
+                LOG_ERROR("Cannot initialize mask backend: tensorrt");
+                break;
+            }
+            LOG_INFO("Mask backend: " << maskBackend->name());
+        }
+
+        if (runtimeMaskEnabled && maskBackend) {
+            maskBackend->updateConfig(runtimeConfig);
             cv::Mat segmentationMask;
             MaskTimings maskTimings;
             if (!maskBackend->generate(resized, frameIndex, segmentationMask, maskTimings)) {
@@ -587,7 +609,7 @@ int VideoProcessor::run()
 
             if (!outputMask.empty()) {
                 BenchmarkScope timer(benchmark, BenchmarkStage::MaskPostprocess);
-                outputMask = applyMaskPostprocessing(outputMask, previousOutputMask, config_);
+                outputMask = applyMaskPostprocessing(outputMask, previousOutputMask, runtimeConfig);
             } else {
                 previousOutputMask.release();
             }
@@ -596,15 +618,24 @@ int VideoProcessor::run()
         }
 
         cv::Mat outputFrame;
-        if (overlayEnabled && !outputMask.empty()) {
-            if (config_.backgroundEffect == BackgroundEffect::Blur) {
+        if (runtimeOverlayEnabled && !outputMask.empty()) {
+            if (runtimeConfig.backgroundEffect == BackgroundEffect::Blur) {
                 BenchmarkScope timer(benchmark, BenchmarkStage::BackgroundBlur);
                 outputFrame = applyBackgroundBlur(
                     resized,
                     outputMask,
-                    config_.blurStrength,
+                    runtimeConfig.blurStrength,
                     backgroundEffectBuffers);
-            } else if (config_.backgroundEffect == BackgroundEffect::Image) {
+            } else if (runtimeConfig.backgroundEffect == BackgroundEffect::Image) {
+                if (loadedBackgroundImagePath != runtimeConfig.backgroundImagePath) {
+                    backgroundImage = cv::imread(runtimeConfig.backgroundImagePath, cv::IMREAD_COLOR);
+                    loadedBackgroundImagePath = runtimeConfig.backgroundImagePath;
+                    if (backgroundImage.empty()) {
+                        LOG_WARNING("Cannot read background image: " << runtimeConfig.backgroundImagePath);
+                    } else {
+                        backgroundEffectBuffers.scaledBackgroundImage.release();
+                    }
+                }
                 BenchmarkScope timer(benchmark, BenchmarkStage::Overlay);
                 outputFrame = applyBackgroundImage(
                     resized,
@@ -616,8 +647,8 @@ int VideoProcessor::run()
                 outputFrame = applyBackgroundOverlay(
                     resized,
                     outputMask,
-                    config_.backgroundOverlayColor,
-                    config_.backgroundOverlayAlpha);
+                    runtimeConfig.backgroundOverlayColor,
+                    runtimeConfig.backgroundOverlayAlpha);
             }
         } else {
             outputFrame = resized;
@@ -636,6 +667,7 @@ int VideoProcessor::run()
         benchmark.add(BenchmarkStage::ProcessingTotal, frameEndedAt - processingStartedAt);
         benchmark.add(BenchmarkStage::PipelineTotal, frameEndedAt - pipelineStartedAt);
         benchmark.frameCompleted();
+        runtimeState.updateBenchmark(benchmark.snapshot());
         benchmark.maybeLogProgress();
 
         if (config_.verbose) {
@@ -679,6 +711,7 @@ int VideoProcessor::run()
 
     LOG_INFO("Processed frames: " << frameIndex);
     benchmark.logSummary();
+    ipcServer.stop();
     if (displayBackend) {
         displayBackend->shutdown();
     }

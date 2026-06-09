@@ -54,6 +54,7 @@ struct ProcessorConfig {
     CameraFormat cameraFormat = CameraFormat::MJPG;
     BackgroundEffect backgroundEffect = BackgroundEffect::Color;
     std::string backgroundImagePath;
+    std::string ipcSocketPath = "/tmp/jonimageprocessor.sock";
     RgbColor backgroundOverlayColor;
     double backgroundOverlayAlpha = 0.35;
     int blurStrength = 15;

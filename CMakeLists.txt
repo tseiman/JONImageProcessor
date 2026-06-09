@@ -65,6 +65,7 @@ add_executable(JONImageProcessor
     src/DrmKmsDisplayBackend.cpp
     src/Logger.cpp
     src/LowLatencyFrameCapture.cpp
+    src/ipc/IPCServer.cpp
     src/ShutdownSignal.cpp
     src/TensorRtMaskBackend.cpp
     src/OpenCvDisplayBackend.cpp

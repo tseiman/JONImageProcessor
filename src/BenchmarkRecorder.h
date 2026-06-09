@@ -4,6 +4,8 @@
 #include <cstddef>
 #include <string>
 
+#include "ipc/RuntimeState.h"
+
 enum class BenchmarkStage {
     CaptureWait,
     FrameHandover,
@@ -35,6 +37,7 @@ public:
         std::chrono::steady_clock::duration elapsed);
     void maybeLogProgress();
     void logSummary() const;
+    BenchmarkSnapshot snapshot() const;
 
 private:
     struct StageStats {

@@ -540,6 +540,15 @@ bool TensorRtMaskBackend::initialize(const ProcessorConfig& config)
 #endif
 }
 
+void TensorRtMaskBackend::updateConfig(const ProcessorConfig& config)
+{
+#ifdef JON_WITH_TENSORRT_MASK
+    impl_->threshold = config.maskThreshold;
+#else
+    (void)config;
+#endif
+}
+
 bool TensorRtMaskBackend::generate(
     const cv::Mat& frame,
     std::size_t frameIndex,

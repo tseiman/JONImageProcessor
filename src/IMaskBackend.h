@@ -19,6 +19,7 @@ public:
     virtual ~IMaskBackend() = default;
 
     virtual bool initialize(const ProcessorConfig& config) = 0;
+    virtual void updateConfig(const ProcessorConfig&) {}
     virtual bool generate(const cv::Mat& frame, std::size_t frameIndex, cv::Mat& personMask, MaskTimings& timings) = 0;
     virtual std::string name() const = 0;
 };

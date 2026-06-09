@@ -30,6 +30,7 @@ enum OptionId {
     OptionBlurStrength,
     OptionFullscreen,
     OptionDisplayBackend,
+    OptionIpcSocket,
     OptionBenchmark,
     OptionNoDisplay,
     OptionNoMask,
@@ -67,6 +68,7 @@ const std::vector<OptionDefinition>& optionDefinitions()
         {OptionBackgroundOverlayAlpha, 0, "background-overlay-alpha", required_argument, "0.0..1.0", "Background alpha for --background-effect color; ignored for blur/image", "0.35"},
         {OptionBlurStrength, 0, "blur-strength", required_argument, "value", "Blur strength for --background-effect blur", "15"},
         {OptionDisplayBackend, 0, "display-backend", required_argument, "backend", "Display backend: highgui or drm", "highgui"},
+        {OptionIpcSocket, 0, "ipc-socket", required_argument, "path", "Unix domain socket path, or 'none' to disable IPC", "/tmp/jonimageprocessor.sock"},
         {OptionFullscreen, 0, "fullscreen", no_argument, "", "Show fullscreen when display output is enabled", ""},
         {OptionBenchmark, 0, "benchmark", no_argument, "", "Enable benchmark mode", ""},
         {OptionNoDisplay, 0, "no-display", no_argument, "", "Disable display output", ""},
@@ -349,6 +351,13 @@ bool parseCommandLine(int argc, char** argv, CommandLineResult& result, std::str
             break;
         case OptionDisplayBackend:
             if (!parseDisplayBackend(optarg, result.config.displayBackend, error)) return false;
+            break;
+        case OptionIpcSocket:
+            result.config.ipcSocketPath = optarg;
+            if (result.config.ipcSocketPath.empty()) {
+                error = "--ipc-socket must not be empty.";
+                return false;
+            }
             break;
         case OptionFullscreen:
             result.config.fullscreen = true;

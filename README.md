@@ -20,6 +20,7 @@ JONImageProcessor is a C++17 video processing prototype for NVIDIA Jetson Orin N
 - [Command Line Options](#command-line-options)
 - [Runtime Behavior](#runtime-behavior)
 - [Benchmarking](#benchmarking)
+- [IPC Control Interface](#ipc-control-interface)
 - [Notes](#notes)
 - [Architecture](docs/architecture.md)
 
@@ -32,7 +33,7 @@ Kept runtime features:
 - TensorRT mask backend.
 - DRM/KMS display backend.
 - OpenCV HighGUI display backend.
-- Background effects: `blur` and `color`.
+- Background effects: `blur`, `color`, and `image`.
 - Benchmark and verbose diagnostics.
 
 Removed runtime features:
@@ -219,6 +220,7 @@ MODEL_PATH="$HOME/JONImageProcessor/models/modnet_photographic_portrait_matting.
 - `--no-display`: disable display output.
 - `--no-mask`: disable TensorRT mask generation.
 - `--no-overlay`: disable background effect rendering.
+- `--ipc-socket <path>`: Unix domain socket path for runtime control. Use `none` to disable IPC. Default: `/tmp/jonimageprocessor.sock`.
 
 ## Runtime Behavior
 
@@ -239,6 +241,53 @@ For pipeline timing without display or effects:
 ```
 
 Stop long-running camera benchmarks with `Ctrl-C`. SIGINT is handled and prints the final benchmark summary.
+
+## IPC Control Interface
+
+JONImageProcessor exposes a small Unix domain socket control interface for runtime parameters. The default socket is `/tmp/jonimageprocessor.sock`; use `--ipc-socket <path>` to change it or `--ipc-socket none` to disable IPC. The protocol is NDJSON: send one JSON request line and receive one JSON response line.
+
+Commands:
+
+- `get`: read one key.
+- `set`: update one writable key.
+- `list`: read all runtime keys.
+
+Writable keys:
+
+- `mask_threshold`: float `0.0..1.0`
+- `mask_smoothing`: float `0.0..1.0`
+- `mask_morphology`: `off`, `light`, `strong`
+- `background_effect`: `color`, `blur`, `image`
+- `background_image`: string path
+- `background_overlay_color`: `R,G,B`
+- `background_overlay_alpha`: float `0.0..1.0`
+- `blur_strength`: integer `1..100`
+- `no_mask`: boolean
+- `no_overlay`: boolean
+
+Read-only key:
+
+- `benchmark`: current benchmark snapshot
+
+Examples:
+
+```bash
+echo '{"cmd":"get","key":"mask_threshold"}' | socat - UNIX-CONNECT:/tmp/jonimageprocessor.sock
+```
+
+```bash
+echo '{"cmd":"set","key":"mask_threshold","value":0.6}' | socat - UNIX-CONNECT:/tmp/jonimageprocessor.sock
+```
+
+```bash
+echo '{"cmd":"list"}' | socat - UNIX-CONNECT:/tmp/jonimageprocessor.sock
+```
+
+```bash
+echo '{"cmd":"get","key":"benchmark"}' | socat - UNIX-CONNECT:/tmp/jonimageprocessor.sock
+```
+
+Invalid JSON, unknown commands, unknown keys, invalid value types, invalid ranges, and attempts to set `benchmark` return `{"ok":false,...}`. There is intentionally no shutdown command.
 
 ## Notes
 

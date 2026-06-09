@@ -203,6 +203,17 @@ void BenchmarkRecorder::logSummary() const
     logDistributionLine("Unclassified other", totalMs > 0.0 ? (otherMs / totalMs) * 100.0 : 0.0);
 }
 
+BenchmarkSnapshot BenchmarkRecorder::snapshot() const
+{
+    BenchmarkSnapshot snapshot;
+    snapshot.framesProcessed = frames_;
+    snapshot.avgFrameMs = pipelineAverageMilliseconds();
+    snapshot.fps = snapshot.avgFrameMs > 0.0 ? 1000.0 / snapshot.avgFrameMs : 0.0;
+    snapshot.processingTotalMs = averageMilliseconds(BenchmarkStage::ProcessingTotal);
+    snapshot.pipelineTotalMs = averageMilliseconds(BenchmarkStage::PipelineTotal);
+    return snapshot;
+}
+
 double BenchmarkRecorder::averageMilliseconds(BenchmarkStage stage) const
 {
     if (frames_ == 0) {
