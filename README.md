@@ -15,8 +15,11 @@ JONImageProcessor is a C++17 video processing prototype for NVIDIA Jetson Orin N
 - [Run](#run)
   - [Blur Background](#blur-background)
   - [Color Background](#color-background)
+  - [Image Background](#image-background)
   - [HighGUI Window](#highgui-window)
   - [Video File Test](#video-file-test)
+- [Running As Daemon](#running-as-daemon)
+- [Running As Systemd Service](#running-as-systemd-service)
 - [Command Line Options](#command-line-options)
 - [Runtime Behavior](#runtime-behavior)
 - [Benchmarking](#benchmarking)
@@ -167,37 +170,114 @@ MODEL_PATH="$HOME/JONImageProcessor/models/modnet_photographic_portrait_matting.
 ### Blur Background
 
 ```bash
-./JONImageProcessor --device /dev/video0 --processing-size 1280x720 --mask-model "$MODEL_PATH" --segmentation-size 384x384 --mask-threshold 0.7 --mask-smoothing 0.65 --mask-morphology light --background-effect blur --blur-strength 85 --display-backend drm --fullscreen --benchmark
+./JONImageProcessor --no-daemon --device /dev/video0 --processing-size 1280x720 --mask-model "$MODEL_PATH" --segmentation-size 384x384 --mask-threshold 0.7 --mask-smoothing 0.65 --mask-morphology light --background-effect blur --blur-strength 85 --display-backend drm --fullscreen --benchmark
 ```
 
 ### Color Background
 
 ```bash
-./JONImageProcessor --device /dev/video0 --processing-size 1280x720 --mask-model "$MODEL_PATH" --segmentation-size 384x384 --mask-threshold 0.5 --mask-smoothing 0.65 --mask-morphology light --background-effect color --background-overlay-color 0,255,0 --background-overlay-alpha 1.0 --display-backend drm --fullscreen --benchmark
+./JONImageProcessor --no-daemon --device /dev/video0 --processing-size 1280x720 --mask-model "$MODEL_PATH" --segmentation-size 384x384 --mask-threshold 0.5 --mask-smoothing 0.65 --mask-morphology light --background-effect color --background-overlay-color 0,255,0 --background-overlay-alpha 1.0 --display-backend drm --fullscreen --benchmark
 ```
 
 ### Image Background
 
 ```bash
-./JONImageProcessor --device /dev/video0 --processing-size 1280x720 --mask-model "$MODEL_PATH" --segmentation-size 384x384 --mask-threshold 0.7 --mask-smoothing 0.65 --mask-morphology light --background-effect image --background-image "$HOME/JONImageProcessor/background.jpg" --display-backend drm --fullscreen --benchmark
+./JONImageProcessor --no-daemon --device /dev/video0 --processing-size 1280x720 --mask-model "$MODEL_PATH" --segmentation-size 384x384 --mask-threshold 0.7 --mask-smoothing 0.65 --mask-morphology light --background-effect image --background-image "$HOME/JONImageProcessor/background.jpg" --display-backend drm --fullscreen --benchmark
 ```
 
 ### HighGUI Window
 
 ```bash
-./JONImageProcessor --device /dev/video0 --processing-size 1280x720 --mask-model "$MODEL_PATH" --segmentation-size 384x384 --background-effect blur --display-backend highgui
+./JONImageProcessor --no-daemon --device /dev/video0 --processing-size 1280x720 --mask-model "$MODEL_PATH" --segmentation-size 384x384 --background-effect blur --display-backend highgui
 ```
 
 ### Video File Test
 
 ```bash
-./JONImageProcessor --input test.mp4 --mask-model "$MODEL_PATH" --background-effect blur --display-backend highgui
+./JONImageProcessor --no-daemon --input test.mp4 --mask-model "$MODEL_PATH" --background-effect blur --display-backend highgui
+```
+
+## Running As Daemon
+
+Without `--no-daemon`, JONImageProcessor starts in daemon mode, detaches from the terminal, redirects standard streams to `/dev/null`, and writes logs through syslog/journald. Use foreground mode for development and benchmarking:
+
+```bash
+./JONImageProcessor --no-daemon --device /dev/video0 --processing-size 1280x720 --mask-model "$MODEL_PATH" --segmentation-size 384x384 --background-effect blur --display-backend drm --fullscreen --benchmark
+```
+
+Daemon example:
+
+```bash
+./JONImageProcessor --device /dev/video0 --processing-size 1280x720 --mask-model "$MODEL_PATH" --segmentation-size 384x384 --background-effect blur --display-backend drm --fullscreen
+```
+
+Stop a daemonized process with `SIGTERM`, for example:
+
+```bash
+pkill -TERM JONImageProcessor
+```
+
+## Running As Systemd Service
+
+The example unit is in `packaging/systemd/JONImageProcessor.service` and uses daemon mode. It does not pass `--no-daemon`.
+
+Copy files from the build host:
+
+```bash
+scp build-jetson-cross/JONImageProcessor tseiman@jon:/tmp/JONImageProcessor
+```
+
+```bash
+scp packaging/systemd/JONImageProcessor.service tseiman@jon:/tmp/JONImageProcessor.service
+```
+
+```bash
+scp ~/models/modnet_photographic_portrait_matting.onnx tseiman@jon:/tmp/modnet_photographic_portrait_matting.onnx
+```
+
+Install on the Jetson:
+
+```bash
+sudo mkdir -p /opt/JONImageProcessor/models
+```
+
+```bash
+sudo cp /tmp/JONImageProcessor /opt/JONImageProcessor/JONImageProcessor
+```
+
+```bash
+sudo cp /tmp/modnet_photographic_portrait_matting.onnx /opt/JONImageProcessor/models/
+```
+
+```bash
+sudo cp /tmp/JONImageProcessor.service /etc/systemd/system/JONImageProcessor.service
+```
+
+```bash
+sudo systemctl daemon-reload
+```
+
+```bash
+sudo systemctl enable JONImageProcessor.service
+```
+
+```bash
+sudo systemctl start JONImageProcessor.service
+```
+
+```bash
+sudo systemctl status JONImageProcessor.service
+```
+
+```bash
+journalctl -u JONImageProcessor.service -f
 ```
 
 ## Command Line Options
 
 - `-h`, `--help`: show help.
 - `--version`: show release/git version.
+- `-n`, `--no-daemon`: run as foreground process instead of daemon mode.
 - `-v`, `--verbose`: enable detailed logs.
 - `-i`, `--input <path>`: use a video file as input. Without this option, the V4L2 camera is used.
 - `-d`, `--device <path>`: V4L2 camera device. Default: `/dev/video0`.

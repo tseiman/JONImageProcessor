@@ -59,6 +59,7 @@ add_executable(JONImageProcessor
     src/BenchmarkRecorder.cpp
     src/CaptureBackendFactory.cpp
     src/CommandLineOptions.cpp
+    src/Daemon.cpp
     src/DisplayBackendFactory.cpp
     src/DisplayEnvironment.cpp
     src/DisplayRenderer.cpp

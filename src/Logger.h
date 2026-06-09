@@ -7,6 +7,8 @@ namespace Logger {
 
 void setVerbose(bool enabled);
 bool isVerbose();
+void setSyslog(bool enabled);
+void shutdown();
 
 void info(const std::string& message);
 void warning(const std::string& message);

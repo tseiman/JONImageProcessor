@@ -1,4 +1,5 @@
 #include "CommandLineOptions.h"
+#include "Daemon.h"
 #include "Logger.h"
 #include "ShutdownSignal.h"
 #include "Version.h"
@@ -15,8 +16,6 @@ constexpr int ExitUsageError = 1;
 
 int main(int argc, char** argv)
 {
-    installShutdownSignalHandlers();
-
     CommandLineResult commandLine;
     std::string error;
 
@@ -38,6 +37,18 @@ int main(int argc, char** argv)
         return ExitOk;
     }
 
+    if (!commandLine.config.noDaemon) {
+        std::string daemonError;
+        if (!daemonizeProcess(daemonError)) {
+            LOG_ERROR("Cannot daemonize process: " << daemonError);
+            return 2;
+        }
+        Logger::setSyslog(true);
+    }
+
+    installShutdownSignalHandlers();
     VideoProcessor processor(commandLine.config);
-    return processor.run();
+    const int result = processor.run();
+    Logger::shutdown();
+    return result;
 }

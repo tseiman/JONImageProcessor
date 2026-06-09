@@ -14,6 +14,7 @@ enum OptionId {
     OptionHelp = 'h',
     OptionInput = 'i',
     OptionDevice = 'd',
+    OptionNoDaemon = 'n',
     OptionVerbose = 'v',
     OptionProcessingSize = 'p',
     OptionOutputSize = 'o',
@@ -54,6 +55,7 @@ const std::vector<OptionDefinition>& optionDefinitions()
         {OptionHelp, 'h', "help", no_argument, "", "Show help", ""},
         {OptionInput, 'i', "input", required_argument, "path", "Use a video file as input", ""},
         {OptionDevice, 'd', "device", required_argument, "path", "Use a V4L2 camera device", "/dev/video0"},
+        {OptionNoDaemon, 'n', "no-daemon", no_argument, "", "Run as foreground process instead of daemon mode", ""},
         {OptionProcessingSize, 'p', "processing-size", required_argument, "WxH", "Processing size and requested camera size", "1920x1080"},
         {OptionOutputSize, 'o', "output-size", required_argument, "WxH", "Explicit display render size", "auto"},
         {OptionSegmentationSize, 's', "segmentation-size", required_argument, "WxH", "TensorRT segmentation size", "384x384"},
@@ -301,6 +303,9 @@ bool parseCommandLine(int argc, char** argv, CommandLineResult& result, std::str
             break;
         case OptionDevice:
             result.config.devicePath = optarg;
+            break;
+        case OptionNoDaemon:
+            result.config.noDaemon = true;
             break;
         case OptionProcessingSize:
             if (!parseSize(optarg, "--processing-size", result.config.width, result.config.height, error)) return false;

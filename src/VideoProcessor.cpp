@@ -392,6 +392,7 @@ void logStartupInfo(const ProcessorConfig& config, const ScreenInfo& screenInfo)
     LOG_VERBOSE("Blur strength: " << config.blurStrength);
     LOG_VERBOSE("Camera format: " << cameraFormatToString(config.cameraFormat));
     LOG_VERBOSE("Fullscreen: " << (config.fullscreen ? "true" : "false"));
+    LOG_VERBOSE("Daemon mode: " << (config.noDaemon ? "false" : "true"));
     LOG_VERBOSE("Benchmark: " << (config.benchmark ? "true" : "false"));
     LOG_VERBOSE("No display: " << (config.noDisplay ? "true" : "false"));
     LOG_VERBOSE("No mask: " << (config.noMask ? "true" : "false"));
