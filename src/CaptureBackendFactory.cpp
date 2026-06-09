@@ -9,12 +9,5 @@ std::unique_ptr<ICaptureBackend> CaptureBackendFactory::create(const ProcessorCo
         return std::make_unique<OpenCvFileCaptureBackend>();
     }
 
-    switch (config.captureBackend) {
-    case CaptureBackendType::OpenCv:
-        return std::make_unique<OpenCvCameraCaptureBackend>();
-    case CaptureBackendType::V4L2:
-        return std::make_unique<V4L2CameraCaptureBackend>();
-    }
-
-    return nullptr;
+    return std::make_unique<V4L2CameraCaptureBackend>();
 }

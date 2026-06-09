@@ -15,7 +15,6 @@
 #include <unistd.h>
 
 #include <cerrno>
-#include <cmath>
 #include <cstring>
 #include <sstream>
 #include <vector>
@@ -93,7 +92,6 @@ bool V4L2CameraCaptureBackend::open(const ProcessorConfig& config)
     LOG_INFO("Opening V4L2 camera device: " << config.devicePath);
     LOG_VERBOSE("Requested camera format: " << cameraFormatToString(config.cameraFormat));
     LOG_VERBOSE("Requested camera size: " << config.width << "x" << config.height);
-    LOG_VERBOSE("Requested camera FPS: " << config.cameraFps);
 
     fd_ = ::open(config.devicePath.c_str(), O_RDWR | O_NONBLOCK, 0);
     if (fd_ < 0) {
@@ -173,7 +171,7 @@ bool V4L2CameraCaptureBackend::read(cv::Mat& frame)
 
 double V4L2CameraCaptureBackend::fps() const
 {
-    return static_cast<double>(fps_);
+    return fps_;
 }
 
 void V4L2CameraCaptureBackend::interrupt()
@@ -258,16 +256,8 @@ bool V4L2CameraCaptureBackend::initializeDevice(const ProcessorConfig& config)
 
     v4l2_streamparm streamParm {};
     streamParm.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
-    streamParm.parm.capture.timeperframe.numerator = 1;
-    streamParm.parm.capture.timeperframe.denominator = static_cast<unsigned int>(config.cameraFps);
-    if (xioctl(fd_, VIDIOC_S_PARM, &streamParm) < 0) {
-        LOG_ERROR("VIDIOC_S_PARM failed: " << errnoMessage());
-        return false;
-    }
-
-    fps_ = static_cast<int>(std::lround(fpsFromTimeperframe(streamParm.parm.capture.timeperframe)));
-    if (fps_ <= 0) {
-        fps_ = config.cameraFps;
+    if (xioctl(fd_, VIDIOC_G_PARM, &streamParm) == 0) {
+        fps_ = fpsFromTimeperframe(streamParm.parm.capture.timeperframe);
     }
 
     return true;
@@ -424,10 +414,6 @@ void V4L2CameraCaptureBackend::logActiveFormat(const ProcessorConfig& config) co
             << width_ << "x" << height_);
     }
 
-    if (fps_ != config.cameraFps) {
-        LOG_WARNING("Camera did not accept requested FPS. Requested "
-            << config.cameraFps << ", active " << fps_);
-    }
 #else
     (void)config;
 #endif

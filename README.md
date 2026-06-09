@@ -1,640 +1,240 @@
 # JONImageProcessor
 
-JONImageProcessor is a C++17 image-processing application for NVIDIA Jetson Orin Nano. It reads video from a camera, creates a TensorRT-based person mask, renders a background overlay, and displays the result fullscreen. OpenCV HighGUI remains available for development; the production display path is moving to Linux DRM/KMS through GBM/EGL/GLES.
-
-The intended deployment is a Jetson appliance: the Jetson boots, the application starts automatically later through systemd, reads the camera, and renders fullscreen to HDMI or DisplayPort. This repository currently focuses on the application binary and reproducible cross-builds.
+JONImageProcessor is a C++17 video processing prototype for NVIDIA Jetson Orin Nano. It captures a live camera image through V4L2 or reads a video file for development, generates a person mask with TensorRT, and renders a processed fullscreen image through DRM/KMS or an OpenCV HighGUI window.
 
 ## Table of Contents
 
+- [Current Scope](#current-scope)
 - [Prerequisites](#prerequisites)
   - [Build Host](#build-host)
   - [Jetson Target](#jetson-target)
-  - [Jetson Packages](#jetson-packages)
-  - [NVIDIA Cross-Compile Container](#nvidia-cross-compile-container)
-- [Prepare the Sysroot](#prepare-the-sysroot)
 - [Build](#build)
-  - [Cross-Build Without Jetson Inference](#cross-build-without-jetson-inference)
-  - [Prepare jetson-inference Prefix](#prepare-jetson-inference-prefix)
-  - [Cross-Build With Jetson Inference](#cross-build-with-jetson-inference)
-- [Install and Run on Jetson](#install-and-run-on-jetson)
-  - [Install the Binary](#install-the-binary)
-  - [Install jetson-inference Runtime Libraries](#install-jetson-inference-runtime-libraries)
-  - [Run the Application](#run-the-application)
-- [Useful Runtime Commands](#useful-runtime-commands)
-- [Command-Line Options](#command-line-options)
-- [Camera Configuration](#camera-configuration)
-- [Capture Backends](#capture-backends)
-- [Mask Backends](#mask-backends)
-- [Segmentation Quality TODO](#segmentation-quality-todo)
-- [Display Backends](#display-backends)
-- [Display Modes](#display-modes)
-- [Verbose Logging](#verbose-logging)
-- [Performance Analysis](#performance-analysis)
-- [Planned Service Operation](#planned-service-operation)
-- [Planned Runtime Control](#planned-runtime-control)
+  - [Local Development Build](#local-development-build)
+  - [Jetson Cross Build](#jetson-cross-build)
+- [Deploy To Jetson](#deploy-to-jetson)
+- [Run](#run)
+  - [Blur Background](#blur-background)
+  - [Color Background](#color-background)
+  - [HighGUI Window](#highgui-window)
+  - [Video File Test](#video-file-test)
+- [Command Line Options](#command-line-options)
+- [Runtime Behavior](#runtime-behavior)
+- [Benchmarking](#benchmarking)
+- [Notes](#notes)
+
+## Current Scope
+
+Kept runtime features:
+
+- V4L2 camera input.
+- OpenCV video file input with `--input` for development and testing.
+- TensorRT mask backend.
+- DRM/KMS display backend.
+- OpenCV HighGUI display backend.
+- Background effects: `blur` and `color`.
+- Benchmark and verbose diagnostics.
+
+Removed runtime features:
+
+- MP4/file output.
+- OpenCV camera capture backend.
+- Experimental mask backends.
+- User-selectable capture backend and display mode.
+
+The camera capture backend is fixed to V4L2. Video files always use OpenCV file capture. Display scaling is fixed to fill the active canvas while preserving aspect ratio and cropping if needed. TensorRT is the only real mask backend.
 
 ## Prerequisites
 
 ### Build Host
 
-Use an x86_64 Linux VM or workstation as the build host.
+Install on the x86_64 Linux build host:
 
-Install the required host tools:
+- Docker with access to NVIDIA NGC images.
+- `git`
+- `rsync`
+- `scp`/OpenSSH client
+- `file`
 
-```bash
-sudo apt update && sudo apt install -y git docker.io rsync openssh-client file wget ca-certificates dialog
-```
-
-Enable Docker and allow your user to run Docker:
-
-```bash
-sudo systemctl enable --now docker && sudo usermod -aG docker "$USER"
-```
-
-Log out and back in, then verify Docker:
-
-```bash
-docker run --rm hello-world
-```
-
-Clone this repository on the build host:
-
-```bash
-git clone git@github.com:tseiman/JONImageProcessor.git && cd JONImageProcessor
-```
-
-### Jetson Target
-
-This README assumes:
-
-- NVIDIA Jetson Orin Nano
-- JetPack 6.1 / L4T 36.4 family
-- Camera available as `/dev/video0`
-- SSH access from the build host, for example `tseiman@jon`
-- Sysroot location on the build host: `$HOME/sysroots/orin-nano`
-- Optional jetson-inference prefix on the build host: `$HOME/aarch64-prefixes/jetson-inference`
-
-Check the Jetson version on the Jetson:
-
-```bash
-cat /etc/nv_tegra_release && dpkg-query -W nvidia-l4t-core
-```
-
-Check the camera on the Jetson:
-
-```bash
-v4l2-ctl --list-formats-ext -d /dev/video0
-```
-
-Allow the runtime user to access V4L2 devices:
-
-```bash
-sudo usermod -aG video "$USER"
-```
-
-Log out and back in after changing group membership.
-
-### Jetson Packages
-
-Install the target packages on the Jetson before syncing the sysroot:
-
-```bash
-sudo apt update && sudo apt install -y rsync openssh-server v4l-utils libopencv-dev libdrm-dev libgbm-dev libegl1-mesa-dev libgles2-mesa-dev libglew-dev libglu1-mesa-dev libgstrtspserver-1.0-dev libjson-glib-dev libsoup2.4-dev
-```
-
-JetPack provides CUDA and TensorRT. The package list above adds the development files that were needed for this cross-build path and for the `jetson-inference` prefix.
-
-### NVIDIA Cross-Compile Container
-
-The build uses NVIDIA's NGC cross-compile container:
-
-```text
-nvcr.io/nvidia/jetpack-linux-aarch64-crosscompile-x86:6.1
-```
-
-Pull it on the x86_64 build host:
+Pull the NVIDIA JetPack cross-compile container:
 
 ```bash
 docker pull nvcr.io/nvidia/jetpack-linux-aarch64-crosscompile-x86:6.1
 ```
 
-This is a build container, not the JONImageProcessor runtime container. The application is deployed directly onto the Jetson OS in this project stage.
-
-## Prepare the Sysroot
-
-Create the sysroot directory on the build host:
+Create a Jetson sysroot on the build host. The sysroot must contain the Jetson target libraries and headers, including OpenCV, CUDA, TensorRT, DRM/KMS, GBM, EGL, and GLES:
 
 ```bash
-mkdir -p "$HOME/sysroots/orin-nano"
+mkdir -p "$HOME/sysroots/orin-nano" && rsync -aHAX --numeric-ids tseiman@jon:/usr "$HOME/sysroots/orin-nano/" && rsync -aHAX --numeric-ids tseiman@jon:/lib "$HOME/sysroots/orin-nano/" && rsync -aHAX --numeric-ids tseiman@jon:/opt "$HOME/sysroots/orin-nano/"
 ```
 
-Copy `/usr`, `/lib`, and `/opt` from the Jetson:
+Some protected system files may fail with rsync permission errors. That is acceptable as long as the needed development files exist:
 
 ```bash
-rsync -aHAX --numeric-ids --exclude='/libexec/sssd/' tseiman@jon:/usr/ "$HOME/sysroots/orin-nano/usr/"
+test -d "$HOME/sysroots/orin-nano/usr/include" && test -d "$HOME/sysroots/orin-nano/usr/lib/aarch64-linux-gnu" && find "$HOME/sysroots/orin-nano/usr" -name OpenCVConfig.cmake -o -name opencv4.pc && find "$HOME/sysroots/orin-nano/usr" -name NvInfer.h
 ```
+
+### Jetson Target
+
+Install or verify on the Jetson:
+
+- JetPack 6.1 compatible runtime.
+- OpenCV runtime libraries.
+- CUDA/TensorRT runtime libraries.
+- V4L2 camera access.
+- DRM/KMS access through `/dev/dri/card*`.
+- The TensorRT mask model under `~/JONImageProcessor/models/`.
+
+For direct DRM/KMS fullscreen output, stop the graphical display manager before running the DRM backend:
 
 ```bash
-rsync -aHAX --numeric-ids tseiman@jon:/lib/ "$HOME/sysroots/orin-nano/lib/"
+sudo systemctl stop gdm3
 ```
 
-```bash
-rsync -aHAX --numeric-ids --exclude='/containerd/' tseiman@jon:/opt/ "$HOME/sysroots/orin-nano/opt/"
-```
-
-If rsync reports permission errors for `/usr/libexec/sssd/*`, those files are not needed for this build. If `/lib` conflicts with an existing symlink or directory, keep the already synced `usr/lib/aarch64-linux-gnu` content and verify the required libraries below before changing the sysroot layout.
-
-Verify the important files:
-
-```bash
-test -d "$HOME/sysroots/orin-nano/usr/include" && test -d "$HOME/sysroots/orin-nano/usr/lib/aarch64-linux-gnu" && echo ok
-```
-
-```bash
-find "$HOME/sysroots/orin-nano/usr" -name OpenCVConfig.cmake -o -name opencv4.pc
-```
-
-```bash
-find "$HOME/sysroots/orin-nano/usr" -name cuda_runtime_api.h
-```
-
-```bash
-find "$HOME/sysroots/orin-nano/usr" "$HOME/sysroots/orin-nano/opt" -name NvInfer.h
-```
-
-```bash
-find "$HOME/sysroots/orin-nano" -name 'libcublas.so' -o -name 'libnppicc.so' -o -name 'libcudla.so' -o -name 'libnvdla_compiler.so' -o -name 'libgstrtspserver-1.0.so' -o -name 'libjson-glib-1.0.so' -o -name 'libsoup-2.4.so'
-```
+If Ubuntu uses another display manager, replace `gdm3` with the active service, for example `lightdm` or `sddm`.
 
 ## Build
 
-### Cross-Build Without Jetson Inference
+### Local Development Build
 
-This is the baseline build. It supports OpenCV/V4L2 capture and the `none`/`dummy` mask backends.
-
-```bash
-JETSON_SYSROOT="$HOME/sysroots/orin-nano" ./scripts/build-jetson-cross.sh
-```
-
-Verify the output:
+Use this only for syntax checks and HighGUI/file-input development on a Linux VM with OpenCV development files installed:
 
 ```bash
-file build-jetson-cross/JONImageProcessor
-```
-
-If the source was committed after this cross-build and only the embedded 7-character Git version needs to be updated, patch the already built binary instead of rebuilding:
-
-```bash
-./scripts/patch-binary-git-version.sh build-jetson-cross/JONImageProcessor
-```
-
-Expected architecture:
-
-```text
-ELF 64-bit LSB pie executable, ARM aarch64, GNU/Linux
-```
-
-### Prepare jetson-inference Prefix
-
-Only do this if you need `--mask-backend jetson`.
-
-Clone `jetson-inference` on the build host:
-
-```bash
-mkdir -p "$HOME/src" "$HOME/aarch64-prefixes" && git clone --recursive https://github.com/dusty-nv/jetson-inference.git "$HOME/src/jetson-inference"
-```
-
-Start the NVIDIA cross-compile container from the JONImageProcessor repository root on the build host:
-
-```bash
-docker run --rm -it -v "$HOME/src/jetson-inference:/workspace/jetson-inference" -v "$HOME/sysroots/orin-nano:/workspace/sysroot:ro" -v "$HOME/aarch64-prefixes/jetson-inference:/workspace/install" -v "$PWD/cmake/toolchains/jetson-aarch64.cmake:/workspace/jetson-aarch64.cmake:ro" -v "$PWD/patches/jetson-inference:/workspace/jon-patches:ro" -w /workspace/jetson-inference nvcr.io/nvidia/jetpack-linux-aarch64-crosscompile-x86:6.1 /bin/bash
-```
-
-Inside the container, patch `jetson-inference` so its legacy `FindCUDA.cmake` links AArch64 CUDA libraries from the mounted sysroot instead of x86_64 host CUDA:
-
-```bash
-cp -n utils/cuda/FindCUDA.cmake utils/cuda/FindCUDA.cmake.codex-backup
+cmake -B build -S .
 ```
 
 ```bash
-python3 - <<'PY'
-from pathlib import Path
-p = Path("utils/cuda/FindCUDA.cmake")
-s = p.read_text()
-old = '''  if(CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64")
-    if( EXISTS "/usr/local/cuda/lib64/lib${_names}.so" )
-        set(${_var} "/usr/local/cuda/lib64/lib${_names}.so")
-    endif()
-  else()'''
-new = '''  if(CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64")
-    if( EXISTS "/workspace/sysroot/usr/local/cuda-12.6/targets/aarch64-linux/lib/lib${_names}.so" )
-        set(${_var} "/workspace/sysroot/usr/local/cuda-12.6/targets/aarch64-linux/lib/lib${_names}.so")
-    elseif( EXISTS "/usr/local/cuda/lib64/lib${_names}.so" )
-        set(${_var} "/usr/local/cuda/lib64/lib${_names}.so")
-    endif()
-  else()'''
-if old not in s:
-    raise SystemExit("expected FindCUDA aarch64 block not found")
-p.write_text(s.replace(old, new))
-PY
+cmake --build build
 ```
 
-Patch `jetson-inference` for the TensorRT 10 runtime path used by JetPack 6. This sets input tensor addresses before `enqueueV3()` and fixes an unsafe TensorRT 10 fallback binding lookup:
+Without `-DJON_ENABLE_TENSORRT_MASK=ON`, the binary can show help/version and run diagnostics with `--no-mask`, but TensorRT masking is not available.
+
+### Jetson Cross Build
+
+Build the AArch64 Jetson binary from the build host:
 
 ```bash
-python3 /workspace/jon-patches/apply-tensorrt10-input-address.py
+ENABLE_TENSORRT_MASK=ON ENABLE_DRM_DISPLAY=ON JETSON_SYSROOT="$HOME/sysroots/orin-nano" ./scripts/build-jetson-cross.sh
 ```
 
-Configure and build `jetson-inference` inside the container:
+The output binary is:
 
 ```bash
-unset PKG_CONFIG_PATH && export PKG_CONFIG_SYSROOT_DIR=/workspace/sysroot && export PKG_CONFIG_LIBDIR=/workspace/sysroot/usr/lib/aarch64-linux-gnu/pkgconfig:/workspace/sysroot/usr/lib/pkgconfig:/workspace/sysroot/usr/share/pkgconfig:/workspace/sysroot/lib/aarch64-linux-gnu/pkgconfig && cmake -B build-aarch64 -S . -DCMAKE_TOOLCHAIN_FILE=/workspace/jetson-aarch64.cmake -DCMAKE_INSTALL_PREFIX=/workspace/install -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH="/workspace/sysroot/usr;/workspace/sysroot/usr/local;/workspace/sysroot/usr/local/cuda-12.6/targets/aarch64-linux" -DCUDA_TOOLKIT_ROOT_DIR=/usr/local/cuda -DCUDA_TOOLKIT_TARGET_DIR=/workspace/sysroot/usr/local/cuda-12.6/targets/aarch64-linux -DCUDA_HOST_COMPILER=/usr/bin/aarch64-linux-gnu-g++ -DCMAKE_CXX_FLAGS="-I/workspace/sysroot/usr/include/gstreamer-1.0 -I/workspace/sysroot/usr/include/glib-2.0 -I/workspace/sysroot/usr/lib/aarch64-linux-gnu/glib-2.0/include -I/workspace/sysroot/usr/include/aarch64-linux-gnu -I/workspace/sysroot/usr/include/libsoup-2.4 -I/workspace/sysroot/usr/include/libxml2 -I/workspace/sysroot/usr/include/json-glib-1.0" -DCMAKE_C_FLAGS="-I/workspace/sysroot/usr/include/gstreamer-1.0 -I/workspace/sysroot/usr/include/glib-2.0 -I/workspace/sysroot/usr/lib/aarch64-linux-gnu/glib-2.0/include -I/workspace/sysroot/usr/include/aarch64-linux-gnu -I/workspace/sysroot/usr/include/libsoup-2.4 -I/workspace/sysroot/usr/include/libxml2 -I/workspace/sysroot/usr/include/json-glib-1.0"
+build-jetson-cross/JONImageProcessor
 ```
 
-```bash
-cmake --build build-aarch64 -- -j$(nproc)
-```
-
-```bash
-cmake --install build-aarch64
-```
-
-Leave the container and verify the prefix on the build host:
-
-```bash
-test -f "$HOME/aarch64-prefixes/jetson-inference/include/jetson-inference/segNet.h" && test -f "$HOME/aarch64-prefixes/jetson-inference/lib/libjetson-inference.so" && test -f "$HOME/aarch64-prefixes/jetson-inference/lib/libjetson-utils.so" && echo ok
-```
-
-```bash
-file "$HOME/aarch64-prefixes/jetson-inference/lib/libjetson-inference.so" "$HOME/aarch64-prefixes/jetson-inference/lib/libjetson-utils.so"
-```
-
-Download the segmentation model data on the build host. This step does not install anything on the Jetson yet; it only downloads the model files into the local `jetson-inference` checkout:
-
-```bash
-cd "$HOME/src/jetson-inference/tools" && ./download-models.sh
-```
-
-In the model selection dialog, select these segmentation models:
-
-- `FCN-ResNet18-Pascal-VOC-320x320`: default model, fast but coarse 10x10 segmentation output.
-- `FCN-ResNet18-MHP-640x360`: recommended Jetson test model for a higher-resolution human mask.
-
-The 320x320 VOC model is useful as a known-good baseline. The 640x360 MHP model produces a denser segmentation grid and is the better first choice when arms, face edges, or people farther away from the camera are visibly lost in large blocks.
-
-If the tool exits with `Model selection status: 127`, install the missing host-side dialog dependencies and run it again:
-
-```bash
-sudo apt update && sudo apt install -y dialog wget ca-certificates
-```
-
-Verify that the model directories exist:
-
-```bash
-test -f "$HOME/src/jetson-inference/data/networks/models.json" && test -f "$HOME/src/jetson-inference/data/networks/FCN-ResNet18-Pascal-VOC-320x320/fcn_resnet18.onnx" && test -f "$HOME/src/jetson-inference/data/networks/FCN-ResNet18-MHP-640x360/fcn_resnet18.onnx" && echo ok
-```
-
-Copy the downloaded model manifest and model directories from the build host to the Jetson runtime directory:
-
-```bash
-rsync -aHAX "$HOME/src/jetson-inference/data/networks/" tseiman@jon:~/JONImageProcessor/networks/
-```
-
-Run this copy again whenever a new model was selected with `download-models.sh`. JONImageProcessor loads `networks/models.json` and the model files at runtime from `~/JONImageProcessor/networks/` on the Jetson.
-
-### Cross-Build With Jetson Inference
-
-Build JONImageProcessor with the TensorRT mask backend and DRM/KMS display backend enabled:
-
-```bash
-ENABLE_JETSON_INFERENCE=ON ENABLE_DRM_DISPLAY=ON JETSON_SYSROOT="$HOME/sysroots/orin-nano" JETSON_INFERENCE_ROOT="$HOME/aarch64-prefixes/jetson-inference" ./scripts/build-jetson-cross.sh
-```
-
-`ENABLE_DRM_DISPLAY` defaults to `ON` in the cross-build script. Set `ENABLE_DRM_DISPLAY=OFF` only for development builds that should not link against DRM/GBM/EGL/GLES.
-
-Verify the output:
+Verify the target architecture:
 
 ```bash
 file build-jetson-cross/JONImageProcessor
 ```
 
-If the source was committed after this cross-build and only the embedded 7-character Git version needs to be updated, patch the already built binary instead of rebuilding:
+Expected result: an AArch64/Linux executable.
 
-```bash
-./scripts/patch-binary-git-version.sh build-jetson-cross/JONImageProcessor
-```
+## Deploy To Jetson
 
-## Install and Run on Jetson
-
-### Install the Binary
-
-Execute these commands on the Jetson:
-
-```bash
-mkdir -p ~/JONImageProcessor
-```
-
-Copy the AArch64 binary from the build host to the Jetson:
+Run this on the build host:
 
 ```bash
 scp build-jetson-cross/JONImageProcessor tseiman@jon:~/JONImageProcessor/JONImageProcessor
 ```
 
-Execute these commands on the Jetson:
+Run these commands on the Jetson:
 
 ```bash
-chmod +x ~/JONImageProcessor/JONImageProcessor && file ~/JONImageProcessor/JONImageProcessor && ~/JONImageProcessor/JONImageProcessor --version
-```
-
-### Install jetson-inference Runtime Libraries
-
-Only do this if the binary was built with `ENABLE_JETSON_INFERENCE=ON`.
-
-Copy the AArch64 `jetson-inference` prefix from the build host to the Jetson:
-
-```bash
-rsync -aHAX "$HOME/aarch64-prefixes/jetson-inference/" tseiman@jon:~/JONImageProcessor/jetson-inference/
-```
-
-Copy the `jetson-inference` model manifest and model data from the build host to the Jetson:
-
-```bash
-rsync -aHAX "$HOME/src/jetson-inference/data/networks/" tseiman@jon:~/JONImageProcessor/networks/
-```
-
-The model download runs on the build host, but the application loads `networks/models.json` at runtime on the Jetson. The copy command above is required before running `--mask-backend jetson`.
-
-Execute these commands on the Jetson when using the `jetson` mask backend:
-
-```bash
-export LD_LIBRARY_PATH="$HOME/JONImageProcessor/jetson-inference/lib:$LD_LIBRARY_PATH"
-```
-
-Check missing libraries on the Jetson:
-
-```bash
-LD_LIBRARY_PATH="$HOME/JONImageProcessor/jetson-inference/lib:$LD_LIBRARY_PATH" ldd ~/JONImageProcessor/JONImageProcessor | grep "not found" || true
-```
-
-### Run the Application
-
-Execute these commands on the Jetson.
-
-Run with the dummy mask backend:
-
-```bash
-~/JONImageProcessor/JONImageProcessor --device /dev/video0 --capture-backend v4l2 --camera-format MJPG --camera-fps 30 --width 1280 --height 720 --mask-backend dummy --display-mode fit --fullscreen --benchmark
-```
-
-Run the current production-oriented TensorRT matting path with the DRM/KMS display backend and the color background effect:
-
-```bash
-cd ~/JONImageProcessor && LD_LIBRARY_PATH="$HOME/JONImageProcessor/jetson-inference/lib:$LD_LIBRARY_PATH" ./JONImageProcessor --device /dev/video0 --capture-backend v4l2 --camera-format MJPG --camera-fps 30 --width 1280 --height 720 --mask-backend tensorrt --mask-model "$HOME/JONImageProcessor/models/modnet_photographic_portrait_matting.onnx" --segmentation-width 384 --segmentation-height 384 --mask-threshold 0.5 --mask-smoothing 0.65 --mask-morphology light --background-effect color --background-overlay-color 0,0,255 --background-overlay-alpha 0.35 --display-backend drm --display-mode fit --fullscreen --benchmark
-```
-
-Run the same TensorRT path with a blurred background:
-
-```bash
-cd ~/JONImageProcessor && LD_LIBRARY_PATH="$HOME/JONImageProcessor/jetson-inference/lib:$LD_LIBRARY_PATH" ./JONImageProcessor --device /dev/video0 --capture-backend v4l2 --camera-format MJPG --camera-fps 30 --width 1280 --height 720 --mask-backend tensorrt --mask-model "$HOME/JONImageProcessor/models/modnet_photographic_portrait_matting.onnx" --segmentation-width 384 --segmentation-height 384 --mask-threshold 0.5 --mask-smoothing 0.65 --mask-morphology light --background-effect blur --blur-strength 15 --display-backend drm --display-mode fit --fullscreen --benchmark
-```
-
-The first TensorRT run for a new model/input size can take longer because TensorRT builds an optimized engine. Later starts load the cached `.engine` file next to the ONNX model.
-
-Run the same path through OpenCV HighGUI for development/debug comparison:
-
-```bash
-cd ~/JONImageProcessor && LD_LIBRARY_PATH="$HOME/JONImageProcessor/jetson-inference/lib:$LD_LIBRARY_PATH" ./JONImageProcessor --device /dev/video0 --capture-backend v4l2 --camera-format MJPG --camera-fps 30 --width 1280 --height 720 --mask-backend tensorrt --mask-model "$HOME/JONImageProcessor/models/modnet_photographic_portrait_matting.onnx" --segmentation-width 384 --segmentation-height 384 --mask-threshold 0.5 --mask-smoothing 0.65 --mask-morphology light --background-overlay-color 0,0,255 --background-overlay-alpha 0.35 --display-backend highgui --display-mode fit --fullscreen --benchmark
-```
-
-## Useful Runtime Commands
-
-Execute these commands on the Jetson.
-
-Show help on the Jetson:
-
-```bash
-~/JONImageProcessor/JONImageProcessor --help
-```
-
-Show version/build information on the Jetson:
-
-```bash
-~/JONImageProcessor/JONImageProcessor --version
-```
-
-Benchmark camera capture on Jetson:
-
-```bash
-~/JONImageProcessor/JONImageProcessor --device /dev/video0 --capture-backend v4l2 --camera-format MJPG --camera-fps 30 --width 1280 --height 720 --benchmark --max-frames 300 --no-display --no-mask --no-overlay
-```
-
-## Command-Line Options
-
-The help output is generated from the same central option table used by `getopt_long`:
-
-```bash
-~/JONImageProcessor/JONImageProcessor --help
-```
-
-Important options:
-
-- `--input <path>` reads video from a file.
-- `--device <path>` reads from a camera device. Default: `/dev/video0`.
-- `--capture-backend <backend>` selects `opencv` or `v4l2`.
-- `--output <mode>` selects `window` or `file`.
-- `--output-file <path>` sets the MP4 output path for file output.
-- `--width <pixels>` and `--height <pixels>` set processing size and requested camera size.
-- `--camera-format <MJPG|YUYV>` requests the camera pixel format.
-- `--camera-fps <fps>` requests the camera frame rate.
-- `--mask-backend <none|dummy|jetson|tensorrt>` selects mask generation.
-- `--jetson-segmentation-model <model>` selects the `jetson-inference` segNet model for `--mask-backend jetson`.
-- `--mask-model <path>` selects an ONNX or TensorRT engine file for `--mask-backend tensorrt`.
-- `--mask-threshold <0.0..1.0>` sets the foreground threshold for single-channel TensorRT mask outputs.
-- `--mask-smoothing <0.0..1.0>` controls temporal mask smoothing.
-- `--mask-morphology <off|light|strong>` controls morphology cleanup for the mask.
-- `--background-effect <color|blur>` selects the background effect. Default: `color`.
-- `--background-overlay-color <R,G,B>` sets background overlay color for `--background-effect color`; ignored for `blur`.
-- `--background-overlay-alpha <0.0..1.0>` sets overlay opacity for `--background-effect color`; ignored for `blur`.
-- `--blur-strength <value>` sets blur strength for `--background-effect blur`. Default: `15`.
-- `--display-mode <fit|fill|stretch>` controls scaling into the window/fullscreen canvas.
-- `--fullscreen` requests fullscreen window output.
-- `--output-width <pixels>` and `--output-height <pixels>` explicitly define the render canvas.
-- `--display-backend <highgui|drm>` selects the display backend.
-- `--benchmark` enables timing output.
-- `--max-frames <n>` exits after n processed frames.
-- `--no-display`, `--no-mask`, and `--no-overlay` disable pipeline stages for diagnostics.
-- `--verbose` or `-v` enables detailed diagnostics.
-- `--version` prints release and Git/build information.
-
-In window mode, `ESC` or `q` exits cleanly.
-
-## Camera Configuration
-
-For the Logitech BRIO and similar USB webcams, prefer MJPG for higher resolutions and frame rates:
-
-```bash
-~/JONImageProcessor/JONImageProcessor --device /dev/video0 --capture-backend v4l2 --width 1280 --height 720 --camera-format MJPG --camera-fps 30
-```
-
-Verbose mode logs requested and active camera format, size, and FPS.
-
-## Capture Backends
-
-File input always uses OpenCV. Camera input can use:
-
-- `opencv`: portable OpenCV capture.
-- `v4l2`: direct Linux V4L2 capture with mmap streaming, preferred on Jetson for live camera use.
-
-The V4L2 backend supports MJPG and YUYV. Automatic V4L2 format enumeration is not implemented yet.
-
-## Mask Backends
-
-Supported mask backends:
-
-- `none`: no mask.
-- `dummy`: moving-circle debug mask.
-- `jetson`: TensorRT/CUDA segmentation through `jetson-inference` `segNet`.
-- `tensorrt`: generic TensorRT/ONNX mask backend for future person segmentation or matting models.
-
-The background effect uses the generated person mask. With `--background-effect color`, the detected person stays unchanged and the background is tinted with the configured overlay color and alpha. With `--background-effect blur`, the detected person stays sharp and the background is blurred; `--background-overlay-color` and `--background-overlay-alpha` are ignored.
-
-Mask postprocessing is enabled by default:
-
-- `--mask-smoothing 0.65`: blends the current mask with the previous frame to reduce flicker and short-lived holes.
-- `--mask-morphology light`: closes small holes, slightly expands the person area, and softens the edge.
-
-Use these options to tune or disable the postprocessing:
-
-```bash
-~/JONImageProcessor/JONImageProcessor --device /dev/video0 --capture-backend v4l2 --camera-format MJPG --camera-fps 30 --width 1280 --height 720 --mask-backend jetson --mask-smoothing 0.75 --mask-morphology strong
+mkdir -p ~/JONImageProcessor/models
 ```
 
 ```bash
-~/JONImageProcessor/JONImageProcessor --device /dev/video0 --capture-backend v4l2 --camera-format MJPG --camera-fps 30 --width 1280 --height 720 --mask-backend jetson --mask-smoothing 0 --mask-morphology off
+chmod +x ~/JONImageProcessor/JONImageProcessor
 ```
 
-For `--mask-backend jetson`, model choice directly affects mask quality:
-
-- `fcn-resnet18-voc-320x320`: default, fast baseline, coarse 10x10 output grid.
-- `fcn-resnet18-mhp-640x360`: recommended first quality test, higher-resolution human/body-part segmentation.
-
-Use the MHP model with matching input size:
+Copy the TensorRT/ONNX model to the Jetson, for example:
 
 ```bash
-~/JONImageProcessor/JONImageProcessor --device /dev/video0 --capture-backend v4l2 --camera-format MJPG --camera-fps 30 --width 1280 --height 720 --mask-backend jetson --jetson-segmentation-model fcn-resnet18-mhp-640x360 --segmentation-width 640 --segmentation-height 360
+scp ~/models/modnet_photographic_portrait_matting.onnx tseiman@jon:~/JONImageProcessor/models/
 ```
 
-If a selected model does not expose a single `person` class, JONImageProcessor treats all non-background segmentation classes as person. This is used for multi-human-parsing models that classify body parts instead of returning one generic person class.
+## Run
 
-The generic TensorRT backend is prepared for denser person masks than `jetson-inference` segNet can provide. It loads either an ONNX model or a serialized TensorRT engine:
+Set the model path on the Jetson:
 
 ```bash
-~/JONImageProcessor/JONImageProcessor --device /dev/video0 --capture-backend v4l2 --camera-format MJPG --camera-fps 30 --width 1280 --height 720 --mask-backend tensorrt --mask-model ~/JONImageProcessor/models/person-mask.onnx --segmentation-width 512 --segmentation-height 512 --mask-threshold 0.5
+MODEL_PATH="$HOME/JONImageProcessor/models/modnet_photographic_portrait_matting.onnx"
 ```
 
-The first implementation expects FP32 input/output tensors and common segmentation output layouts: one foreground-probability channel, two foreground/background classes, or multi-class output where class `0` is background. The next quality step is selecting and validating a concrete ONNX model that produces a dense mask suitable for virtual-background use.
-
-## Segmentation Quality TODO
-
-The current Jetson path is a first real-time debug mask, not final virtual-background quality. Open improvement options:
-
-- Select and validate a newer person segmentation or matting model exported through ONNX and TensorRT.
-- Add model-specific preprocessing and normalization presets when the selected model requires them.
-- Evaluate higher input resolutions such as 768x432 or 1024x576 if the selected model supports them.
-- Add edge-aware refinement so hair, hands, and arm boundaries are less blocky.
-- Add confidence-aware blending when the model output exposes usable probabilities.
-- Compare quality and FPS on macOS development, Linux VM, and Jetson Orin Nano with the same benchmark commands.
-
-## Display Backends
-
-Supported display backends:
-
-- `highgui`: OpenCV HighGUI window output for development and debugging.
-- `drm`: Linux DRM/KMS output through GBM/EGL/GLES, intended for Jetson appliance operation on a directly attached HDMI/DisplayPort display.
-
-Use `highgui` when working from a desktop session or comparing behavior with earlier builds. Use `drm` for the production path where JONImageProcessor should own the display directly after boot. The DRM backend uses the active connector mode and does not change the monitor resolution.
-
-For systemd production use, the runtime user must have access to `/dev/dri/card*` and `/dev/dri/renderD*`. On Jetson this usually means membership in the `video` and `render` groups:
+### Blur Background
 
 ```bash
-sudo usermod -aG video,render "$USER"
+./JONImageProcessor --device /dev/video0 --width 1280 --height 720 --mask-model "$MODEL_PATH" --segmentation-width 384 --segmentation-height 384 --mask-threshold 0.7 --mask-smoothing 0.65 --mask-morphology light --background-effect blur --blur-strength 85 --display-backend drm --fullscreen --benchmark
 ```
 
-Log out and back in after changing group membership.
-
-The DRM backend must also be the DRM master for the display. If a desktop compositor or display manager already owns HDMI/DisplayPort, startup can fail with `drmModeSetCrtc failed: Permission denied`. For production, start JONImageProcessor before the desktop session or stop the display manager for the appliance profile.
-
-## Display Modes
-
-Default: `fit`.
-
-- `fit`: preserve aspect ratio, show the full image, center it, and allow black bars.
-- `fill`: preserve aspect ratio, fill the whole canvas, center it, and crop overflow.
-- `stretch`: ignore aspect ratio and scale exactly to the canvas.
-
-With `--display-backend drm`, the canvas is the active DRM/KMS display mode. With `--display-backend highgui`, use `--output-width` and `--output-height` when OpenCV HighGUI reports unreliable fullscreen dimensions.
-
-## Verbose Logging
-
-Verbose logging is intentionally simple and prints prefixed messages to stdout:
-
-- `[INFO]`
-- `[WARNING]`
-- `[ERROR]`
-- `[VERBOSE]`
-- `[BENCH]`
-
-Enable it with:
+### Color Background
 
 ```bash
-~/JONImageProcessor/JONImageProcessor --device /dev/video0 --capture-backend v4l2 --camera-format MJPG --camera-fps 30 --width 1280 --height 720 --verbose
+./JONImageProcessor --device /dev/video0 --width 1280 --height 720 --mask-model "$MODEL_PATH" --segmentation-width 384 --segmentation-height 384 --mask-threshold 0.5 --mask-smoothing 0.65 --mask-morphology light --background-effect color --background-overlay-color 0,255,0 --background-overlay-alpha 1.0 --display-backend drm --fullscreen --benchmark
 ```
 
-Verbose diagnostics include version/build info, OpenCV version, operating system, camera settings, display canvas/window sizes, destination rectangle, FPS, and benchmark counters.
-
-## Performance Analysis
-
-Benchmark mode separates capture wait, frame handover, decode, resize, segmentation preprocess, segmentation inference, segmentation postprocess, mask upscale, overlay, display, processing total, and pipeline total.
-
-Example:
+### HighGUI Window
 
 ```bash
-~/JONImageProcessor/JONImageProcessor --device /dev/video0 --capture-backend v4l2 --camera-format MJPG --camera-fps 30 --width 1280 --height 720 --benchmark --max-frames 300 --no-display --no-mask --no-overlay
+./JONImageProcessor --device /dev/video0 --width 1280 --height 720 --mask-model "$MODEL_PATH" --segmentation-width 384 --segmentation-height 384 --background-effect blur --display-backend highgui
 ```
 
-This makes it visible whether runtime is spent waiting for camera frames, running segmentation, copying frames, rendering overlays, or displaying output.
+### Video File Test
 
-## Planned Service Operation
-
-Future versions should run automatically as a Linux service/daemon through systemd and display fullscreen to HDMI or DisplayPort.
-
-Not implemented yet:
-
-- no systemd unit
-- no daemon mode
-- no boot-time display setup
-
-Long-term appliance flow:
-
-```text
-Jetson boots
--> systemd starts JONImageProcessor
--> HDMI resolution is detected
--> fullscreen output is opened
--> the image is centered correctly
--> display mode controls scaling
+```bash
+./JONImageProcessor --input test.mp4 --mask-model "$MODEL_PATH" --background-effect blur --display-backend highgui
 ```
 
-## Planned Runtime Control
+## Command Line Options
 
-Processing settings already live in a central `ProcessorConfig` structure. This prepares the application for future runtime updates.
+- `-h`, `--help`: show help.
+- `--version`: show release/git version.
+- `-v`, `--verbose`: enable detailed logs.
+- `-i`, `--input <path>`: use a video file as input. Without this option, the V4L2 camera is used.
+- `-d`, `--device <path>`: V4L2 camera device. Default: `/dev/video0`.
+- `--width <pixels>`: processing width and requested camera width. Default: `1920`.
+- `--height <pixels>`: processing height and requested camera height. Default: `1080`.
+- `--output-width <pixels>`: explicit render canvas width.
+- `--output-height <pixels>`: explicit render canvas height.
+- `--camera-format <MJPG|YUYV>`: requested V4L2 pixel format. Default: `MJPG`.
+- `--mask-model <path>`: TensorRT mask model path. Required unless `--no-mask` is used.
+- `--segmentation-width <pixels>`: TensorRT input width. Default: `384`.
+- `--segmentation-height <pixels>`: TensorRT input height. Default: `384`.
+- `--mask-threshold <0.0..1.0>`: foreground threshold. Default: `0.5`.
+- `--mask-smoothing <0.0..1.0>`: temporal mask smoothing. Default: `0.65`.
+- `--mask-morphology <off|light|strong>`: mask cleanup mode. Default: `light`.
+- `--background-effect <color|blur>`: background effect. Default: `color`.
+- `--background-overlay-color <R,G,B>`: color used by `--background-effect color`. Ignored for blur. Default: `0,255,0`.
+- `--background-overlay-alpha <0.0..1.0>`: alpha used by `--background-effect color`. Ignored for blur. Default: `0.35`.
+- `--blur-strength <1..100>`: blur strength used by `--background-effect blur`. Default: `15`.
+- `--display-backend <highgui|drm>`: display backend. Default: `highgui`.
+- `--fullscreen`: request fullscreen display output.
+- `--benchmark`: print benchmark statistics.
+- `--no-display`: disable display output.
+- `--no-mask`: disable TensorRT mask generation.
+- `--no-overlay`: disable background effect rendering.
 
-Planned, but not implemented:
+## Runtime Behavior
 
-- local Unix domain socket
-- JSON runtime commands
-- background image control
-- blur strength
-- transparency
-- fullscreen control
-- mask debug overlay control
+Camera input always uses V4L2 and low-latency capture. The capture thread keeps only the newest frame, so old frames are overwritten instead of queued.
+
+Video file input uses OpenCV file capture and processes frames sequentially.
+
+Display mode is fixed to fill. The image fills the output canvas while preserving aspect ratio. Cropping is allowed; stretching is not used.
+
+## Benchmarking
+
+Use `--benchmark` to print timing statistics for capture, resize, TensorRT preprocessing, TensorRT inference, postprocessing, mask upscale, background effect, display, and total frame time.
+
+For pipeline timing without display or effects:
+
+```bash
+./JONImageProcessor --device /dev/video0 --width 1280 --height 720 --no-display --no-mask --no-overlay --benchmark
+```
+
+Stop long-running camera benchmarks with `Ctrl-C`. SIGINT is handled and prints the final benchmark summary.
+
+## Notes
+
+The current production direction is V4L2 camera input, TensorRT masking, and DRM/KMS fullscreen output. Later systemd service integration should start this binary automatically after boot and open the DRM fullscreen output directly.

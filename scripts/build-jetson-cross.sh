@@ -7,13 +7,10 @@ REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 JETPACK_VERSION="${JETPACK_VERSION:-6.1}"
 CONTAINER_IMAGE="${CONTAINER_IMAGE:-nvcr.io/nvidia/jetpack-linux-aarch64-crosscompile-x86:${JETPACK_VERSION}}"
 BUILD_DIR_NAME="${BUILD_DIR_NAME:-build-jetson-cross}"
-ENABLE_JETSON_INFERENCE="${ENABLE_JETSON_INFERENCE:-OFF}"
-ENABLE_TENSORRT_MASK="${ENABLE_TENSORRT_MASK:-${ENABLE_JETSON_INFERENCE}}"
+ENABLE_TENSORRT_MASK="${ENABLE_TENSORRT_MASK:-ON}"
 ENABLE_DRM_DISPLAY="${ENABLE_DRM_DISPLAY:-ON}"
 HOST_SYSROOT="${JETSON_SYSROOT:-}"
 CONTAINER_SYSROOT=""
-HOST_JETSON_INFERENCE_ROOT="${JETSON_INFERENCE_ROOT:-}"
-CONTAINER_JETSON_INFERENCE_ROOT=""
 HOST_UID="$(id -u)"
 HOST_GID="$(id -g)"
 BUILD_HOST_NAME="${BUILD_HOST_NAME:-$(hostname -s 2>/dev/null || hostname 2>/dev/null || echo unknown)}"
@@ -33,15 +30,6 @@ if [[ -n "${HOST_SYSROOT}" ]]; then
     fi
     DOCKER_ARGS+=(-v "${HOST_SYSROOT}:/workspace/sysroot:ro")
     CONTAINER_SYSROOT="/workspace/sysroot"
-fi
-
-if [[ -n "${HOST_JETSON_INFERENCE_ROOT}" ]]; then
-    if [[ ! -d "${HOST_JETSON_INFERENCE_ROOT}" ]]; then
-        echo "[ERROR] JETSON_INFERENCE_ROOT does not exist or is not a directory: ${HOST_JETSON_INFERENCE_ROOT}" >&2
-        exit 2
-    fi
-    DOCKER_ARGS+=(-v "${HOST_JETSON_INFERENCE_ROOT}:/workspace/jetson-inference-root:ro")
-    CONTAINER_JETSON_INFERENCE_ROOT="/workspace/jetson-inference-root"
 fi
 
 DOCKER_ARGS+=("${CONTAINER_IMAGE}")
@@ -81,31 +69,6 @@ if [[ -n "${JETSON_TOOLCHAIN_PREFIX:-}" && ! -x "${JETSON_TOOLCHAIN_PREFIX}g++" 
     exit 4
 fi
 
-if [[ "${ENABLE_JETSON_INFERENCE}" == "ON" ]]; then
-    if [[ -n "${JETSON_INFERENCE_ROOT}" ]]; then
-        SEARCH_ROOTS=("${JETSON_INFERENCE_ROOT}" "${JETSON_SYSROOT}/usr/local" "${JETSON_SYSROOT}/usr")
-    else
-        SEARCH_ROOTS=("${JETSON_SYSROOT}/usr/local" "${JETSON_SYSROOT}/usr" "/usr/local" "/usr")
-    fi
-
-    FOUND_JETSON_INFERENCE=0
-    for root in "${SEARCH_ROOTS[@]}"; do
-        if [[ -f "${root}/include/jetson-inference/segNet.h" ]] && \
-           { [[ -f "${root}/lib/libjetson-inference.so" ]] || [[ -f "${root}/lib/aarch64-linux-gnu/libjetson-inference.so" ]]; } && \
-           { [[ -f "${root}/lib/libjetson-utils.so" ]] || [[ -f "${root}/lib/aarch64-linux-gnu/libjetson-utils.so" ]]; }; then
-            FOUND_JETSON_INFERENCE=1
-            break
-        fi
-    done
-
-    if [[ "${FOUND_JETSON_INFERENCE}" != "1" ]]; then
-        echo "[ERROR] ENABLE_JETSON_INFERENCE=ON, but jetson-inference dependencies were not found." >&2
-        echo "[ERROR] Required: include/jetson-inference/segNet.h, libjetson-inference, libjetson-utils." >&2
-        echo "[ERROR] Provide them in the sysroot/container or set JETSON_INFERENCE_ROOT=/path/to/aarch64/prefix." >&2
-        exit 5
-    fi
-fi
-
 if [[ "${ENABLE_TENSORRT_MASK}" == "ON" ]]; then
     if [[ ! -f "${JETSON_SYSROOT}/usr/include/aarch64-linux-gnu/NvInfer.h" && ! -f "${JETSON_SYSROOT}/usr/include/NvInfer.h" ]]; then
         echo "[ERROR] ENABLE_TENSORRT_MASK=ON, but NvInfer.h was not found in the Jetson sysroot." >&2
@@ -117,6 +80,14 @@ if [[ "${ENABLE_TENSORRT_MASK}" == "ON" ]]; then
     fi
     if ! find "${JETSON_SYSROOT}/usr/lib" "${JETSON_SYSROOT}/lib" -name 'libnvonnxparser.so*' -print -quit 2>/dev/null | grep -q .; then
         echo "[ERROR] ENABLE_TENSORRT_MASK=ON, but libnvonnxparser was not found in the Jetson sysroot." >&2
+        exit 6
+    fi
+    if ! find "${JETSON_SYSROOT}/usr/local/cuda"* "${JETSON_SYSROOT}/usr/lib" "${JETSON_SYSROOT}/lib" -name 'libcudla.so*' -print -quit 2>/dev/null | grep -q .; then
+        echo "[ERROR] ENABLE_TENSORRT_MASK=ON, but libcudla was not found in the Jetson sysroot." >&2
+        exit 6
+    fi
+    if ! find "${JETSON_SYSROOT}/usr/lib" "${JETSON_SYSROOT}/lib" -name 'libnvdla_compiler.so*' -print -quit 2>/dev/null | grep -q .; then
+        echo "[ERROR] ENABLE_TENSORRT_MASK=ON, but libnvdla_compiler was not found in the Jetson sysroot." >&2
         exit 6
     fi
 fi
@@ -152,11 +123,9 @@ cmake \
     -B "${BUILD_DIR_NAME}" \
     -S . \
     -DCMAKE_TOOLCHAIN_FILE=cmake/toolchains/jetson-aarch64.cmake \
-    -DJON_ENABLE_JETSON_INFERENCE="${ENABLE_JETSON_INFERENCE}" \
     -DJON_ENABLE_TENSORRT_MASK="${ENABLE_TENSORRT_MASK}" \
     -DJON_ENABLE_DRM_DISPLAY="${ENABLE_DRM_DISPLAY}" \
-    -DJON_IMAGE_PROCESSOR_BUILD_HOST_OVERRIDE="${BUILD_HOST_NAME}" \
-    ${JETSON_INFERENCE_ROOT:+-DJON_JETSON_INFERENCE_ROOT="${JETSON_INFERENCE_ROOT}"}
+    -DJON_IMAGE_PROCESSOR_BUILD_HOST_OVERRIDE="${BUILD_HOST_NAME}"
 
 cmake --build "${BUILD_DIR_NAME}" -- -j"$(nproc)"
 
@@ -172,7 +141,6 @@ EOS
 
 echo "[INFO] Using container image: ${CONTAINER_IMAGE}"
 echo "[INFO] Build directory: ${BUILD_DIR_NAME}"
-echo "[INFO] Jetson inference: ${ENABLE_JETSON_INFERENCE}"
 echo "[INFO] TensorRT mask backend: ${ENABLE_TENSORRT_MASK}"
 echo "[INFO] DRM/KMS display backend: ${ENABLE_DRM_DISPLAY}"
 echo "[INFO] Build host name: ${BUILD_HOST_NAME}"
@@ -181,9 +149,5 @@ if [[ -n "${HOST_SYSROOT}" ]]; then
 else
     echo "[INFO] Host sysroot: auto from container /l4t/rootfs"
 fi
-if [[ -n "${HOST_JETSON_INFERENCE_ROOT}" ]]; then
-    echo "[INFO] Host jetson-inference root: ${HOST_JETSON_INFERENCE_ROOT}"
-fi
-
 docker "${DOCKER_ARGS[@]}" /bin/bash -lc \
-    "export BUILD_DIR_NAME='${BUILD_DIR_NAME}'; export ENABLE_JETSON_INFERENCE='${ENABLE_JETSON_INFERENCE}'; export ENABLE_TENSORRT_MASK='${ENABLE_TENSORRT_MASK}'; export ENABLE_DRM_DISPLAY='${ENABLE_DRM_DISPLAY}'; export BUILD_HOST_NAME='${BUILD_HOST_NAME}'; export JETSON_SYSROOT_IN_CONTAINER='${CONTAINER_SYSROOT}'; export JETSON_INFERENCE_ROOT='${CONTAINER_JETSON_INFERENCE_ROOT}'; export HOST_UID='${HOST_UID}'; export HOST_GID='${HOST_GID}'; ${CONTAINER_COMMAND}"
+    "export BUILD_DIR_NAME='${BUILD_DIR_NAME}'; export ENABLE_TENSORRT_MASK='${ENABLE_TENSORRT_MASK}'; export ENABLE_DRM_DISPLAY='${ENABLE_DRM_DISPLAY}'; export BUILD_HOST_NAME='${BUILD_HOST_NAME}'; export JETSON_SYSROOT_IN_CONTAINER='${CONTAINER_SYSROOT}'; export HOST_UID='${HOST_UID}'; export HOST_GID='${HOST_GID}'; ${CONTAINER_COMMAND}"

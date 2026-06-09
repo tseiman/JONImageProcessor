@@ -38,7 +38,7 @@ private:
     int fd_ = -1;
     int width_ = 0;
     int height_ = 0;
-    int fps_ = 0;
+    double fps_ = 0.0;
     unsigned int pixelFormat_ = 0;
     bool streaming_ = false;
     std::atomic<bool> stopRequested_ {false};

@@ -7,14 +7,13 @@
 #include "ICaptureBackend.h"
 #include "Logger.h"
 #include "LowLatencyFrameCapture.h"
-#include "MaskBackendFactory.h"
+#include "MaskBackends.h"
 #include "ShutdownSignal.h"
 #include "Version.h"
 
 #include <opencv2/core.hpp>
 #include <opencv2/core/utils/logger.hpp>
 #include <opencv2/imgproc.hpp>
-#include <opencv2/videoio.hpp>
 
 #include <algorithm>
 #include <array>
@@ -319,14 +318,11 @@ void logStartupInfo(const ProcessorConfig& config, const ScreenInfo& screenInfo)
     LOG_INFO("OpenCV version: " << CV_VERSION);
     LOG_VERBOSE("Primary screen size: " << screenInfoToString(screenInfo));
     LOG_VERBOSE("Input source: " << inputSource);
-    LOG_VERBOSE("Output mode: " << outputModeToString(config.outputMode));
-    LOG_VERBOSE("Display mode: " << displayModeToString(config.displayMode));
+    LOG_VERBOSE("Display mode: " << displayModeToString(DisplayMode::Fill));
     LOG_VERBOSE("Display backend: " << displayBackendToString(config.displayBackend));
-    LOG_VERBOSE("Capture backend: " << captureBackendToString(config.captureBackend));
     LOG_VERBOSE("Processing size: " << config.width << "x" << config.height);
-    LOG_VERBOSE("Mask backend: " << maskBackendToString(config.maskBackend));
+    LOG_VERBOSE("Mask backend: tensorrt");
     LOG_VERBOSE("Segmentation size: " << config.segmentationWidth << "x" << config.segmentationHeight);
-    LOG_VERBOSE("Jetson segmentation model: " << config.jetsonSegmentationModel);
     LOG_VERBOSE("Mask model: " << (config.maskModelPath.empty() ? "none" : config.maskModelPath));
     LOG_VERBOSE("Mask threshold: " << config.maskThreshold);
     LOG_VERBOSE("Mask smoothing: " << config.maskSmoothing);
@@ -339,11 +335,8 @@ void logStartupInfo(const ProcessorConfig& config, const ScreenInfo& screenInfo)
     LOG_VERBOSE("Background overlay alpha: " << config.backgroundOverlayAlpha);
     LOG_VERBOSE("Blur strength: " << config.blurStrength);
     LOG_VERBOSE("Camera format: " << cameraFormatToString(config.cameraFormat));
-    LOG_VERBOSE("Camera FPS: " << config.cameraFps);
     LOG_VERBOSE("Fullscreen: " << (config.fullscreen ? "true" : "false"));
     LOG_VERBOSE("Benchmark: " << (config.benchmark ? "true" : "false"));
-    LOG_VERBOSE("Low latency requested: " << (config.lowLatency ? "true" : "false"));
-    LOG_VERBOSE("Max frames: " << (config.maxFrames > 0 ? std::to_string(config.maxFrames) : "unlimited"));
     LOG_VERBOSE("No display: " << (config.noDisplay ? "true" : "false"));
     LOG_VERBOSE("No mask: " << (config.noMask ? "true" : "false"));
     LOG_VERBOSE("No overlay: " << (config.noOverlay ? "true" : "false"));
@@ -385,10 +378,7 @@ int VideoProcessor::run()
     logStartupInfo(config_, screenInfo);
     LOG_INFO("Display backend: " << displayBackendToString(config_.displayBackend));
     const bool usingCamera = config_.inputPath.empty();
-    const CaptureBackendType effectiveCaptureBackend = usingCamera
-        ? config_.captureBackend
-        : CaptureBackendType::OpenCv;
-    LOG_INFO("Capture backend: " << captureBackendToString(effectiveCaptureBackend));
+    LOG_INFO("Capture backend: " << (usingCamera ? "v4l2" : "opencv-file"));
     const bool lowLatencyMode = usingCamera;
     LOG_INFO("Low latency mode: " << (lowLatencyMode ? "enabled" : "disabled"));
 
@@ -398,7 +388,7 @@ int VideoProcessor::run()
 
     std::unique_ptr<ICaptureBackend> captureBackend = CaptureBackendFactory::create(config_);
     if (!captureBackend) {
-        LOG_ERROR("Cannot create capture backend: " << captureBackendToString(effectiveCaptureBackend));
+        LOG_ERROR("Cannot create capture backend");
         return ExitRuntimeError;
     }
 
@@ -413,21 +403,16 @@ int VideoProcessor::run()
         ? cv::Size(config_.outputWidth, config_.outputHeight)
         : (useScreenDisplaySize ? screenInfo.size : outputSize);
     const bool forceConfiguredDisplaySize = hasExplicitDisplaySize || useScreenDisplaySize;
-    const bool writeFile = config_.outputMode == OutputMode::File && !config_.noDisplay;
-    const bool showWindow = config_.outputMode == OutputMode::Window && !config_.noDisplay;
-    const bool maskEnabled = !config_.noMask && config_.maskBackend != MaskBackendType::None;
+    const bool showWindow = !config_.noDisplay;
+    const bool maskEnabled = !config_.noMask;
     const bool overlayEnabled = !config_.noOverlay && maskEnabled;
 
     std::unique_ptr<IMaskBackend> maskBackend;
     if (maskEnabled) {
-        maskBackend = MaskBackendFactory::create(config_.maskBackend);
-        if (!maskBackend) {
-            LOG_ERROR("Cannot create mask backend: " << maskBackendToString(config_.maskBackend));
-            return ExitRuntimeError;
-        }
+        maskBackend = std::make_unique<TensorRtMaskBackend>();
 
         if (!maskBackend->initialize(config_)) {
-            LOG_ERROR("Cannot initialize mask backend: " << maskBackendToString(config_.maskBackend));
+            LOG_ERROR("Cannot initialize mask backend: tensorrt");
             return ExitRuntimeError;
         }
         LOG_INFO("Mask backend: " << maskBackend->name());
@@ -435,23 +420,8 @@ int VideoProcessor::run()
         LOG_INFO("Mask backend: none");
     }
 
-    cv::VideoWriter writer;
     std::unique_ptr<IDisplayBackend> displayBackend;
-    if (writeFile) {
-        double fps = captureBackend->fps();
-        if (fps <= 1.0 || fps > 240.0) {
-            fps = 30.0;
-        }
-
-        const int fourcc = cv::VideoWriter::fourcc('m', 'p', '4', 'v');
-        writer.open(config_.outputFile, fourcc, fps, outputSize, true);
-        if (!writer.isOpened()) {
-            LOG_ERROR("Cannot open output file: " << config_.outputFile);
-            return ExitRuntimeError;
-        }
-
-        LOG_INFO("Writing MP4 output: " << config_.outputFile << " @ " << fps << " fps");
-    } else if (showWindow) {
+    if (showWindow) {
         displayBackend = DisplayBackendFactory::create(config_.displayBackend);
         if (!displayBackend) {
             LOG_ERROR("Cannot create display backend: " << displayBackendToString(config_.displayBackend));
@@ -459,7 +429,7 @@ int VideoProcessor::run()
         }
 
         DisplayBackendConfig displayConfig;
-        displayConfig.displayMode = config_.displayMode;
+        displayConfig.displayMode = DisplayMode::Fill;
         displayConfig.processingSize = outputSize;
         displayConfig.canvasFallbackSize = configuredDisplaySize;
         displayConfig.screenInfo = screenInfo;
@@ -583,10 +553,7 @@ int VideoProcessor::run()
             outputFrame = resized;
         }
 
-        if (writeFile) {
-            BenchmarkScope timer(benchmark, BenchmarkStage::Display);
-            writer.write(outputFrame);
-        } else if (showWindow) {
+        if (showWindow) {
             BenchmarkScope timer(benchmark, BenchmarkStage::Display);
             if (!displayBackend->render(outputFrame)) {
                 break;
@@ -614,10 +581,6 @@ int VideoProcessor::run()
                 intervalStartedAt = now;
                 intervalFrames = 0;
             }
-        }
-
-        if (config_.maxFrames > 0 && frameIndex >= static_cast<std::size_t>(config_.maxFrames)) {
-            break;
         }
     }
 
