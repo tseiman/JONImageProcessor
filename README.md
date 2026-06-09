@@ -166,25 +166,25 @@ MODEL_PATH="$HOME/JONImageProcessor/models/modnet_photographic_portrait_matting.
 ### Blur Background
 
 ```bash
-./JONImageProcessor --device /dev/video0 --width 1280 --height 720 --mask-model "$MODEL_PATH" --segmentation-width 384 --segmentation-height 384 --mask-threshold 0.7 --mask-smoothing 0.65 --mask-morphology light --background-effect blur --blur-strength 85 --display-backend drm --fullscreen --benchmark
+./JONImageProcessor --device /dev/video0 --processing-size 1280x720 --mask-model "$MODEL_PATH" --segmentation-size 384x384 --mask-threshold 0.7 --mask-smoothing 0.65 --mask-morphology light --background-effect blur --blur-strength 85 --display-backend drm --fullscreen --benchmark
 ```
 
 ### Color Background
 
 ```bash
-./JONImageProcessor --device /dev/video0 --width 1280 --height 720 --mask-model "$MODEL_PATH" --segmentation-width 384 --segmentation-height 384 --mask-threshold 0.5 --mask-smoothing 0.65 --mask-morphology light --background-effect color --background-overlay-color 0,255,0 --background-overlay-alpha 1.0 --display-backend drm --fullscreen --benchmark
+./JONImageProcessor --device /dev/video0 --processing-size 1280x720 --mask-model "$MODEL_PATH" --segmentation-size 384x384 --mask-threshold 0.5 --mask-smoothing 0.65 --mask-morphology light --background-effect color --background-overlay-color 0,255,0 --background-overlay-alpha 1.0 --display-backend drm --fullscreen --benchmark
 ```
 
 ### Image Background
 
 ```bash
-./JONImageProcessor --device /dev/video0 --width 1280 --height 720 --mask-model "$MODEL_PATH" --segmentation-width 384 --segmentation-height 384 --mask-threshold 0.7 --mask-smoothing 0.65 --mask-morphology light --background-effect image --background-image "$HOME/JONImageProcessor/background.jpg" --display-backend drm --fullscreen --benchmark
+./JONImageProcessor --device /dev/video0 --processing-size 1280x720 --mask-model "$MODEL_PATH" --segmentation-size 384x384 --mask-threshold 0.7 --mask-smoothing 0.65 --mask-morphology light --background-effect image --background-image "$HOME/JONImageProcessor/background.jpg" --display-backend drm --fullscreen --benchmark
 ```
 
 ### HighGUI Window
 
 ```bash
-./JONImageProcessor --device /dev/video0 --width 1280 --height 720 --mask-model "$MODEL_PATH" --segmentation-width 384 --segmentation-height 384 --background-effect blur --display-backend highgui
+./JONImageProcessor --device /dev/video0 --processing-size 1280x720 --mask-model "$MODEL_PATH" --segmentation-size 384x384 --background-effect blur --display-backend highgui
 ```
 
 ### Video File Test
@@ -200,14 +200,11 @@ MODEL_PATH="$HOME/JONImageProcessor/models/modnet_photographic_portrait_matting.
 - `-v`, `--verbose`: enable detailed logs.
 - `-i`, `--input <path>`: use a video file as input. Without this option, the V4L2 camera is used.
 - `-d`, `--device <path>`: V4L2 camera device. Default: `/dev/video0`.
-- `--width <pixels>`: processing width and requested camera width. Default: `1920`.
-- `--height <pixels>`: processing height and requested camera height. Default: `1080`.
-- `--output-width <pixels>`: explicit render canvas width.
-- `--output-height <pixels>`: explicit render canvas height.
+- `-p`, `--processing-size <WxH>`: processing size and requested camera size. Default: `1920x1080`.
+- `-o`, `--output-size <WxH>`: explicit render canvas size. Default: `auto`.
 - `--camera-format <MJPG|YUYV>`: requested V4L2 pixel format. Default: `MJPG`.
 - `--mask-model <path>`: TensorRT mask model path. Required unless `--no-mask` is used.
-- `--segmentation-width <pixels>`: TensorRT input width. Default: `384`.
-- `--segmentation-height <pixels>`: TensorRT input height. Default: `384`.
+- `-s`, `--segmentation-size <WxH>`: TensorRT input size. Default: `384x384`.
 - `--mask-threshold <0.0..1.0>`: foreground threshold. Default: `0.5`.
 - `--mask-smoothing <0.0..1.0>`: temporal mask smoothing. Default: `0.65`.
 - `--mask-morphology <off|light|strong>`: mask cleanup mode. Default: `light`.
@@ -238,7 +235,7 @@ Use `--benchmark` to print timing statistics for capture, resize, TensorRT prepr
 For pipeline timing without display or effects:
 
 ```bash
-./JONImageProcessor --device /dev/video0 --width 1280 --height 720 --no-display --no-mask --no-overlay --benchmark
+./JONImageProcessor --device /dev/video0 --processing-size 1280x720 --no-display --no-mask --no-overlay --benchmark
 ```
 
 Stop long-running camera benchmarks with `Ctrl-C`. SIGINT is handled and prints the final benchmark summary.

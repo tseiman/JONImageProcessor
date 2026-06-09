@@ -69,7 +69,7 @@ chmod +x ~/JONImageProcessor/JONImageProcessor
 ## Run On Jetson
 
 ```bash
-cd ~/JONImageProcessor && MODEL_PATH="$HOME/JONImageProcessor/models/modnet_photographic_portrait_matting.onnx" ./JONImageProcessor --device /dev/video0 --width 1280 --height 720 --mask-model "$MODEL_PATH" --segmentation-width 384 --segmentation-height 384 --background-effect blur --blur-strength 85 --display-backend drm --fullscreen --benchmark
+cd ~/JONImageProcessor && MODEL_PATH="$HOME/JONImageProcessor/models/modnet_photographic_portrait_matting.onnx" ./JONImageProcessor --device /dev/video0 --processing-size 1280x720 --mask-model "$MODEL_PATH" --segmentation-size 384x384 --background-effect blur --blur-strength 85 --display-backend drm --fullscreen --benchmark
 ```
 
 GPU/TensorRT execution can only be tested on the Jetson. The build host only produces the target binary.

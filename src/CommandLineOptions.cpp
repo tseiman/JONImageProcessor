@@ -15,13 +15,10 @@ enum OptionId {
     OptionInput = 'i',
     OptionDevice = 'd',
     OptionVerbose = 'v',
-    OptionWidth = 1000,
-    OptionHeight,
-    OptionOutputWidth,
-    OptionOutputHeight,
-    OptionSegmentationWidth,
-    OptionSegmentationHeight,
-    OptionMaskModel,
+    OptionProcessingSize = 'p',
+    OptionOutputSize = 'o',
+    OptionSegmentationSize = 's',
+    OptionMaskModel = 1000,
     OptionMaskThreshold,
     OptionMaskSmoothing,
     OptionMaskMorphology,
@@ -56,12 +53,9 @@ const std::vector<OptionDefinition>& optionDefinitions()
         {OptionHelp, 'h', "help", no_argument, "", "Show help", ""},
         {OptionInput, 'i', "input", required_argument, "path", "Use a video file as input", ""},
         {OptionDevice, 'd', "device", required_argument, "path", "Use a V4L2 camera device", "/dev/video0"},
-        {OptionWidth, 0, "width", required_argument, "pixels", "Processing width and requested camera width", "1920"},
-        {OptionHeight, 0, "height", required_argument, "pixels", "Processing height and requested camera height", "1080"},
-        {OptionOutputWidth, 0, "output-width", required_argument, "pixels", "Explicit display render width", "auto"},
-        {OptionOutputHeight, 0, "output-height", required_argument, "pixels", "Explicit display render height", "auto"},
-        {OptionSegmentationWidth, 0, "segmentation-width", required_argument, "pixels", "TensorRT segmentation width", "384"},
-        {OptionSegmentationHeight, 0, "segmentation-height", required_argument, "pixels", "TensorRT segmentation height", "384"},
+        {OptionProcessingSize, 'p', "processing-size", required_argument, "WxH", "Processing size and requested camera size", "1920x1080"},
+        {OptionOutputSize, 'o', "output-size", required_argument, "WxH", "Explicit display render size", "auto"},
+        {OptionSegmentationSize, 's', "segmentation-size", required_argument, "WxH", "TensorRT segmentation size", "384x384"},
         {OptionMaskModel, 0, "mask-model", required_argument, "path", "TensorRT mask model path (.onnx or .engine)", ""},
         {OptionMaskThreshold, 0, "mask-threshold", required_argument, "0.0..1.0", "TensorRT foreground threshold", "0.5"},
         {OptionMaskSmoothing, 0, "mask-smoothing", required_argument, "0.0..1.0", "Temporal mask smoothing strength", "0.65"},
@@ -119,6 +113,28 @@ bool parsePositiveInteger(const char* value, const std::string& optionName, int&
         return false;
     }
     target = static_cast<int>(parsed);
+    return true;
+}
+
+bool parseSize(const char* value, const std::string& optionName, int& width, int& height, std::string& error)
+{
+    const std::string parsed(value);
+    const std::size_t separator = parsed.find('x');
+    if (separator == std::string::npos || separator == 0 || separator == parsed.size() - 1 || parsed.find('x', separator + 1) != std::string::npos) {
+        error = "Invalid value for " + optionName + ": " + parsed + " (expected WIDTHxHEIGHT)";
+        return false;
+    }
+
+    int parsedWidth = 0;
+    int parsedHeight = 0;
+    if (!parsePositiveInteger(parsed.substr(0, separator).c_str(), optionName, parsedWidth, error)
+        || !parsePositiveInteger(parsed.substr(separator + 1).c_str(), optionName, parsedHeight, error)) {
+        error = "Invalid value for " + optionName + ": " + parsed + " (expected positive WIDTHxHEIGHT)";
+        return false;
+    }
+
+    width = parsedWidth;
+    height = parsedHeight;
     return true;
 }
 
@@ -284,23 +300,14 @@ bool parseCommandLine(int argc, char** argv, CommandLineResult& result, std::str
         case OptionDevice:
             result.config.devicePath = optarg;
             break;
-        case OptionWidth:
-            if (!parsePositiveInteger(optarg, "--width", result.config.width, error)) return false;
+        case OptionProcessingSize:
+            if (!parseSize(optarg, "--processing-size", result.config.width, result.config.height, error)) return false;
             break;
-        case OptionHeight:
-            if (!parsePositiveInteger(optarg, "--height", result.config.height, error)) return false;
+        case OptionOutputSize:
+            if (!parseSize(optarg, "--output-size", result.config.outputWidth, result.config.outputHeight, error)) return false;
             break;
-        case OptionOutputWidth:
-            if (!parsePositiveInteger(optarg, "--output-width", result.config.outputWidth, error)) return false;
-            break;
-        case OptionOutputHeight:
-            if (!parsePositiveInteger(optarg, "--output-height", result.config.outputHeight, error)) return false;
-            break;
-        case OptionSegmentationWidth:
-            if (!parsePositiveInteger(optarg, "--segmentation-width", result.config.segmentationWidth, error)) return false;
-            break;
-        case OptionSegmentationHeight:
-            if (!parsePositiveInteger(optarg, "--segmentation-height", result.config.segmentationHeight, error)) return false;
+        case OptionSegmentationSize:
+            if (!parseSize(optarg, "--segmentation-size", result.config.segmentationWidth, result.config.segmentationHeight, error)) return false;
             break;
         case OptionMaskModel:
             result.config.maskModelPath = optarg;
@@ -385,10 +392,6 @@ bool parseCommandLine(int argc, char** argv, CommandLineResult& result, std::str
     }
     if (result.showHelp || result.showVersion) {
         return true;
-    }
-    if ((result.config.outputWidth > 0) != (result.config.outputHeight > 0)) {
-        error = "--output-width and --output-height must be specified together.";
-        return false;
     }
     if (!result.config.noMask && result.config.maskModelPath.empty()) {
         error = "--mask-model is required unless --no-mask is used.";

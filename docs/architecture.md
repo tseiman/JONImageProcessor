@@ -80,7 +80,7 @@ classDiagram
 Typical DRM blur call:
 
 ```bash
-./JONImageProcessor --device /dev/video0 --width 1280 --height 720 --mask-model "$MODEL_PATH" --segmentation-width 384 --segmentation-height 384 --background-effect blur --display-backend drm --fullscreen --benchmark
+./JONImageProcessor --device /dev/video0 --processing-size 1280x720 --mask-model "$MODEL_PATH" --segmentation-size 384x384 --background-effect blur --display-backend drm --fullscreen --benchmark
 ```
 
 ```mermaid
