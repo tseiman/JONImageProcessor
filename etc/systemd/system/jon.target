@@ -1,0 +1,16 @@
+# /etc/systemd/system/jon.target
+# a own target on the NVIdA Jetson Orin Nano 
+# preventing to boot graphical
+# reduced services, direct start og JONImageProcessor as a appliance
+#
+[Unit]
+Description=JON Minimal Appliance Mode
+Documentation=man:systemd.special(7)
+
+Requires=basic.target
+
+Wants=systemd-user-sessions.service systemd-logind.service getty@tty1.service serial-getty@ttyTCU0.service NetworkManager.service NetworkManager-wait-online.service network-online.target ssh.service nvfancontrol.service nvpmodel.service nvfb-early.service nvfb.service nvidia-pva-allowd.service seatd.service nv-l4t-usb-device-mode.service
+After=basic.target systemd-user-sessions.service systemd-logind.service getty@tty1.service serial-getty@ttyTCU0.service NetworkManager.service NetworkManager-wait-online.service network-online.target ssh.service nvfancontrol.service nvpmodel.service nvfb-early.service nvfb.service nvidia-pva-allowd.service seatd.service nv-l4t-usb-device-mode.service
+
+Conflicts=rescue.service rescue.target
+AllowIsolate=yes

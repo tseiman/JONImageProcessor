@@ -1,0 +1,13 @@
+# /etc/systemd/system/brio-startup-check.service
+[Unit]
+Description=BRIO Camera USB Reset Check
+After=local-fs.target
+Before=jon-image-processor.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/local/bin/brio-startup-check.sh
+
+[Install]
+WantedBy=jon.target

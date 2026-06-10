@@ -1,0 +1,21 @@
+[Unit]
+Description=JON Image Processor
+After=local-fs.target brio-startup-check.service
+Requires=brio-startup-check.service
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/JONImageProcessor
+ExecStart=/opt/JONImageProcessor/bin/JONImageProcessor \
+    --config /opt/JONImageProcessor/etc/jonimageprocessor.json \
+    --benchmark --no-daemon
+Restart=on-failure
+RestartSec=5
+StartLimitIntervalSec=60
+StartLimitBurst=3
+User=jonimageprocessor
+Group=jonimageprocessor
+SupplementaryGroups=video input render debug
+
+[Install]
+WantedBy=jon.target
