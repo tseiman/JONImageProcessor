@@ -77,8 +77,15 @@ cv::Mat makeStatusFrame(
             if (config->pauseImageShowStatusText) {
                 const int marginX = size.width / 8;
                 cv::rectangle(frame, cv::Rect(marginX, size.height / 2 - 70, size.width - 2 * marginX, 140), cv::Scalar(245, 245, 245), cv::FILLED);
-                cv::putText(frame, status, cv::Point(marginX + 32, size.height / 2 - 10), cv::FONT_HERSHEY_SIMPLEX, 1.6, cv::Scalar(20, 20, 20), 4, cv::LINE_AA);
-                cv::putText(frame, "JONImageProcessor", cv::Point(marginX + 34, size.height / 2 + 42), cv::FONT_HERSHEY_SIMPLEX, 0.8, cv::Scalar(60, 60, 60), 2, cv::LINE_AA);
+                cv::Mat textOverlay = frame.clone();
+                const cv::Scalar textColor(
+                    std::clamp(config->pauseImageTextColor.b, 0, 255),
+                    std::clamp(config->pauseImageTextColor.g, 0, 255),
+                    std::clamp(config->pauseImageTextColor.r, 0, 255));
+                cv::putText(textOverlay, status, cv::Point(marginX + 32, size.height / 2 - 10), cv::FONT_HERSHEY_SIMPLEX, 1.6, textColor, 4, cv::LINE_AA);
+                cv::putText(textOverlay, "JONImageProcessor", cv::Point(marginX + 34, size.height / 2 + 42), cv::FONT_HERSHEY_SIMPLEX, 0.8, textColor, 2, cv::LINE_AA);
+                const double alpha = std::clamp(config->pauseImageTextColor.a, 0, 255) / 255.0;
+                cv::addWeighted(textOverlay, alpha, frame, 1.0 - alpha, 0.0, frame);
             }
             return frame;
         }
@@ -499,6 +506,11 @@ void logStartupInfo(const ProcessorConfig& config, const ScreenInfo& screenInfo)
     LOG_VERBOSE("Pause image enabled: " << (config.pauseImageEnabled ? "true" : "false"));
     LOG_VERBOSE("Pause image: " << (config.pauseImagePath.empty() ? "none" : config.pauseImagePath));
     LOG_VERBOSE("Pause image status text: " << (config.pauseImageShowStatusText ? "true" : "false"));
+    LOG_VERBOSE("Pause image text color: "
+        << config.pauseImageTextColor.r << ","
+        << config.pauseImageTextColor.g << ","
+        << config.pauseImageTextColor.b << ","
+        << config.pauseImageTextColor.a);
     LOG_VERBOSE("Background overlay color: "
         << config.backgroundOverlayColor.r << ","
         << config.backgroundOverlayColor.g << ","

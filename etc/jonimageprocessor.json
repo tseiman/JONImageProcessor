@@ -22,7 +22,8 @@
   "pause": {
     "enabled": false,
     "image": "",
-    "showStatusText": true
+    "showStatusText": true,
+    "textColor": "ffffffff"
   },
   "output": {
     "size": "auto"
