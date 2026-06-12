@@ -159,7 +159,10 @@ bool V4L2CameraCaptureBackend::read(cv::Mat& frame)
             return false;
         }
 
-        return decoded;
+        if (decoded) {
+            return true;
+        }
+        LOG_WARNING("Skipping invalid V4L2 frame");
     }
 
     return false;

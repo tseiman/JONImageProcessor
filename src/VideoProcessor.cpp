@@ -35,6 +35,8 @@ namespace {
 
 constexpr int ExitOk = 0;
 constexpr int ExitRuntimeError = 2;
+constexpr auto CameraReconnectInterval = std::chrono::seconds(5);
+constexpr auto CameraReconnectSettleTime = std::chrono::seconds(3);
 
 struct BackgroundEffectBuffers {
     cv::Mat downscaledFrame;
@@ -539,6 +541,7 @@ int VideoProcessor::run()
         lowLatencyCapture.start(*captureBackend);
     }
     auto nextReconnectAttempt = std::chrono::steady_clock::now();
+    std::chrono::steady_clock::time_point cameraDevicePresentSince {};
     const auto startedAt = std::chrono::steady_clock::now();
     auto intervalStartedAt = startedAt;
     std::size_t intervalFrames = 0;
@@ -577,6 +580,8 @@ int VideoProcessor::run()
                 captureBackend->close();
                 captureOpened = false;
             }
+            cameraDevicePresentSince = {};
+            nextReconnectAttempt = std::chrono::steady_clock::now();
             frame = makeStatusFrame(outputSize, "Camera OFF");
             syntheticFrame = true;
             std::this_thread::sleep_for(std::chrono::milliseconds(33));
@@ -585,12 +590,23 @@ int VideoProcessor::run()
             if (!captureOpened) {
                 const auto now = std::chrono::steady_clock::now();
                 if (now >= nextReconnectAttempt) {
-                    if (pathExists(config_.devicePath)) {
-                        captureOpened = captureBackend->open(config_);
+                    const bool cameraDevicePresent = pathExists(config_.devicePath);
+                    if (cameraDevicePresent && cameraDevicePresentSince == std::chrono::steady_clock::time_point {}) {
+                        cameraDevicePresentSince = now;
+                        LOG_INFO("Camera device appeared, waiting before reconnect: " << config_.devicePath);
+                    } else if (!cameraDevicePresent) {
+                        cameraDevicePresentSince = {};
                     }
-                    nextReconnectAttempt = now + std::chrono::seconds(2);
+
+                    if (cameraDevicePresent && now - cameraDevicePresentSince >= CameraReconnectSettleTime) {
+                        captureOpened = captureBackend->open(config_);
+                        nextReconnectAttempt = now + CameraReconnectInterval;
+                    } else {
+                        nextReconnectAttempt = now + std::chrono::seconds(1);
+                    }
                     if (captureOpened) {
                         LOG_INFO("Camera reconnected");
+                        cameraDevicePresentSince = {};
                     }
                 }
                 if (!captureOpened) {
@@ -617,7 +633,8 @@ int VideoProcessor::run()
                     captureActive = false;
                     captureBackend->close();
                     captureOpened = false;
-                    nextReconnectAttempt = std::chrono::steady_clock::now() + std::chrono::seconds(2);
+                    nextReconnectAttempt = std::chrono::steady_clock::now() + CameraReconnectInterval;
+                    cameraDevicePresentSince = {};
                     LOG_WARNING("Camera disconnected, showing disconnected test image");
                     frame = makeStatusFrame(outputSize, "Camera DISCONNECTED");
                     syntheticFrame = true;
