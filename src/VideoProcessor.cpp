@@ -37,6 +37,8 @@ constexpr int ExitOk = 0;
 constexpr int ExitRuntimeError = 2;
 constexpr auto CameraReconnectInterval = std::chrono::seconds(5);
 constexpr auto CameraReconnectSettleTime = std::chrono::seconds(3);
+constexpr auto CameraEnableDisconnectedDelay = std::chrono::seconds(10);
+constexpr auto DisplayReconnectInterval = std::chrono::seconds(3);
 
 struct BackgroundEffectBuffers {
     cv::Mat downscaledFrame;
@@ -524,22 +526,6 @@ int VideoProcessor::run()
         cv::utils::logging::setLogLevel(cv::utils::logging::LOG_LEVEL_ERROR);
     }
 
-    std::unique_ptr<ICaptureBackend> captureBackend = CaptureBackendFactory::create(config_);
-    if (!captureBackend) {
-        LOG_ERROR("Cannot create capture backend");
-        return ExitRuntimeError;
-    }
-
-    bool captureOpened = !usingCamera || pathExists(config_.devicePath)
-        ? captureBackend->open(config_)
-        : false;
-    if (!captureOpened && !usingCamera) {
-        return ExitRuntimeError;
-    }
-    if (!captureOpened && usingCamera) {
-        LOG_WARNING("Camera is not available, showing disconnected test image");
-    }
-
     const cv::Size outputSize(config_.width, config_.height);
     const bool hasExplicitDisplaySize = config_.outputWidth > 0 && config_.outputHeight > 0;
     const bool useScreenDisplaySize = config_.fullscreen && screenInfo.available && !hasExplicitDisplaySize;
@@ -550,6 +536,12 @@ int VideoProcessor::run()
     const bool showWindow = !config_.noDisplay;
     const bool maskEnabled = !config_.noMask;
     const bool overlayEnabled = !config_.noOverlay && maskEnabled;
+
+    std::unique_ptr<ICaptureBackend> captureBackend = CaptureBackendFactory::create(config_);
+    if (!captureBackend) {
+        LOG_ERROR("Cannot create capture backend");
+        return ExitRuntimeError;
+    }
 
     std::unique_ptr<IMaskBackend> maskBackend;
     if (maskEnabled) {
@@ -565,26 +557,42 @@ int VideoProcessor::run()
     }
 
     std::unique_ptr<IDisplayBackend> displayBackend;
+    DisplayBackendConfig displayConfig;
+    displayConfig.displayMode = DisplayMode::Fill;
+    displayConfig.processingSize = outputSize;
+    displayConfig.canvasFallbackSize = configuredDisplaySize;
+    displayConfig.screenInfo = screenInfo;
+    displayConfig.fullscreen = config_.fullscreen;
+    displayConfig.forceCanvasFallbackSize = forceConfiguredDisplaySize;
+    displayConfig.useScreenCanvasFallback = useScreenDisplaySize;
+    bool displayReady = !showWindow;
     if (showWindow) {
         displayBackend = DisplayBackendFactory::create(config_.displayBackend);
         if (!displayBackend) {
             LOG_ERROR("Cannot create display backend: " << displayBackendToString(config_.displayBackend));
             return ExitRuntimeError;
         }
-
-        DisplayBackendConfig displayConfig;
-        displayConfig.displayMode = DisplayMode::Fill;
-        displayConfig.processingSize = outputSize;
-        displayConfig.canvasFallbackSize = configuredDisplaySize;
-        displayConfig.screenInfo = screenInfo;
-        displayConfig.fullscreen = config_.fullscreen;
-        displayConfig.forceCanvasFallbackSize = forceConfiguredDisplaySize;
-        displayConfig.useScreenCanvasFallback = useScreenDisplaySize;
-
-        if (!displayBackend->initialize(displayConfig)) {
-            LOG_ERROR("Cannot initialize display backend: " << displayBackendToString(config_.displayBackend));
-            return ExitRuntimeError;
+        displayReady = displayBackend->initialize(displayConfig);
+        if (!displayReady) {
+            LOG_WARNING("Display backend is not available, waiting for display reconnect: "
+                << displayBackendToString(config_.displayBackend));
+            displayBackend->shutdown();
         }
+    }
+
+    auto openCapture = [&]() {
+        if (usingCamera && !pathExists(config_.devicePath)) {
+            return false;
+        }
+        return captureBackend->open(config_);
+    };
+
+    bool captureOpened = displayReady ? openCapture() : false;
+    if (!captureOpened && !usingCamera && displayReady) {
+        return ExitRuntimeError;
+    }
+    if (!captureOpened && usingCamera && displayReady) {
+        LOG_WARNING("Camera is not available, showing disconnected test image");
     }
 
     std::size_t frameIndex = 0;
@@ -596,7 +604,10 @@ int VideoProcessor::run()
         lowLatencyCapture.start(*captureBackend);
     }
     auto nextReconnectAttempt = std::chrono::steady_clock::now();
+    auto nextDisplayReconnectAttempt = std::chrono::steady_clock::now() + DisplayReconnectInterval;
     std::chrono::steady_clock::time_point cameraDevicePresentSince {};
+    std::chrono::steady_clock::time_point cameraEnableStartedAt {};
+    bool cameraWasDisabledByRuntime = !config_.cameraEnabled;
     const auto startedAt = std::chrono::steady_clock::now();
     auto intervalStartedAt = startedAt;
     std::size_t intervalFrames = 0;
@@ -623,6 +634,29 @@ int VideoProcessor::run()
 
         ProcessorConfig runtimeConfig = runtimeState.configSnapshot();
         const auto pipelineStartedAt = std::chrono::steady_clock::now();
+        if (showWindow && !displayReady) {
+            const auto now = std::chrono::steady_clock::now();
+            if (now >= nextDisplayReconnectAttempt) {
+                displayReady = displayBackend->initialize(displayConfig);
+                if (displayReady) {
+                    LOG_INFO("Display backend connected: " << displayBackendToString(config_.displayBackend));
+                    captureOpened = openCapture();
+                    if (!captureOpened && !usingCamera) {
+                        LOG_ERROR("Cannot open input file: " << config_.inputPath);
+                        break;
+                    }
+                    if (!captureOpened && usingCamera) {
+                        LOG_WARNING("Camera is not available, showing disconnected test image");
+                    }
+                } else {
+                    displayBackend->shutdown();
+                    nextDisplayReconnectAttempt = now + DisplayReconnectInterval;
+                }
+            }
+            std::this_thread::sleep_for(std::chrono::milliseconds(100));
+            continue;
+        }
+
         bool readOk = false;
         bool syntheticFrame = false;
         if (lowLatencyMode && usingCamera && !runtimeConfig.cameraEnabled) {
@@ -637,11 +671,16 @@ int VideoProcessor::run()
             }
             cameraDevicePresentSince = {};
             nextReconnectAttempt = std::chrono::steady_clock::now();
+            cameraEnableStartedAt = {};
+            cameraWasDisabledByRuntime = true;
             frame = makeStatusFrame(outputSize, "Camera OFF");
             syntheticFrame = true;
             std::this_thread::sleep_for(std::chrono::milliseconds(33));
             readOk = true;
         } else if (lowLatencyMode) {
+            if (cameraWasDisabledByRuntime && cameraEnableStartedAt == std::chrono::steady_clock::time_point {}) {
+                cameraEnableStartedAt = std::chrono::steady_clock::now();
+            }
             if (!captureOpened) {
                 const auto now = std::chrono::steady_clock::now();
                 if (now >= nextReconnectAttempt) {
@@ -662,6 +701,8 @@ int VideoProcessor::run()
                                 readOk = true;
                                 LOG_INFO("Camera reconnected");
                                 cameraDevicePresentSince = {};
+                                cameraWasDisabledByRuntime = false;
+                                cameraEnableStartedAt = {};
                                 lowLatencyCapture.start(*captureBackend);
                                 captureActive = true;
                                 LOG_INFO("Camera input enabled by runtime config");
@@ -677,7 +718,10 @@ int VideoProcessor::run()
                     }
                 }
                 if (!captureOpened && !readOk) {
-                    frame = makeStatusFrame(outputSize, "Camera DISCONNECTED");
+                    const bool keepCameraOffStatus = cameraWasDisabledByRuntime
+                        && cameraEnableStartedAt != std::chrono::steady_clock::time_point {}
+                        && std::chrono::steady_clock::now() - cameraEnableStartedAt < CameraEnableDisconnectedDelay;
+                    frame = makeStatusFrame(outputSize, keepCameraOffStatus ? "Camera OFF" : "Camera DISCONNECTED");
                     syntheticFrame = true;
                     std::this_thread::sleep_for(std::chrono::milliseconds(33));
                     readOk = true;
@@ -702,6 +746,8 @@ int VideoProcessor::run()
                     captureOpened = false;
                     nextReconnectAttempt = std::chrono::steady_clock::now() + CameraReconnectInterval;
                     cameraDevicePresentSince = {};
+                    cameraWasDisabledByRuntime = false;
+                    cameraEnableStartedAt = {};
                     LOG_WARNING("Camera disconnected, showing disconnected test image");
                     frame = makeStatusFrame(outputSize, "Camera DISCONNECTED");
                     syntheticFrame = true;
@@ -823,7 +869,19 @@ int VideoProcessor::run()
         if (showWindow) {
             BenchmarkScope timer(benchmark, BenchmarkStage::Display);
             if (!displayBackend->render(outputFrame)) {
-                break;
+                LOG_WARNING("Display backend render failed, waiting for display reconnect");
+                displayBackend->shutdown();
+                displayReady = false;
+                nextDisplayReconnectAttempt = std::chrono::steady_clock::now() + DisplayReconnectInterval;
+                if (captureActive) {
+                    lowLatencyCapture.stop();
+                    captureActive = false;
+                }
+                if (usingCamera && captureOpened) {
+                    captureBackend->close();
+                    captureOpened = false;
+                }
+                continue;
             }
         }
 

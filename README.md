@@ -377,11 +377,11 @@ All fields are optional. Unknown JSON fields log warnings and are ignored. Inval
 
 ## Runtime Behavior
 
-Camera input always uses V4L2 and low-latency capture. The capture thread keeps only the newest frame, so old frames are overwritten instead of queued. If the USB camera disappears, JONImageProcessor closes the broken capture path, renders a `Camera DISCONNECTED` test image, and periodically retries the configured device after it has been visible for a short settle period. Reconnect is accepted after the reopened V4L2 device delivers a valid frame. If `camera.enabled` was set to false through IPC, the application keeps rendering `Camera OFF` until the camera is explicitly enabled again. If the Jetson kernel does not recreate `/dev/video0` after a USB reconnect, JONImageProcessor continues showing `Camera DISCONNECTED`; a USB/controller reset or service restart may still be required.
+Camera input always uses V4L2 and low-latency capture. The capture thread keeps only the newest frame, so old frames are overwritten instead of queued. If the USB camera disappears, JONImageProcessor closes the broken capture path, renders a `Camera DISCONNECTED` test image, and periodically retries the configured device after it has been visible for a short settle period. Reconnect is accepted after the reopened V4L2 device delivers a valid frame. If `camera.enabled` was set to false through IPC, the application renders `Camera OFF`. When camera input is enabled again, `Camera OFF` stays visible while the camera is being reopened; only if `/dev/video0` is still unavailable after a short delay does the status change to `Camera DISCONNECTED`. If the Jetson kernel does not recreate `/dev/video0` after a USB reconnect, JONImageProcessor continues showing `Camera DISCONNECTED`; a USB/controller reset or service restart may still be required.
 
 Video file input uses OpenCV file capture and processes frames sequentially.
 
-Display mode is fixed to fill. The image fills the output canvas while preserving aspect ratio. Cropping is allowed; stretching is not used.
+Display mode is fixed to fill. The image fills the output canvas while preserving aspect ratio. Cropping is allowed; stretching is not used. If the DRM/KMS display is not connected during service startup, JONImageProcessor stays alive and retries display initialization periodically. Camera capture is not started while the display is unavailable.
 
 ## Benchmarking
 
