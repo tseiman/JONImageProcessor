@@ -302,6 +302,8 @@ journalctl -u JONImageProcessor.service -f
 - `--pause-image-enabled <true|false>`: use pause image instead of generated camera status screens. Default: `false`.
 - `--pause-image-status-text <true|false>`: render camera status text over the pause image. Default: `true`.
 - `--pause-image-text-color <RRGGBBAA>`: status text color for the pause image overlay. Default: `ffffffff`.
+- `--pause-image-text-position <XxY>`: status text position on the pause image. Use `auto` for the default centered position. Default: `auto`.
+- `--pause-image-text-size <value>`: status text size on the pause image. Default: `1.6`.
 - `--background-overlay-color <R,G,B>`: color used by `--background-effect color`. Ignored for blur/image. Default: `0,255,0`.
 - `--background-overlay-alpha <0.0..1.0>`: alpha used by `--background-effect color`. Ignored for blur/image. Default: `0.35`.
 - `--blur-strength <1..100>`: blur strength used by `--background-effect blur`. Default: `15`.
@@ -372,9 +374,11 @@ Supported JSON groups:
   },
   "pause": {
     "enabled": false,
-    "image": "/opt/JONImageProcessor/var/userdata/pause.jpg",
+    "image": "testdata/sample_pause.jpg",
     "showStatusText": true,
-    "textColor": "ffffffff"
+    "textColor": "ffffffff",
+    "textPosition": "auto",
+    "textSize": 1.6
   },
   "output": {
     "size": "auto"
@@ -392,7 +396,7 @@ Supported JSON groups:
 }
 ```
 
-All fields are optional. Unknown JSON fields log warnings and are ignored. Invalid JSON, invalid types, and invalid values stop startup with an error. JSON syntax errors include line and column information where possible. `camera.connectTimeoutSeconds` controls how long `Camera connecting...` is shown after runtime camera re-enable before falling back to `Camera DISCONNECTED`. `pause.enabled` switches camera status screens from the generated pattern to `pause.image`; `pause.showStatusText` controls whether the status label is rendered over that image. `pause.textColor` uses `RRGGBBAA` hex, for example `ffffff0a`. `diagnostics.benchmark` enables benchmark collection for IPC without passing `--benchmark`.
+All fields are optional. Unknown JSON fields log warnings and are ignored. Invalid JSON, invalid types, and invalid values stop startup with an error. JSON syntax errors include line and column information where possible. `camera.connectTimeoutSeconds` controls how long `Camera connecting...` is shown after runtime camera re-enable before falling back to `Camera DISCONNECTED`. `pause.enabled` switches camera status screens from the generated pattern to `pause.image`; `pause.showStatusText` controls whether the status label is rendered over that image. `pause.textColor` uses `RRGGBBAA` hex, for example `ffffff0a`. `pause.textPosition` uses `XxY` or `auto`; `pause.textSize` controls the rendered text scale. `diagnostics.benchmark` enables benchmark collection for IPC without passing `--benchmark`.
 
 ## Runtime Behavior
 
@@ -431,6 +435,8 @@ Writable keys:
 - `pause.image`: string path.
 - `pause.showStatusText`: boolean. When false, no status text is rendered over the pause image.
 - `pause.textColor`: `RRGGBBAA` hex color for the pause image status text.
+- `pause.textPosition`: `XxY` or `auto`.
+- `pause.textSize`: float `0.1..10.0`.
 - `segmentation.threshold`: float `0.0..1.0`
 - `segmentation.smoothing`: float `0.0..1.0`
 - `segmentation.morphology`: `off`, `light`, `strong`

@@ -43,6 +43,11 @@ struct RgbaColor {
     int a = 255;
 };
 
+struct Point2i {
+    int x = -1;
+    int y = -1;
+};
+
 struct ProcessorConfig {
     std::string inputPath;
     std::string devicePath = "/dev/video0";
@@ -66,7 +71,9 @@ struct ProcessorConfig {
     std::string ipcSocketPath = "/tmp/jonimageprocessor.sock";
     RgbColor backgroundOverlayColor;
     RgbaColor pauseImageTextColor;
+    Point2i pauseImageTextPosition;
     double backgroundOverlayAlpha = 0.35;
+    double pauseImageTextSize = 1.6;
     int blurStrength = 15;
     bool fullscreen = false;
     bool verbose = false;

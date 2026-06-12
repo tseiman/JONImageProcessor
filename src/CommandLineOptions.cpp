@@ -37,6 +37,8 @@ enum OptionId {
     OptionPauseImageEnabled,
     OptionPauseImageStatusText,
     OptionPauseImageTextColor,
+    OptionPauseImageTextPosition,
+    OptionPauseImageTextSize,
     OptionBackgroundOverlayColor,
     OptionBackgroundOverlayAlpha,
     OptionBlurStrength,
@@ -85,6 +87,8 @@ const std::vector<OptionDefinition>& optionDefinitions()
         {OptionPauseImageEnabled, 0, "pause-image-enabled", required_argument, "true|false", "Use pause image instead of generated camera status screens", "false"},
         {OptionPauseImageStatusText, 0, "pause-image-status-text", required_argument, "true|false", "Render camera status text over pause image", "true"},
         {OptionPauseImageTextColor, 0, "pause-image-text-color", required_argument, "RRGGBBAA", "Status text color for pause image overlay", "ffffffff"},
+        {OptionPauseImageTextPosition, 0, "pause-image-text-position", required_argument, "XxY", "Status text position on pause image", "auto"},
+        {OptionPauseImageTextSize, 0, "pause-image-text-size", required_argument, "value", "Status text size on pause image", "1.6"},
         {OptionBackgroundOverlayColor, 0, "background-overlay-color", required_argument, "R,G,B", "Background color for --background-effect color; ignored for blur/image", "0,255,0"},
         {OptionBackgroundOverlayAlpha, 0, "background-overlay-alpha", required_argument, "0.0..1.0", "Background alpha for --background-effect color; ignored for blur/image", "0.35"},
         {OptionBlurStrength, 0, "blur-strength", required_argument, "value", "Blur strength for --background-effect blur", "15"},
@@ -162,12 +166,54 @@ bool parseSize(const char* value, const std::string& optionName, int& width, int
     return true;
 }
 
+bool parsePosition(const char* value, const std::string& optionName, Point2i& position, std::string& error)
+{
+    const std::string parsed(value);
+    if (parsed == "auto") {
+        position = Point2i {};
+        return true;
+    }
+    const std::size_t separator = parsed.find('x');
+    if (separator == std::string::npos || separator == 0 || separator == parsed.size() - 1 || parsed.find('x', separator + 1) != std::string::npos) {
+        error = "Invalid value for " + optionName + ": " + parsed + " (expected XxY)";
+        return false;
+    }
+    const std::string xPart = parsed.substr(0, separator);
+    char* end = nullptr;
+    const long x = std::strtol(xPart.c_str(), &end, 10);
+    if (end == xPart.c_str() || *end != '\0' || x < 0 || x > 16384) {
+        error = "Invalid value for " + optionName + ": " + parsed + " (expected non-negative XxY)";
+        return false;
+    }
+    const std::string yPart = parsed.substr(separator + 1);
+    const long y = std::strtol(yPart.c_str(), &end, 10);
+    if (end == yPart.c_str() || *end != '\0' || y < 0 || y > 16384) {
+        error = "Invalid value for " + optionName + ": " + parsed + " (expected non-negative XxY)";
+        return false;
+    }
+    position.x = static_cast<int>(x);
+    position.y = static_cast<int>(y);
+    return true;
+}
+
 bool parseUnitDouble(const char* value, const std::string& optionName, double& target, std::string& error)
 {
     char* end = nullptr;
     const double parsed = std::strtod(value, &end);
     if (end == value || *end != '\0' || parsed < 0.0 || parsed > 1.0) {
         error = "Invalid value for " + optionName + ": " + value + " (allowed: 0.0..1.0)";
+        return false;
+    }
+    target = parsed;
+    return true;
+}
+
+bool parseTextSize(const char* value, const std::string& optionName, double& target, std::string& error)
+{
+    char* end = nullptr;
+    const double parsed = std::strtod(value, &end);
+    if (end == value || *end != '\0' || parsed < 0.1 || parsed > 10.0) {
+        error = "Invalid value for " + optionName + ": " + value + " (allowed: 0.1..10.0)";
         return false;
     }
     target = parsed;
@@ -499,6 +545,12 @@ bool parseCommandLine(int argc, char** argv, CommandLineResult& result, std::str
             break;
         case OptionPauseImageTextColor:
             if (!parseRgbaHexColor(optarg, result.config.pauseImageTextColor, error)) return false;
+            break;
+        case OptionPauseImageTextPosition:
+            if (!parsePosition(optarg, "--pause-image-text-position", result.config.pauseImageTextPosition, error)) return false;
+            break;
+        case OptionPauseImageTextSize:
+            if (!parseTextSize(optarg, "--pause-image-text-size", result.config.pauseImageTextSize, error)) return false;
             break;
         case OptionBackgroundOverlayColor:
             if (!parseOverlayColor(optarg, result.config.backgroundOverlayColor, error)) return false;

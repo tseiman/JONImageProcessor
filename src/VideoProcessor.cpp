@@ -76,14 +76,22 @@ cv::Mat makeStatusFrame(
             frame = buffers->scaledPauseImage.clone();
             if (config->pauseImageShowStatusText) {
                 const int marginX = size.width / 8;
-                cv::rectangle(frame, cv::Rect(marginX, size.height / 2 - 70, size.width - 2 * marginX, 140), cv::Scalar(245, 245, 245), cv::FILLED);
+                const cv::Point textPosition(
+                    config->pauseImageTextPosition.x >= 0 ? config->pauseImageTextPosition.x : marginX + 32,
+                    config->pauseImageTextPosition.y >= 0 ? config->pauseImageTextPosition.y : size.height / 2 - 10);
+                const double textSize = std::clamp(config->pauseImageTextSize, 0.1, 10.0);
+                const int boxHeight = static_cast<int>(std::round(140.0 * textSize / 1.6));
+                const int boxTop = std::max(0, textPosition.y - static_cast<int>(std::round(60.0 * textSize / 1.6)));
+                const int boxLeft = std::max(0, textPosition.x - 32);
+                const int boxWidth = std::min(size.width - boxLeft, size.width - 2 * marginX);
+                cv::rectangle(frame, cv::Rect(boxLeft, boxTop, boxWidth, std::min(boxHeight, size.height - boxTop)), cv::Scalar(245, 245, 245), cv::FILLED);
                 cv::Mat textOverlay = frame.clone();
                 const cv::Scalar textColor(
                     std::clamp(config->pauseImageTextColor.b, 0, 255),
                     std::clamp(config->pauseImageTextColor.g, 0, 255),
                     std::clamp(config->pauseImageTextColor.r, 0, 255));
-                cv::putText(textOverlay, status, cv::Point(marginX + 32, size.height / 2 - 10), cv::FONT_HERSHEY_SIMPLEX, 1.6, textColor, 4, cv::LINE_AA);
-                cv::putText(textOverlay, "JONImageProcessor", cv::Point(marginX + 34, size.height / 2 + 42), cv::FONT_HERSHEY_SIMPLEX, 0.8, textColor, 2, cv::LINE_AA);
+                cv::putText(textOverlay, status, textPosition, cv::FONT_HERSHEY_SIMPLEX, textSize, textColor, std::max(1, static_cast<int>(std::round(4.0 * textSize / 1.6))), cv::LINE_AA);
+                cv::putText(textOverlay, "JONImageProcessor", cv::Point(textPosition.x + 2, textPosition.y + static_cast<int>(std::round(52.0 * textSize / 1.6))), cv::FONT_HERSHEY_SIMPLEX, textSize * 0.5, textColor, std::max(1, static_cast<int>(std::round(2.0 * textSize / 1.6))), cv::LINE_AA);
                 const double alpha = std::clamp(config->pauseImageTextColor.a, 0, 255) / 255.0;
                 cv::addWeighted(textOverlay, alpha, frame, 1.0 - alpha, 0.0, frame);
             }
@@ -511,6 +519,11 @@ void logStartupInfo(const ProcessorConfig& config, const ScreenInfo& screenInfo)
         << config.pauseImageTextColor.g << ","
         << config.pauseImageTextColor.b << ","
         << config.pauseImageTextColor.a);
+    LOG_VERBOSE("Pause image text position: "
+        << (config.pauseImageTextPosition.x < 0 || config.pauseImageTextPosition.y < 0
+            ? std::string("auto")
+            : std::to_string(config.pauseImageTextPosition.x) + "x" + std::to_string(config.pauseImageTextPosition.y)));
+    LOG_VERBOSE("Pause image text size: " << config.pauseImageTextSize);
     LOG_VERBOSE("Background overlay color: "
         << config.backgroundOverlayColor.r << ","
         << config.backgroundOverlayColor.g << ","

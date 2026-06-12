@@ -256,6 +256,26 @@ bool parseSizeValue(const std::string& value, int& width, int& height)
     return parsePositiveInt(value.substr(0, x), width) && parsePositiveInt(value.substr(x + 1), height);
 }
 
+bool parsePositionValue(const std::string& value, Point2i& position)
+{
+    if (value == "auto") {
+        position = Point2i {};
+        return true;
+    }
+    const std::size_t x = value.find('x');
+    if (x == std::string::npos || x == 0 || x == value.size() - 1 || value.find('x', x + 1) != std::string::npos) return false;
+    char* end = nullptr;
+    const std::string xPart = value.substr(0, x);
+    const long parsedX = std::strtol(xPart.c_str(), &end, 10);
+    if (end == xPart.c_str() || *end != '\0' || parsedX < 0 || parsedX > 16384) return false;
+    const std::string yPart = value.substr(x + 1);
+    const long parsedY = std::strtol(yPart.c_str(), &end, 10);
+    if (end == yPart.c_str() || *end != '\0' || parsedY < 0 || parsedY > 16384) return false;
+    position.x = static_cast<int>(parsedX);
+    position.y = static_cast<int>(parsedY);
+    return true;
+}
+
 bool parseUnit(double value)
 {
     return value >= 0.0 && value <= 1.0;
@@ -396,13 +416,20 @@ bool applyConfig(const Json& root, ProcessorConfig& config, ConfigLoadResult& re
 
     if (const Json* pause = objectChild(root, "pause")) {
         if (pause->type != Json::Type::Object) { error = "pause must be an object"; return false; }
-        warnUnknownFields(*pause, "pause.", {"enabled", "image", "showStatusText", "textColor"});
+        warnUnknownFields(*pause, "pause.", {"enabled", "image", "showStatusText", "textColor", "textPosition", "textSize"});
         if (!readBoolean(*pause, "enabled", config.pauseImageEnabled, error)) return false;
         if (!readString(*pause, "image", config.pauseImagePath, error)) return false;
         if (!readBoolean(*pause, "showStatusText", config.pauseImageShowStatusText, error)) return false;
         std::string textColor;
         if (!readString(*pause, "textColor", textColor, error)) return false;
         if (!textColor.empty() && !parseRgbaHexColor(textColor, config.pauseImageTextColor)) { error = "Invalid pause.textColor"; return false; }
+        std::string textPosition;
+        if (!readString(*pause, "textPosition", textPosition, error)) return false;
+        if (!textPosition.empty() && !parsePositionValue(textPosition, config.pauseImageTextPosition)) { error = "Invalid pause.textPosition"; return false; }
+        double textSize = config.pauseImageTextSize;
+        if (!readNumber(*pause, "textSize", textSize, error)) return false;
+        if (textSize < 0.1 || textSize > 10.0) { error = "Invalid pause.textSize"; return false; }
+        config.pauseImageTextSize = textSize;
     }
 
     if (const Json* output = objectChild(root, "output")) {

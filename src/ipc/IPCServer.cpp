@@ -146,6 +146,32 @@ std::string rgbaColorToHex(const RgbaColor& color)
     return out;
 }
 
+std::string positionToString(const Point2i& position)
+{
+    if (position.x < 0 || position.y < 0) return "auto";
+    return std::to_string(position.x) + "x" + std::to_string(position.y);
+}
+
+bool parsePosition(const std::string& value, Point2i& position)
+{
+    if (value == "auto") {
+        position = Point2i {};
+        return true;
+    }
+    const std::size_t separator = value.find('x');
+    if (separator == std::string::npos || separator == 0 || separator == value.size() - 1 || value.find('x', separator + 1) != std::string::npos) return false;
+    char* end = nullptr;
+    const std::string xPart = value.substr(0, separator);
+    const long x = std::strtol(xPart.c_str(), &end, 10);
+    if (end == xPart.c_str() || *end != '\0' || x < 0 || x > 16384) return false;
+    const std::string yPart = value.substr(separator + 1);
+    const long y = std::strtol(yPart.c_str(), &end, 10);
+    if (end == yPart.c_str() || *end != '\0' || y < 0 || y > 16384) return false;
+    position.x = static_cast<int>(x);
+    position.y = static_cast<int>(y);
+    return true;
+}
+
 int hexValue(char c)
 {
     if (c >= '0' && c <= '9') return c - '0';
@@ -237,6 +263,8 @@ std::string valueJson(const ProcessorConfig& c, const std::string& key, const Be
     if (key == "pause.image") return "\"" + escapeJson(c.pauseImagePath) + "\"";
     if (key == "pause.showStatusText") return c.pauseImageShowStatusText ? "true" : "false";
     if (key == "pause.textColor") return "\"" + rgbaColorToHex(c.pauseImageTextColor) + "\"";
+    if (key == "pause.textPosition") return "\"" + positionToString(c.pauseImageTextPosition) + "\"";
+    if (key == "pause.textSize") return std::to_string(c.pauseImageTextSize);
     if (key == "no_mask" || key == "runtime.noMask") return c.noMask ? "true" : "false";
     if (key == "no_overlay" || key == "runtime.noOverlay") return c.noOverlay ? "true" : "false";
     if (key == "camera.enabled") return c.cameraEnabled ? "true" : "false";
@@ -254,6 +282,7 @@ bool knownKey(const std::string& key)
         || key == "background.effect" || key == "background.image" || key == "background.overlayColor"
         || key == "background.overlayAlpha" || key == "background.blurStrength"
         || key == "pause.enabled" || key == "pause.image" || key == "pause.showStatusText" || key == "pause.textColor"
+        || key == "pause.textPosition" || key == "pause.textSize"
         || key == "runtime.noMask" || key == "runtime.noOverlay" || key == "camera.enabled";
 }
 
@@ -374,7 +403,9 @@ std::string IPCServer::handleLine(const std::string& line)
             << ",\"pause\":{\"enabled\":" << (current.pauseImageEnabled ? "true" : "false")
             << ",\"image\":\"" << escapeJson(current.pauseImagePath)
             << "\",\"showStatusText\":" << (current.pauseImageShowStatusText ? "true" : "false")
-            << ",\"textColor\":\"" << rgbaColorToHex(current.pauseImageTextColor) << "\"}"
+            << ",\"textColor\":\"" << rgbaColorToHex(current.pauseImageTextColor)
+            << "\",\"textPosition\":\"" << positionToString(current.pauseImageTextPosition)
+            << "\",\"textSize\":" << current.pauseImageTextSize << "}"
             << ",\"runtime\":{\"noMask\":" << (current.noMask ? "true" : "false")
             << ",\"noOverlay\":" << (current.noOverlay ? "true" : "false") << "}";
         if (current.benchmark) {
@@ -434,6 +465,13 @@ std::string IPCServer::handleLine(const std::string& line)
     } else if (key == "pause.textColor") {
         if (value.type != JsonValue::Type::String) return errorResponse("invalid value type");
         if (!parseRgbaHexColor(value.text, updated.pauseImageTextColor)) return errorResponse("invalid value");
+    } else if (key == "pause.textPosition") {
+        if (value.type != JsonValue::Type::String) return errorResponse("invalid value type");
+        if (!parsePosition(value.text, updated.pauseImageTextPosition)) return errorResponse("invalid value");
+    } else if (key == "pause.textSize") {
+        if (value.type != JsonValue::Type::Number) return errorResponse("invalid value type");
+        if (value.number < 0.1 || value.number > 10.0) return errorResponse("invalid value");
+        updated.pauseImageTextSize = value.number;
     } else if (key == "background_overlay_color" || key == "background.overlayColor") {
         if (value.type != JsonValue::Type::String) return errorResponse("invalid value type");
         if (!parseColor(value.text, updated.backgroundOverlayColor)) return errorResponse("invalid value");

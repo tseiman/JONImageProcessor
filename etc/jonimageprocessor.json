@@ -21,9 +21,11 @@
   },
   "pause": {
     "enabled": false,
-    "image": "",
+    "image": "testdata/sample_pause.jpg",
     "showStatusText": true,
-    "textColor": "ffffffff"
+    "textColor": "ffffffff",
+    "textPosition": "auto",
+    "textSize": 1.6
   },
   "output": {
     "size": "auto"
