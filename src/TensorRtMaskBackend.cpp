@@ -386,7 +386,11 @@ bool TensorRtMaskBackend::initialize(const ProcessorConfig& config)
             LOG_ERROR("Failed to create TensorRT builder");
             return false;
         }
+#if NV_TENSORRT_MAJOR >= 10
+        network.reset(builder->createNetworkV2(0U));
+#else
         network.reset(builder->createNetworkV2(1U << static_cast<uint32_t>(nvinfer1::NetworkDefinitionCreationFlag::kEXPLICIT_BATCH)));
+#endif
         builderConfig.reset(builder->createBuilderConfig());
         parser.reset(nvonnxparser::createParser(*network, tensorRtLogger()));
         if (!network || !builderConfig || !parser) {

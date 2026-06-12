@@ -19,6 +19,11 @@
     "overlayColor": "0,255,0",
     "overlayAlpha": 1.0
   },
+  "pause": {
+    "enabled": false,
+    "image": "",
+    "showStatusText": true
+  },
   "output": {
     "size": "auto"
   },

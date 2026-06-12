@@ -47,8 +47,43 @@ struct BackgroundEffectBuffers {
     cv::Mat result;
 };
 
-cv::Mat makeStatusFrame(const cv::Size& size, const std::string& status)
+struct StatusFrameBuffers {
+    cv::Mat pauseImage;
+    cv::Mat scaledPauseImage;
+    std::string loadedPauseImagePath;
+};
+
+cv::Mat makeStatusFrame(
+    const cv::Size& size,
+    const std::string& status,
+    const ProcessorConfig* config = nullptr,
+    StatusFrameBuffers* buffers = nullptr)
 {
+    if (config != nullptr && buffers != nullptr && config->pauseImageEnabled && !config->pauseImagePath.empty()) {
+        if (buffers->loadedPauseImagePath != config->pauseImagePath) {
+            buffers->pauseImage = cv::imread(config->pauseImagePath, cv::IMREAD_COLOR);
+            buffers->scaledPauseImage.release();
+            buffers->loadedPauseImagePath = config->pauseImagePath;
+            if (buffers->pauseImage.empty()) {
+                LOG_WARNING("Cannot read pause image: " << config->pauseImagePath);
+            }
+        }
+        if (!buffers->pauseImage.empty()) {
+            cv::Mat frame;
+            if (buffers->scaledPauseImage.size() != size || buffers->scaledPauseImage.type() != CV_8UC3) {
+                cv::resize(buffers->pauseImage, buffers->scaledPauseImage, size, 0.0, 0.0, cv::INTER_LINEAR);
+            }
+            frame = buffers->scaledPauseImage.clone();
+            if (config->pauseImageShowStatusText) {
+                const int marginX = size.width / 8;
+                cv::rectangle(frame, cv::Rect(marginX, size.height / 2 - 70, size.width - 2 * marginX, 140), cv::Scalar(245, 245, 245), cv::FILLED);
+                cv::putText(frame, status, cv::Point(marginX + 32, size.height / 2 - 10), cv::FONT_HERSHEY_SIMPLEX, 1.6, cv::Scalar(20, 20, 20), 4, cv::LINE_AA);
+                cv::putText(frame, "JONImageProcessor", cv::Point(marginX + 34, size.height / 2 + 42), cv::FONT_HERSHEY_SIMPLEX, 0.8, cv::Scalar(60, 60, 60), 2, cv::LINE_AA);
+            }
+            return frame;
+        }
+    }
+
     cv::Mat frame(size, CV_8UC3, cv::Scalar(128, 128, 128));
 
     const int grid = std::max(40, size.width / 32);
@@ -461,6 +496,9 @@ void logStartupInfo(const ProcessorConfig& config, const ScreenInfo& screenInfo)
     LOG_VERBOSE("Mask morphology: " << maskMorphologyModeToString(config.maskMorphology));
     LOG_VERBOSE("Background effect: " << backgroundEffectToString(config.backgroundEffect));
     LOG_VERBOSE("Background image: " << (config.backgroundImagePath.empty() ? "none" : config.backgroundImagePath));
+    LOG_VERBOSE("Pause image enabled: " << (config.pauseImageEnabled ? "true" : "false"));
+    LOG_VERBOSE("Pause image: " << (config.pauseImagePath.empty() ? "none" : config.pauseImagePath));
+    LOG_VERBOSE("Pause image status text: " << (config.pauseImageShowStatusText ? "true" : "false"));
     LOG_VERBOSE("Background overlay color: "
         << config.backgroundOverlayColor.r << ","
         << config.backgroundOverlayColor.g << ","
@@ -613,6 +651,7 @@ int VideoProcessor::run()
     std::size_t intervalFrames = 0;
     cv::Mat previousOutputMask;
     BackgroundEffectBuffers backgroundEffectBuffers;
+    StatusFrameBuffers statusFrameBuffers;
     cv::Mat backgroundImage;
     std::string loadedBackgroundImagePath;
     if (config_.backgroundEffect == BackgroundEffect::Image && overlayEnabled) {
@@ -673,7 +712,7 @@ int VideoProcessor::run()
             nextReconnectAttempt = std::chrono::steady_clock::now();
             cameraEnableStartedAt = {};
             cameraWasDisabledByRuntime = true;
-            frame = makeStatusFrame(outputSize, "Camera OFF");
+            frame = makeStatusFrame(outputSize, "Camera OFF", &runtimeConfig, &statusFrameBuffers);
             syntheticFrame = true;
             std::this_thread::sleep_for(std::chrono::milliseconds(33));
             readOk = true;
@@ -722,7 +761,11 @@ int VideoProcessor::run()
                     const bool keepCameraConnectingStatus = cameraWasDisabledByRuntime
                         && cameraEnableStartedAt != std::chrono::steady_clock::time_point {}
                         && std::chrono::steady_clock::now() - cameraEnableStartedAt < cameraConnectTimeout;
-                    frame = makeStatusFrame(outputSize, keepCameraConnectingStatus ? "Camera connecting..." : "Camera DISCONNECTED");
+                    frame = makeStatusFrame(
+                        outputSize,
+                        keepCameraConnectingStatus ? "Camera connecting..." : "Camera DISCONNECTED",
+                        &runtimeConfig,
+                        &statusFrameBuffers);
                     syntheticFrame = true;
                     std::this_thread::sleep_for(std::chrono::milliseconds(33));
                     readOk = true;
@@ -750,7 +793,7 @@ int VideoProcessor::run()
                     cameraWasDisabledByRuntime = false;
                     cameraEnableStartedAt = {};
                     LOG_WARNING("Camera disconnected, showing disconnected test image");
-                    frame = makeStatusFrame(outputSize, "Camera DISCONNECTED");
+                    frame = makeStatusFrame(outputSize, "Camera DISCONNECTED", &runtimeConfig, &statusFrameBuffers);
                     syntheticFrame = true;
                     std::this_thread::sleep_for(std::chrono::milliseconds(33));
                     readOk = true;

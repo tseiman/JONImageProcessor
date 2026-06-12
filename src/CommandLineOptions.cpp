@@ -30,8 +30,13 @@ enum OptionId {
     OptionMaskSmoothing,
     OptionMaskMorphology,
     OptionCameraFormat,
+    OptionCameraConnectTimeout,
     OptionBackgroundEffect,
     OptionBackgroundImage,
+    OptionPauseImage,
+    OptionPauseImageEnabled,
+    OptionPauseImageStatusText,
+    OptionPauseImageTextColor,
     OptionBackgroundOverlayColor,
     OptionBackgroundOverlayAlpha,
     OptionBlurStrength,
@@ -73,8 +78,13 @@ const std::vector<OptionDefinition>& optionDefinitions()
         {OptionMaskSmoothing, 0, "mask-smoothing", required_argument, "0.0..1.0", "Temporal mask smoothing strength", "0.65"},
         {OptionMaskMorphology, 0, "mask-morphology", required_argument, "mode", "Mask morphology: off, light, or strong", "light"},
         {OptionCameraFormat, 0, "camera-format", required_argument, "format", "Camera pixel format: MJPG or YUYV", "MJPG"},
+        {OptionCameraConnectTimeout, 0, "camera-connect-timeout", required_argument, "seconds", "Seconds to show Camera connecting before disconnected status", "10"},
         {OptionBackgroundEffect, 0, "background-effect", required_argument, "effect", "Background effect: color, blur, or image", "color"},
         {OptionBackgroundImage, 0, "background-image", required_argument, "path", "JPEG/PNG image for --background-effect image", ""},
+        {OptionPauseImage, 0, "pause-image", required_argument, "path", "JPEG/PNG image for camera status screens", ""},
+        {OptionPauseImageEnabled, 0, "pause-image-enabled", required_argument, "true|false", "Use pause image instead of generated camera status screens", "false"},
+        {OptionPauseImageStatusText, 0, "pause-image-status-text", required_argument, "true|false", "Render camera status text over pause image", "true"},
+        {OptionPauseImageTextColor, 0, "pause-image-text-color", required_argument, "RRGGBBAA", "Status text color for pause image overlay", "ffffffff"},
         {OptionBackgroundOverlayColor, 0, "background-overlay-color", required_argument, "R,G,B", "Background color for --background-effect color; ignored for blur/image", "0,255,0"},
         {OptionBackgroundOverlayAlpha, 0, "background-overlay-alpha", required_argument, "0.0..1.0", "Background alpha for --background-effect color; ignored for blur/image", "0.35"},
         {OptionBlurStrength, 0, "blur-strength", required_argument, "value", "Blur strength for --background-effect blur", "15"},
@@ -242,6 +252,35 @@ bool parseOverlayColor(const char* value, RgbColor& color, std::string& error)
     return true;
 }
 
+int hexValue(char c)
+{
+    if (c >= '0' && c <= '9') return c - '0';
+    if (c >= 'a' && c <= 'f') return c - 'a' + 10;
+    if (c >= 'A' && c <= 'F') return c - 'A' + 10;
+    return -1;
+}
+
+bool parseRgbaHexColor(const char* value, RgbaColor& color, std::string& error)
+{
+    const std::string parsed(value);
+    if (parsed.size() != 8) {
+        error = "Invalid pause image text color: " + parsed + " (expected RRGGBBAA)";
+        return false;
+    }
+    int parts[4] {};
+    for (int index = 0; index < 4; ++index) {
+        const int high = hexValue(parsed[static_cast<std::size_t>(index * 2)]);
+        const int low = hexValue(parsed[static_cast<std::size_t>(index * 2 + 1)]);
+        if (high < 0 || low < 0) {
+            error = "Invalid pause image text color: " + parsed + " (expected RRGGBBAA)";
+            return false;
+        }
+        parts[index] = high * 16 + low;
+    }
+    color = RgbaColor {parts[0], parts[1], parts[2], parts[3]};
+    return true;
+}
+
 bool parseMaskMorphology(const char* value, MaskMorphologyMode& mode, std::string& error)
 {
     const std::string parsed(value);
@@ -270,6 +309,33 @@ bool parseBlurStrength(const char* value, int& strength, std::string& error)
         return false;
     }
     strength = static_cast<int>(parsed);
+    return true;
+}
+
+bool parseBooleanText(const char* value, const std::string& optionName, bool& target, std::string& error)
+{
+    const std::string parsed(value);
+    if (parsed == "true") {
+        target = true;
+        return true;
+    }
+    if (parsed == "false") {
+        target = false;
+        return true;
+    }
+    error = "Invalid value for " + optionName + ": " + parsed + " (allowed: true, false)";
+    return false;
+}
+
+bool parseRangedInteger(const char* value, const std::string& optionName, int minValue, int maxValue, int& target, std::string& error)
+{
+    char* end = nullptr;
+    const long parsed = std::strtol(value, &end, 10);
+    if (end == value || *end != '\0' || parsed < minValue || parsed > maxValue) {
+        error = "Invalid value for " + optionName + ": " + value;
+        return false;
+    }
+    target = static_cast<int>(parsed);
     return true;
 }
 
@@ -332,12 +398,16 @@ bool parseCommandLine(int argc, char** argv, CommandLineResult& result, std::str
             result.showHelpOnError = false;
             return false;
         }
+        result.configLoaded = true;
+        result.configPath = configPath;
     } else {
         configPath = findDefaultConfigPath(argv[0]);
         if (!configPath.empty() && !loadJsonConfigFile(configPath, result.config, configLoad, error)) {
             result.showHelpOnError = false;
             return false;
         }
+        result.configLoaded = !configPath.empty();
+        result.configPath = configPath;
     }
 
     const std::vector<option> longOptions = buildLongOptions();
@@ -401,6 +471,9 @@ bool parseCommandLine(int argc, char** argv, CommandLineResult& result, std::str
         case OptionCameraFormat:
             if (!parseCameraFormat(optarg, result.config.cameraFormat, error)) return false;
             break;
+        case OptionCameraConnectTimeout:
+            if (!parseRangedInteger(optarg, "--camera-connect-timeout", 1, 300, result.config.cameraConnectTimeoutSeconds, error)) return false;
+            break;
         case OptionBackgroundEffect:
             if (!parseBackgroundEffect(optarg, result.config.backgroundEffect, error)) return false;
             break;
@@ -410,6 +483,22 @@ bool parseCommandLine(int argc, char** argv, CommandLineResult& result, std::str
                 error = "--background-image must not be empty.";
                 return false;
             }
+            break;
+        case OptionPauseImage:
+            result.config.pauseImagePath = optarg;
+            if (result.config.pauseImagePath.empty()) {
+                error = "--pause-image must not be empty.";
+                return false;
+            }
+            break;
+        case OptionPauseImageEnabled:
+            if (!parseBooleanText(optarg, "--pause-image-enabled", result.config.pauseImageEnabled, error)) return false;
+            break;
+        case OptionPauseImageStatusText:
+            if (!parseBooleanText(optarg, "--pause-image-status-text", result.config.pauseImageShowStatusText, error)) return false;
+            break;
+        case OptionPauseImageTextColor:
+            if (!parseRgbaHexColor(optarg, result.config.pauseImageTextColor, error)) return false;
             break;
         case OptionBackgroundOverlayColor:
             if (!parseOverlayColor(optarg, result.config.backgroundOverlayColor, error)) return false;
@@ -497,7 +586,7 @@ std::string buildHelpText(const std::string& programName)
     stream << "Usage: " << programName << " [options]\n\n";
     stream << "Options:\n";
     for (const auto& definition : optionDefinitions()) {
-        stream << "  " << std::left << std::setw(42) << formatOptionName(definition)
+        stream << "  " << std::left << std::setw(48) << formatOptionName(definition)
                << definition.description;
         if (!definition.defaultValue.empty()) {
             stream << " (Default: " << definition.defaultValue << ")";

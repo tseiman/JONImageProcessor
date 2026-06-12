@@ -281,6 +281,28 @@ bool parseColor(const std::string& value, RgbColor& color)
     return true;
 }
 
+int hexValue(char c)
+{
+    if (c >= '0' && c <= '9') return c - '0';
+    if (c >= 'a' && c <= 'f') return c - 'a' + 10;
+    if (c >= 'A' && c <= 'F') return c - 'A' + 10;
+    return -1;
+}
+
+bool parseRgbaHexColor(const std::string& value, RgbaColor& color)
+{
+    if (value.size() != 8) return false;
+    int parts[4] {};
+    for (int index = 0; index < 4; ++index) {
+        const int high = hexValue(value[static_cast<std::size_t>(index * 2)]);
+        const int low = hexValue(value[static_cast<std::size_t>(index * 2 + 1)]);
+        if (high < 0 || low < 0) return false;
+        parts[index] = high * 16 + low;
+    }
+    color = RgbaColor {parts[0], parts[1], parts[2], parts[3]};
+    return true;
+}
+
 void warnUnknownFields(const Json& object, const std::string& prefix, const std::initializer_list<const char*> allowed)
 {
     if (object.type != Json::Type::Object) return;
@@ -299,7 +321,7 @@ bool applyConfig(const Json& root, ProcessorConfig& config, ConfigLoadResult& re
         error = "JSON config root must be an object";
         return false;
     }
-    warnUnknownFields(root, "", {"camera", "processing", "segmentation", "background", "output", "ipc", "display", "diagnostics"});
+    warnUnknownFields(root, "", {"camera", "processing", "segmentation", "background", "pause", "output", "ipc", "display", "diagnostics"});
 
     if (const Json* camera = objectChild(root, "camera")) {
         if (camera->type != Json::Type::Object) { error = "camera must be an object"; return false; }
@@ -370,6 +392,17 @@ bool applyConfig(const Json& root, ProcessorConfig& config, ConfigLoadResult& re
         if (!readNumber(*background, "blurStrength", blur, error)) return false;
         config.blurStrength = static_cast<int>(blur);
         if (blur != static_cast<double>(config.blurStrength) || config.blurStrength < 1 || config.blurStrength > 100) { error = "Invalid background.blurStrength"; return false; }
+    }
+
+    if (const Json* pause = objectChild(root, "pause")) {
+        if (pause->type != Json::Type::Object) { error = "pause must be an object"; return false; }
+        warnUnknownFields(*pause, "pause.", {"enabled", "image", "showStatusText", "textColor"});
+        if (!readBoolean(*pause, "enabled", config.pauseImageEnabled, error)) return false;
+        if (!readString(*pause, "image", config.pauseImagePath, error)) return false;
+        if (!readBoolean(*pause, "showStatusText", config.pauseImageShowStatusText, error)) return false;
+        std::string textColor;
+        if (!readString(*pause, "textColor", textColor, error)) return false;
+        if (!textColor.empty() && !parseRgbaHexColor(textColor, config.pauseImageTextColor)) { error = "Invalid pause.textColor"; return false; }
     }
 
     if (const Json* output = objectChild(root, "output")) {

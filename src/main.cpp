@@ -41,6 +41,11 @@ int main(int argc, char** argv)
     }
 
     if (commandLine.testConfig) {
+        if (commandLine.configLoaded) {
+            LOG_INFO("Tested config file: " << commandLine.configPath);
+        } else {
+            LOG_INFO("No config file found; tested built-in defaults");
+        }
         LOG_INFO("Configuration OK");
         return ExitOk;
     }

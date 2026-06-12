@@ -9,6 +9,7 @@
 #include <unistd.h>
 
 #include <cerrno>
+#include <algorithm>
 #include <cstdlib>
 #include <cstring>
 #include <map>
@@ -131,6 +132,42 @@ std::string colorToString(const RgbColor& color)
     return out.str();
 }
 
+std::string rgbaColorToHex(const RgbaColor& color)
+{
+    constexpr char digits[] = "0123456789abcdef";
+    const int parts[4] {color.r, color.g, color.b, color.a};
+    std::string out;
+    out.reserve(8);
+    for (int part : parts) {
+        const int value = std::clamp(part, 0, 255);
+        out.push_back(digits[value >> 4]);
+        out.push_back(digits[value & 0x0f]);
+    }
+    return out;
+}
+
+int hexValue(char c)
+{
+    if (c >= '0' && c <= '9') return c - '0';
+    if (c >= 'a' && c <= 'f') return c - 'a' + 10;
+    if (c >= 'A' && c <= 'F') return c - 'A' + 10;
+    return -1;
+}
+
+bool parseRgbaHexColor(const std::string& value, RgbaColor& color)
+{
+    if (value.size() != 8) return false;
+    int parts[4] {};
+    for (int index = 0; index < 4; ++index) {
+        const int high = hexValue(value[static_cast<std::size_t>(index * 2)]);
+        const int low = hexValue(value[static_cast<std::size_t>(index * 2 + 1)]);
+        if (high < 0 || low < 0) return false;
+        parts[index] = high * 16 + low;
+    }
+    color = RgbaColor {parts[0], parts[1], parts[2], parts[3]};
+    return true;
+}
+
 bool parseColor(const std::string& value, RgbColor& color)
 {
     int parts[3] {};
@@ -196,6 +233,10 @@ std::string valueJson(const ProcessorConfig& c, const std::string& key, const Be
     if (key == "background_overlay_color" || key == "background.overlayColor") return "\"" + colorToString(c.backgroundOverlayColor) + "\"";
     if (key == "background_overlay_alpha" || key == "background.overlayAlpha") return std::to_string(c.backgroundOverlayAlpha);
     if (key == "blur_strength" || key == "background.blurStrength") return std::to_string(c.blurStrength);
+    if (key == "pause.enabled") return c.pauseImageEnabled ? "true" : "false";
+    if (key == "pause.image") return "\"" + escapeJson(c.pauseImagePath) + "\"";
+    if (key == "pause.showStatusText") return c.pauseImageShowStatusText ? "true" : "false";
+    if (key == "pause.textColor") return "\"" + rgbaColorToHex(c.pauseImageTextColor) + "\"";
     if (key == "no_mask" || key == "runtime.noMask") return c.noMask ? "true" : "false";
     if (key == "no_overlay" || key == "runtime.noOverlay") return c.noOverlay ? "true" : "false";
     if (key == "camera.enabled") return c.cameraEnabled ? "true" : "false";
@@ -212,6 +253,7 @@ bool knownKey(const std::string& key)
         || key == "segmentation.threshold" || key == "segmentation.smoothing" || key == "segmentation.morphology"
         || key == "background.effect" || key == "background.image" || key == "background.overlayColor"
         || key == "background.overlayAlpha" || key == "background.blurStrength"
+        || key == "pause.enabled" || key == "pause.image" || key == "pause.showStatusText" || key == "pause.textColor"
         || key == "runtime.noMask" || key == "runtime.noOverlay" || key == "camera.enabled";
 }
 
@@ -329,6 +371,10 @@ std::string IPCServer::handleLine(const std::string& line)
             << "\",\"overlayColor\":\"" << colorToString(current.backgroundOverlayColor)
             << "\",\"overlayAlpha\":" << current.backgroundOverlayAlpha
             << ",\"blurStrength\":" << current.blurStrength << "}"
+            << ",\"pause\":{\"enabled\":" << (current.pauseImageEnabled ? "true" : "false")
+            << ",\"image\":\"" << escapeJson(current.pauseImagePath)
+            << "\",\"showStatusText\":" << (current.pauseImageShowStatusText ? "true" : "false")
+            << ",\"textColor\":\"" << rgbaColorToHex(current.pauseImageTextColor) << "\"}"
             << ",\"runtime\":{\"noMask\":" << (current.noMask ? "true" : "false")
             << ",\"noOverlay\":" << (current.noOverlay ? "true" : "false") << "}";
         if (current.benchmark) {
@@ -382,13 +428,22 @@ std::string IPCServer::handleLine(const std::string& line)
     } else if (key == "background_image" || key == "background.image") {
         if (value.type != JsonValue::Type::String) return errorResponse("invalid value type");
         updated.backgroundImagePath = value.text;
+    } else if (key == "pause.image") {
+        if (value.type != JsonValue::Type::String) return errorResponse("invalid value type");
+        updated.pauseImagePath = value.text;
+    } else if (key == "pause.textColor") {
+        if (value.type != JsonValue::Type::String) return errorResponse("invalid value type");
+        if (!parseRgbaHexColor(value.text, updated.pauseImageTextColor)) return errorResponse("invalid value");
     } else if (key == "background_overlay_color" || key == "background.overlayColor") {
         if (value.type != JsonValue::Type::String) return errorResponse("invalid value type");
         if (!parseColor(value.text, updated.backgroundOverlayColor)) return errorResponse("invalid value");
-    } else if (key == "no_mask" || key == "runtime.noMask" || key == "no_overlay" || key == "runtime.noOverlay") {
+    } else if (key == "no_mask" || key == "runtime.noMask" || key == "no_overlay" || key == "runtime.noOverlay"
+        || key == "pause.enabled" || key == "pause.showStatusText") {
         if (value.type != JsonValue::Type::Boolean) return errorResponse("invalid value type");
         if (key == "no_mask" || key == "runtime.noMask") updated.noMask = value.boolean;
-        else updated.noOverlay = value.boolean;
+        else if (key == "no_overlay" || key == "runtime.noOverlay") updated.noOverlay = value.boolean;
+        else if (key == "pause.enabled") updated.pauseImageEnabled = value.boolean;
+        else updated.pauseImageShowStatusText = value.boolean;
     } else if (key == "camera.enabled") {
         if (value.type != JsonValue::Type::Boolean) return errorResponse("invalid value type");
         updated.cameraEnabled = value.boolean;

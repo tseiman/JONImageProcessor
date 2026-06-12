@@ -36,6 +36,13 @@ struct RgbColor {
     int b = 0;
 };
 
+struct RgbaColor {
+    int r = 255;
+    int g = 255;
+    int b = 255;
+    int a = 255;
+};
+
 struct ProcessorConfig {
     std::string inputPath;
     std::string devicePath = "/dev/video0";
@@ -55,8 +62,10 @@ struct ProcessorConfig {
     int cameraConnectTimeoutSeconds = 10;
     BackgroundEffect backgroundEffect = BackgroundEffect::Color;
     std::string backgroundImagePath;
+    std::string pauseImagePath;
     std::string ipcSocketPath = "/tmp/jonimageprocessor.sock";
     RgbColor backgroundOverlayColor;
+    RgbaColor pauseImageTextColor;
     double backgroundOverlayAlpha = 0.35;
     int blurStrength = 15;
     bool fullscreen = false;
@@ -67,6 +76,8 @@ struct ProcessorConfig {
     bool noOverlay = false;
     bool noDaemon = true;
     bool cameraEnabled = true;
+    bool pauseImageEnabled = false;
+    bool pauseImageShowStatusText = true;
 };
 
 struct CommandLineResult {
@@ -75,6 +86,8 @@ struct CommandLineResult {
     bool showVersion = false;
     bool testConfig = false;
     bool showHelpOnError = true;
+    bool configLoaded = false;
+    std::string configPath;
 };
 
 bool parseCommandLine(int argc, char** argv, CommandLineResult& result, std::string& error);
