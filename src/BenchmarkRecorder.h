@@ -26,7 +26,7 @@ enum class BenchmarkStage {
 
 class BenchmarkRecorder {
 public:
-    explicit BenchmarkRecorder(bool enabled);
+    explicit BenchmarkRecorder(bool enabled, bool logEnabled);
 
     bool enabled() const;
     void add(BenchmarkStage stage, std::chrono::steady_clock::duration duration);
@@ -51,6 +51,7 @@ private:
     std::chrono::steady_clock::duration otherTotal() const;
 
     bool enabled_ = false;
+    bool logEnabled_ = false;
     std::size_t frames_ = 0;
     std::size_t capturedFrames_ = 0;
     std::size_t droppedFrames_ = 0;

@@ -534,7 +534,7 @@ int VideoProcessor::run()
 
     std::size_t frameIndex = 0;
     cv::Mat frame;
-    BenchmarkRecorder benchmark(config_.benchmark);
+    BenchmarkRecorder benchmark(config_.benchmark, config_.verbose);
     LowLatencyFrameCapture lowLatencyCapture;
     bool captureActive = lowLatencyMode && config_.cameraEnabled && captureOpened;
     if (captureActive) {
@@ -600,23 +600,32 @@ int VideoProcessor::run()
 
                     if (cameraDevicePresent && now - cameraDevicePresentSince >= CameraReconnectSettleTime) {
                         captureOpened = captureBackend->open(config_);
+                        if (captureOpened) {
+                            cv::Mat reconnectFrame;
+                            if (captureBackend->read(reconnectFrame) && !reconnectFrame.empty()) {
+                                frame = reconnectFrame;
+                                readOk = true;
+                                LOG_INFO("Camera reconnected");
+                                cameraDevicePresentSince = {};
+                            } else {
+                                captureBackend->close();
+                                captureOpened = false;
+                                LOG_WARNING("Camera device opened but did not deliver a frame, keeping disconnected test image");
+                            }
+                        }
                         nextReconnectAttempt = now + CameraReconnectInterval;
                     } else {
                         nextReconnectAttempt = now + std::chrono::seconds(1);
                     }
-                    if (captureOpened) {
-                        LOG_INFO("Camera reconnected");
-                        cameraDevicePresentSince = {};
-                    }
                 }
-                if (!captureOpened) {
+                if (!captureOpened && !readOk) {
                     frame = makeStatusFrame(outputSize, "Camera DISCONNECTED");
                     syntheticFrame = true;
                     std::this_thread::sleep_for(std::chrono::milliseconds(33));
                     readOk = true;
                 }
             }
-            if (captureOpened && !captureActive) {
+            if (captureOpened && !captureActive && !readOk) {
                 lowLatencyCapture.start(*captureBackend);
                 captureActive = true;
                 LOG_INFO("Camera input enabled by runtime config");

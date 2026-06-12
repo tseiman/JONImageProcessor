@@ -89,8 +89,9 @@ void logDistributionLine(const std::string& label, double percent)
 
 } // namespace
 
-BenchmarkRecorder::BenchmarkRecorder(bool enabled)
+BenchmarkRecorder::BenchmarkRecorder(bool enabled, bool logEnabled)
     : enabled_(enabled)
+    , logEnabled_(logEnabled)
     , lastProgressLog_(std::chrono::steady_clock::now())
 {
 }
@@ -132,7 +133,7 @@ void BenchmarkRecorder::setCaptureStats(
 
 void BenchmarkRecorder::maybeLogProgress()
 {
-    if (!enabled_ || frames_ == 0) {
+    if (!enabled_ || !logEnabled_ || frames_ == 0) {
         return;
     }
 
@@ -149,7 +150,7 @@ void BenchmarkRecorder::maybeLogProgress()
 
 void BenchmarkRecorder::logSummary() const
 {
-    if (!enabled_) {
+    if (!enabled_ || !logEnabled_) {
         return;
     }
 

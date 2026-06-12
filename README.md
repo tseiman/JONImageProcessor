@@ -299,7 +299,7 @@ journalctl -u JONImageProcessor.service -f
 - `--blur-strength <1..100>`: blur strength used by `--background-effect blur`. Default: `15`.
 - `--display-backend <highgui|drm>`: display backend. Default: `highgui`.
 - `--fullscreen`: request fullscreen display output.
-- `--benchmark`: print benchmark statistics.
+- `--benchmark`: collect benchmark statistics for IPC. Benchmark log output is only written when `--verbose` is also enabled.
 - `--no-display`: disable display output.
 - `--no-mask`: disable TensorRT mask generation.
 - `--no-overlay`: disable background effect rendering.
@@ -371,7 +371,7 @@ Supported JSON groups:
 }
 ```
 
-All fields are optional. Unknown JSON fields log warnings and are ignored. Invalid JSON, invalid types, and invalid values stop startup with an error. `diagnostics.benchmark` enables benchmark collection and logging without passing `--benchmark`.
+All fields are optional. Unknown JSON fields log warnings and are ignored. Invalid JSON, invalid types, and invalid values stop startup with an error. `diagnostics.benchmark` enables benchmark collection for IPC without passing `--benchmark`.
 
 ## Runtime Behavior
 
@@ -383,7 +383,7 @@ Display mode is fixed to fill. The image fills the output canvas while preservin
 
 ## Benchmarking
 
-Use `--benchmark` to print timing statistics for capture, resize, TensorRT preprocessing, TensorRT inference, postprocessing, mask upscale, background effect, display, and total frame time.
+Use `--benchmark` to collect timing statistics for capture, resize, TensorRT preprocessing, TensorRT inference, postprocessing, mask upscale, background effect, display, and total frame time. The values can be read through IPC. Add `--verbose` when benchmark progress and shutdown summaries should be written to the log.
 
 For pipeline timing without display or effects:
 
@@ -391,7 +391,7 @@ For pipeline timing without display or effects:
 ./JONImageProcessor --device /dev/video0 --processing-size 1280x720 --no-display --no-mask --no-overlay --benchmark
 ```
 
-Stop long-running camera benchmarks with `Ctrl-C`. SIGINT is handled and prints the final benchmark summary.
+Stop long-running foreground benchmarks with `Ctrl-C`. SIGINT is handled cleanly; the final benchmark summary is logged only in verbose mode.
 
 ## IPC Control Interface
 
