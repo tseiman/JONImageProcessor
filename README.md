@@ -375,7 +375,7 @@ All fields are optional. Unknown JSON fields log warnings and are ignored. Inval
 
 ## Runtime Behavior
 
-Camera input always uses V4L2 and low-latency capture. The capture thread keeps only the newest frame, so old frames are overwritten instead of queued.
+Camera input always uses V4L2 and low-latency capture. The capture thread keeps only the newest frame, so old frames are overwritten instead of queued. If the USB camera disappears, JONImageProcessor closes the broken capture path, renders a `Camera DISCONNECTED` test image, and periodically retries the configured device. If `camera.enabled` was set to false through IPC, the application keeps rendering `Camera OFF` until the camera is explicitly enabled again.
 
 Video file input uses OpenCV file capture and processes frames sequentially.
 

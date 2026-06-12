@@ -22,6 +22,7 @@
 #include <array>
 #include <chrono>
 #include <cmath>
+#include <fstream>
 #include <memory>
 #include <sstream>
 #include <string>
@@ -43,15 +44,21 @@ struct BackgroundEffectBuffers {
     cv::Mat result;
 };
 
-cv::Mat makeCameraOffFrame(const cv::Size& size)
+cv::Mat makeStatusFrame(const cv::Size& size, const std::string& status)
 {
     cv::Mat frame(size, CV_8UC3, cv::Scalar(32, 32, 32));
     for (int x = -size.height; x < size.width; x += 80) {
         cv::line(frame, cv::Point(x, 0), cv::Point(x + size.height, size.height), cv::Scalar(58, 58, 58), 2);
     }
-    cv::putText(frame, "Camera OFF", cv::Point(48, 92), cv::FONT_HERSHEY_SIMPLEX, 1.5, cv::Scalar(255, 255, 255), 3, cv::LINE_AA);
+    cv::putText(frame, status, cv::Point(48, 92), cv::FONT_HERSHEY_SIMPLEX, 1.5, cv::Scalar(255, 255, 255), 3, cv::LINE_AA);
     cv::putText(frame, "JONImageProcessor test image", cv::Point(50, 140), cv::FONT_HERSHEY_SIMPLEX, 0.8, cv::Scalar(180, 220, 255), 2, cv::LINE_AA);
     return frame;
+}
+
+bool pathExists(const std::string& path)
+{
+    std::ifstream file(path);
+    return static_cast<bool>(file);
 }
 
 cv::Mat applyBackgroundOverlay(
@@ -466,8 +473,14 @@ int VideoProcessor::run()
         return ExitRuntimeError;
     }
 
-    if (!captureBackend->open(config_)) {
+    bool captureOpened = !usingCamera || pathExists(config_.devicePath)
+        ? captureBackend->open(config_)
+        : false;
+    if (!captureOpened && !usingCamera) {
         return ExitRuntimeError;
+    }
+    if (!captureOpened && usingCamera) {
+        LOG_WARNING("Camera is not available, showing disconnected test image");
     }
 
     const cv::Size outputSize(config_.width, config_.height);
@@ -521,10 +534,11 @@ int VideoProcessor::run()
     cv::Mat frame;
     BenchmarkRecorder benchmark(config_.benchmark);
     LowLatencyFrameCapture lowLatencyCapture;
-    bool captureActive = lowLatencyMode && config_.cameraEnabled;
+    bool captureActive = lowLatencyMode && config_.cameraEnabled && captureOpened;
     if (captureActive) {
         lowLatencyCapture.start(*captureBackend);
     }
+    auto nextReconnectAttempt = std::chrono::steady_clock::now();
     const auto startedAt = std::chrono::steady_clock::now();
     auto intervalStartedAt = startedAt;
     std::size_t intervalFrames = 0;
@@ -552,27 +566,64 @@ int VideoProcessor::run()
         ProcessorConfig runtimeConfig = runtimeState.configSnapshot();
         const auto pipelineStartedAt = std::chrono::steady_clock::now();
         bool readOk = false;
+        bool syntheticFrame = false;
         if (lowLatencyMode && usingCamera && !runtimeConfig.cameraEnabled) {
             if (captureActive) {
                 lowLatencyCapture.stop();
                 captureActive = false;
                 LOG_INFO("Camera input disabled by runtime config");
             }
-            frame = makeCameraOffFrame(outputSize);
+            if (captureOpened) {
+                captureBackend->close();
+                captureOpened = false;
+            }
+            frame = makeStatusFrame(outputSize, "Camera OFF");
+            syntheticFrame = true;
             std::this_thread::sleep_for(std::chrono::milliseconds(33));
             readOk = true;
         } else if (lowLatencyMode) {
-            if (!captureActive) {
+            if (!captureOpened) {
+                const auto now = std::chrono::steady_clock::now();
+                if (now >= nextReconnectAttempt) {
+                    if (pathExists(config_.devicePath)) {
+                        captureOpened = captureBackend->open(config_);
+                    }
+                    nextReconnectAttempt = now + std::chrono::seconds(2);
+                    if (captureOpened) {
+                        LOG_INFO("Camera reconnected");
+                    }
+                }
+                if (!captureOpened) {
+                    frame = makeStatusFrame(outputSize, "Camera DISCONNECTED");
+                    syntheticFrame = true;
+                    std::this_thread::sleep_for(std::chrono::milliseconds(33));
+                    readOk = true;
+                }
+            }
+            if (captureOpened && !captureActive) {
                 lowLatencyCapture.start(*captureBackend);
                 captureActive = true;
                 LOG_INFO("Camera input enabled by runtime config");
             }
-            std::chrono::steady_clock::duration captureWait {};
-            std::chrono::steady_clock::duration frameHandover {};
-            readOk = lowLatencyCapture.waitForLatestFrame(frame, captureWait, frameHandover);
-            if (readOk) {
-                benchmark.add(BenchmarkStage::CaptureWait, captureWait);
-                benchmark.add(BenchmarkStage::FrameHandover, frameHandover);
+            if (captureActive) {
+                std::chrono::steady_clock::duration captureWait {};
+                std::chrono::steady_clock::duration frameHandover {};
+                readOk = lowLatencyCapture.waitForLatestFrame(frame, captureWait, frameHandover);
+                if (readOk) {
+                    benchmark.add(BenchmarkStage::CaptureWait, captureWait);
+                    benchmark.add(BenchmarkStage::FrameHandover, frameHandover);
+                } else if (!shutdownRequested()) {
+                    lowLatencyCapture.stop();
+                    captureActive = false;
+                    captureBackend->close();
+                    captureOpened = false;
+                    nextReconnectAttempt = std::chrono::steady_clock::now() + std::chrono::seconds(2);
+                    LOG_WARNING("Camera disconnected, showing disconnected test image");
+                    frame = makeStatusFrame(outputSize, "Camera DISCONNECTED");
+                    syntheticFrame = true;
+                    std::this_thread::sleep_for(std::chrono::milliseconds(33));
+                    readOk = true;
+                }
             }
         } else {
             const auto decodeStartedAt = std::chrono::steady_clock::now();
@@ -607,7 +658,7 @@ int VideoProcessor::run()
         }
 
         cv::Mat outputMask;
-        const bool runtimeMaskEnabled = !runtimeConfig.noMask;
+        const bool runtimeMaskEnabled = !syntheticFrame && !runtimeConfig.noMask;
         const bool runtimeOverlayEnabled = !runtimeConfig.noOverlay && runtimeMaskEnabled;
         if (runtimeMaskEnabled && !maskBackend) {
             maskBackend = std::make_unique<TensorRtMaskBackend>();

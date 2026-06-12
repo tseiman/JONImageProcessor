@@ -88,11 +88,14 @@ flowchart TD
     A[main] --> B[parse CLI into ProcessorConfig]
     B --> C[VideoProcessor::run]
     C --> D[Create V4L2CameraCaptureBackend]
-    D --> E[Start LowLatencyFrameCapture thread]
+    D --> E[Open camera if available]
+    E --> Fallback[Camera DISCONNECTED test frame]
+    E --> LC[Start LowLatencyFrameCapture thread]
     C --> F[Create TensorRtMaskBackend]
     F --> G[Load cached engine or build engine from ONNX]
     C --> H[Create DrmKmsDisplayBackend]
-    E --> I[Newest camera frame]
+    LC --> I[Newest camera frame]
+    Fallback --> J
     I --> J[Resize to processing size]
     J --> K[TensorRT mask inference]
     K --> L[Mask smoothing and morphology]
@@ -100,6 +103,8 @@ flowchart TD
     M --> N[Render frame through DRM/KMS]
     N --> I
 ```
+
+For camera input, failed startup open or USB disconnect does not terminate the process. The pipeline renders a `Camera DISCONNECTED` test image and periodically attempts to reopen the configured V4L2 device. If runtime IPC sets `camera.enabled=false`, camera capture is stopped and a `Camera OFF` test image is rendered until it is enabled again.
 
 For `--input <path>`, `OpenCvFileCaptureBackend` is used instead of V4L2 and frames are processed sequentially. For `--display-backend highgui`, `OpenCvDisplayBackend` replaces the DRM/KMS backend.
 

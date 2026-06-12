@@ -157,8 +157,7 @@ Requires=brio-startup-check.service
 Type=simple
 WorkingDirectory=/opt/JONImageProcessor
 ExecStart=/opt/JONImageProcessor/bin/JONImageProcessor \
-    --config /opt/JONImageProcessor/etc/jonimageprocessor.json \
-    --benchmark --no-daemon
+    --config /opt/JONImageProcessor/etc/jonimageprocessor.json
 Restart=on-failure
 RestartSec=5
 StartLimitIntervalSec=60
@@ -201,6 +200,6 @@ systemctl status jon-image-processor.service
 ## Notes
 
 - The script identifies the BRIO by USB Vendor ID `046d` / Product ID `085e`. If you use a different camera, adjust these values. Find them with `lsusb`.
-- The USB reset is performed **once only**. There is no retry loop. If the camera does not appear within 10 seconds after the reset, the script exits cleanly and lets the main service decide how to handle the absence.
+- The USB reset is performed **once only**. If the camera is missing or unplugged later, JONImageProcessor shows a `Camera DISCONNECTED` test image and periodically tries to reopen the configured camera device.
 - This issue is observed on NVIDIA Jetson (Tegra) hardware with a 3 m USB 3 cable. A shorter cable or an active (powered) USB extension may reduce the frequency of the problem at the hardware level.
-- The `--no-daemon` flag prevents the process from forking itself, which is required for `Type=simple`. Without it, use `Type=forking`.
+- JONImageProcessor runs as a normal foreground process by default, which is the correct mode for systemd `Type=simple`.
