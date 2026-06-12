@@ -52,6 +52,7 @@ struct ProcessorConfig {
     double maskSmoothing = 0.65;
     MaskMorphologyMode maskMorphology = MaskMorphologyMode::Light;
     CameraFormat cameraFormat = CameraFormat::MJPG;
+    int cameraConnectTimeoutSeconds = 10;
     BackgroundEffect backgroundEffect = BackgroundEffect::Color;
     std::string backgroundImagePath;
     std::string ipcSocketPath = "/tmp/jonimageprocessor.sock";
@@ -72,6 +73,8 @@ struct CommandLineResult {
     ProcessorConfig config;
     bool showHelp = false;
     bool showVersion = false;
+    bool testConfig = false;
+    bool showHelpOnError = true;
 };
 
 bool parseCommandLine(int argc, char** argv, CommandLineResult& result, std::string& error);

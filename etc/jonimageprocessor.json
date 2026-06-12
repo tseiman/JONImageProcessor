@@ -1,7 +1,8 @@
 {
   "camera": {
     "device": "/dev/video0",
-    "format": "MJPG"
+    "format": "MJPG",
+    "connectTimeoutSeconds": 10
   },
   "processing": {
     "size": "1280x720"

@@ -280,6 +280,7 @@ journalctl -u JONImageProcessor.service -f
 
 - `-h`, `--help`: show help.
 - `-c`, `--config <path>`: read configuration from JSON file.
+- `-t`, `--test-config`: parse and validate configuration, then exit.
 - `--version`: show release/git version.
 - `--daemon`: detach into legacy self-daemon mode.
 - `-n`, `--no-daemon`: run as foreground process; accepted for compatibility because this is now the default.
@@ -330,6 +331,12 @@ CLI override example:
 ./JONImageProcessor --config ./etc/jonimageprocessor.json --mask-threshold 0.6
 ```
 
+Config test example:
+
+```bash
+./JONImageProcessor --test-config --config ./etc/jonimageprocessor.json
+```
+
 The project example is [etc/jonimageprocessor.json](/home/tseiman/agent-work/JONImageProcessor/etc/jonimageprocessor.json).
 
 Supported JSON groups:
@@ -338,7 +345,8 @@ Supported JSON groups:
 {
   "camera": {
     "device": "/dev/video0",
-    "format": "MJPG"
+    "format": "MJPG",
+    "connectTimeoutSeconds": 10
   },
   "processing": {
     "size": "1920x1080"
@@ -373,11 +381,11 @@ Supported JSON groups:
 }
 ```
 
-All fields are optional. Unknown JSON fields log warnings and are ignored. Invalid JSON, invalid types, and invalid values stop startup with an error. `diagnostics.benchmark` enables benchmark collection for IPC without passing `--benchmark`.
+All fields are optional. Unknown JSON fields log warnings and are ignored. Invalid JSON, invalid types, and invalid values stop startup with an error. JSON syntax errors include line and column information where possible. `camera.connectTimeoutSeconds` controls how long `Camera connecting...` is shown after runtime camera re-enable before falling back to `Camera DISCONNECTED`. `diagnostics.benchmark` enables benchmark collection for IPC without passing `--benchmark`.
 
 ## Runtime Behavior
 
-Camera input always uses V4L2 and low-latency capture. The capture thread keeps only the newest frame, so old frames are overwritten instead of queued. If the USB camera disappears, JONImageProcessor closes the broken capture path, renders a `Camera DISCONNECTED` test image, and periodically retries the configured device after it has been visible for a short settle period. Reconnect is accepted after the reopened V4L2 device delivers a valid frame. If `camera.enabled` was set to false through IPC, the application renders `Camera OFF`. When camera input is enabled again, `Camera OFF` stays visible while the camera is being reopened; only if `/dev/video0` is still unavailable after a short delay does the status change to `Camera DISCONNECTED`. If the Jetson kernel does not recreate `/dev/video0` after a USB reconnect, JONImageProcessor continues showing `Camera DISCONNECTED`; a USB/controller reset or service restart may still be required.
+Camera input always uses V4L2 and low-latency capture. The capture thread keeps only the newest frame, so old frames are overwritten instead of queued. If the USB camera disappears, JONImageProcessor closes the broken capture path, renders a `Camera DISCONNECTED` test image, and periodically retries the configured device after it has been visible for a short settle period. Reconnect is accepted after the reopened V4L2 device delivers a valid frame. If `camera.enabled` was set to false through IPC, the application renders `Camera OFF`. When camera input is enabled again, `Camera connecting...` is shown while the camera is being reopened; only if `/dev/video0` is still unavailable after `camera.connectTimeoutSeconds` does the status change to `Camera DISCONNECTED`. If the Jetson kernel does not recreate `/dev/video0` after a USB reconnect, JONImageProcessor continues showing `Camera DISCONNECTED`; a USB/controller reset or service restart may still be required.
 
 Video file input uses OpenCV file capture and processes frames sequentially.
 

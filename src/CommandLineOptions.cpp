@@ -17,6 +17,7 @@ namespace {
 enum OptionId {
     OptionHelp = 'h',
     OptionConfig = 'c',
+    OptionTestConfig = 't',
     OptionInput = 'i',
     OptionDevice = 'd',
     OptionNoDaemon = 'n',
@@ -60,6 +61,7 @@ const std::vector<OptionDefinition>& optionDefinitions()
     static const std::vector<OptionDefinition> definitions = {
         {OptionHelp, 'h', "help", no_argument, "", "Show help", ""},
         {OptionConfig, 'c', "config", required_argument, "path", "Read configuration from JSON file", ""},
+        {OptionTestConfig, 't', "test-config", no_argument, "", "Parse and validate configuration, then exit", ""},
         {OptionInput, 'i', "input", required_argument, "path", "Use a video file as input", ""},
         {OptionDevice, 'd', "device", required_argument, "path", "Use a V4L2 camera device", "/dev/video0"},
         {OptionNoDaemon, 'n', "no-daemon", no_argument, "", "Run as foreground process; accepted for compatibility because this is now the default", ""},
@@ -289,6 +291,15 @@ std::string requestedConfigPath(int argc, char** argv, bool& explicitConfig)
     return {};
 }
 
+bool requestedTestConfig(int argc, char** argv)
+{
+    for (int index = 1; index < argc; ++index) {
+        const std::string arg(argv[index]);
+        if (arg == "-t" || arg == "--test-config") return true;
+    }
+    return false;
+}
+
 std::string formatOptionName(const OptionDefinition& definition)
 {
     std::ostringstream stream;
@@ -308,6 +319,7 @@ std::string formatOptionName(const OptionDefinition& definition)
 
 bool parseCommandLine(int argc, char** argv, CommandLineResult& result, std::string& error)
 {
+    result.testConfig = requestedTestConfig(argc, argv);
     bool explicitConfig = false;
     std::string configPath = requestedConfigPath(argc, argv, explicitConfig);
     ConfigLoadResult configLoad;
@@ -316,10 +328,16 @@ bool parseCommandLine(int argc, char** argv, CommandLineResult& result, std::str
             error = "--config requires a path.";
             return false;
         }
-        if (!loadJsonConfigFile(configPath, result.config, configLoad, error)) return false;
+        if (!loadJsonConfigFile(configPath, result.config, configLoad, error)) {
+            result.showHelpOnError = false;
+            return false;
+        }
     } else {
         configPath = findDefaultConfigPath(argv[0]);
-        if (!configPath.empty() && !loadJsonConfigFile(configPath, result.config, configLoad, error)) return false;
+        if (!configPath.empty() && !loadJsonConfigFile(configPath, result.config, configLoad, error)) {
+            result.showHelpOnError = false;
+            return false;
+        }
     }
 
     const std::vector<option> longOptions = buildLongOptions();
@@ -339,6 +357,9 @@ bool parseCommandLine(int argc, char** argv, CommandLineResult& result, std::str
             result.showHelp = true;
             break;
         case OptionConfig:
+            break;
+        case OptionTestConfig:
+            result.testConfig = true;
             break;
         case OptionInput:
             result.config.inputPath = optarg;

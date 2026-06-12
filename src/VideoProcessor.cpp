@@ -37,7 +37,6 @@ constexpr int ExitOk = 0;
 constexpr int ExitRuntimeError = 2;
 constexpr auto CameraReconnectInterval = std::chrono::seconds(5);
 constexpr auto CameraReconnectSettleTime = std::chrono::seconds(3);
-constexpr auto CameraEnableDisconnectedDelay = std::chrono::seconds(10);
 constexpr auto DisplayReconnectInterval = std::chrono::seconds(3);
 
 struct BackgroundEffectBuffers {
@@ -469,6 +468,7 @@ void logStartupInfo(const ProcessorConfig& config, const ScreenInfo& screenInfo)
     LOG_VERBOSE("Background overlay alpha: " << config.backgroundOverlayAlpha);
     LOG_VERBOSE("Blur strength: " << config.blurStrength);
     LOG_VERBOSE("Camera format: " << cameraFormatToString(config.cameraFormat));
+    LOG_VERBOSE("Camera connect timeout: " << config.cameraConnectTimeoutSeconds << "s");
     LOG_VERBOSE("Fullscreen: " << (config.fullscreen ? "true" : "false"));
     LOG_VERBOSE("Daemon mode: " << (config.noDaemon ? "false" : "true"));
     LOG_VERBOSE("Benchmark: " << (config.benchmark ? "true" : "false"));
@@ -718,10 +718,11 @@ int VideoProcessor::run()
                     }
                 }
                 if (!captureOpened && !readOk) {
-                    const bool keepCameraOffStatus = cameraWasDisabledByRuntime
+                    const auto cameraConnectTimeout = std::chrono::seconds(runtimeConfig.cameraConnectTimeoutSeconds);
+                    const bool keepCameraConnectingStatus = cameraWasDisabledByRuntime
                         && cameraEnableStartedAt != std::chrono::steady_clock::time_point {}
-                        && std::chrono::steady_clock::now() - cameraEnableStartedAt < CameraEnableDisconnectedDelay;
-                    frame = makeStatusFrame(outputSize, keepCameraOffStatus ? "Camera OFF" : "Camera DISCONNECTED");
+                        && std::chrono::steady_clock::now() - cameraEnableStartedAt < cameraConnectTimeout;
+                    frame = makeStatusFrame(outputSize, keepCameraConnectingStatus ? "Camera connecting..." : "Camera DISCONNECTED");
                     syntheticFrame = true;
                     std::this_thread::sleep_for(std::chrono::milliseconds(33));
                     readOk = true;

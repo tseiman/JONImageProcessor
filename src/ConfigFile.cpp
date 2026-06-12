@@ -4,6 +4,7 @@
 
 #include <unistd.h>
 
+#include <algorithm>
 #include <cerrno>
 #include <cstdlib>
 #include <cstring>
@@ -30,15 +31,50 @@ public:
     {
     }
 
-    bool parse(Json& value)
+    bool parse(Json& value, std::string& error)
     {
         skipWs();
-        if (!parseValue(value)) return false;
+        if (!parseValue(value)) {
+            error = formatError();
+            return false;
+        }
         skipWs();
-        return pos_ == input_.size();
+        if (pos_ != input_.size()) {
+            setError("Unexpected trailing data");
+            error = formatError();
+            return false;
+        }
+        return true;
     }
 
 private:
+    void setError(const std::string& message)
+    {
+        if (errorMessage_.empty()) {
+            errorMessage_ = message;
+            errorPos_ = pos_;
+        }
+    }
+
+    std::string formatError() const
+    {
+        std::size_t line = 1;
+        std::size_t column = 1;
+        const std::size_t limit = std::min(errorPos_, input_.size());
+        for (std::size_t index = 0; index < limit; ++index) {
+            if (input_[index] == '\n') {
+                ++line;
+                column = 1;
+            } else {
+                ++column;
+            }
+        }
+        std::ostringstream stream;
+        stream << (errorMessage_.empty() ? "Invalid JSON syntax" : errorMessage_)
+               << " at line " << line << ", column " << column;
+        return stream.str();
+    }
+
     void skipWs()
     {
         while (pos_ < input_.size() && (input_[pos_] == ' ' || input_[pos_] == '\n' || input_[pos_] == '\r' || input_[pos_] == '\t')) ++pos_;
@@ -47,7 +83,10 @@ private:
     bool parseValue(Json& value)
     {
         skipWs();
-        if (pos_ >= input_.size()) return false;
+        if (pos_ >= input_.size()) {
+            setError("Unexpected end of JSON");
+            return false;
+        }
         if (input_[pos_] == '{') return parseObject(value);
         if (input_[pos_] == '"') {
             value.type = Json::Type::String;
@@ -67,7 +106,10 @@ private:
         }
         char* end = nullptr;
         value.number = std::strtod(input_.c_str() + pos_, &end);
-        if (end == input_.c_str() + pos_) return false;
+        if (end == input_.c_str() + pos_) {
+            setError("Expected JSON value");
+            return false;
+        }
         value.type = Json::Type::Number;
         pos_ = static_cast<std::size_t>(end - input_.c_str());
         return true;
@@ -75,17 +117,24 @@ private:
 
     bool parseString(std::string& out)
     {
-        if (pos_ >= input_.size() || input_[pos_++] != '"') return false;
+        if (pos_ >= input_.size() || input_[pos_++] != '"') {
+            setError("Expected string");
+            return false;
+        }
         while (pos_ < input_.size()) {
             const char c = input_[pos_++];
             if (c == '"') return true;
             if (c == '\\') {
-                if (pos_ >= input_.size()) return false;
+                if (pos_ >= input_.size()) {
+                    setError("Unterminated escape sequence");
+                    return false;
+                }
                 out.push_back(input_[pos_++]);
             } else {
                 out.push_back(c);
             }
         }
+        setError("Unterminated string");
         return false;
     }
 
@@ -102,7 +151,10 @@ private:
             std::string key;
             if (!parseString(key)) return false;
             skipWs();
-            if (pos_ >= input_.size() || input_[pos_++] != ':') return false;
+            if (pos_ >= input_.size() || input_[pos_++] != ':') {
+                setError("Expected ':' after object key");
+                return false;
+            }
             Json child;
             if (!parseValue(child)) return false;
             value.object[key] = child;
@@ -116,13 +168,17 @@ private:
                 ++pos_;
                 return true;
             }
+            setError("Expected ',' or '}' in object");
             return false;
         }
+        setError("Unterminated object");
         return false;
     }
 
     std::string input_;
     std::size_t pos_ = 0;
+    std::size_t errorPos_ = 0;
+    std::string errorMessage_;
 };
 
 bool fileExists(const std::string& path)
@@ -247,7 +303,7 @@ bool applyConfig(const Json& root, ProcessorConfig& config, ConfigLoadResult& re
 
     if (const Json* camera = objectChild(root, "camera")) {
         if (camera->type != Json::Type::Object) { error = "camera must be an object"; return false; }
-        warnUnknownFields(*camera, "camera.", {"device", "format"});
+        warnUnknownFields(*camera, "camera.", {"device", "format", "connectTimeoutSeconds"});
         if (!readString(*camera, "device", config.devicePath, error)) return false;
         std::string format;
         if (!readString(*camera, "format", format, error)) return false;
@@ -255,6 +311,15 @@ bool applyConfig(const Json& root, ProcessorConfig& config, ConfigLoadResult& re
             if (format == "MJPG") config.cameraFormat = CameraFormat::MJPG;
             else if (format == "YUYV") config.cameraFormat = CameraFormat::YUYV;
             else { error = "Invalid camera.format"; return false; }
+        }
+        double connectTimeoutSeconds = static_cast<double>(config.cameraConnectTimeoutSeconds);
+        if (!readNumber(*camera, "connectTimeoutSeconds", connectTimeoutSeconds, error)) return false;
+        config.cameraConnectTimeoutSeconds = static_cast<int>(connectTimeoutSeconds);
+        if (connectTimeoutSeconds != static_cast<double>(config.cameraConnectTimeoutSeconds)
+            || config.cameraConnectTimeoutSeconds < 1
+            || config.cameraConnectTimeoutSeconds > 300) {
+            error = "Invalid camera.connectTimeoutSeconds";
+            return false;
         }
     }
 
@@ -374,8 +439,9 @@ bool loadJsonConfigFile(const std::string& path, ProcessorConfig& config, Config
     buffer << file.rdbuf();
     Json root;
     Parser parser(buffer.str());
-    if (!parser.parse(root)) {
-        error = "Invalid JSON config file: " + path;
+    std::string parseError;
+    if (!parser.parse(root, parseError)) {
+        error = "Invalid JSON config file: " + path + ": " + parseError;
         return false;
     }
     if (!applyConfig(root, config, result, error)) {

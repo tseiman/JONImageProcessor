@@ -22,7 +22,9 @@ int main(int argc, char** argv)
 
     if (!parseCommandLine(argc, argv, commandLine, error)) {
         LOG_ERROR(error);
-        std::cout << '\n' << buildHelpText(argv[0]);
+        if (commandLine.showHelpOnError) {
+            std::cout << '\n' << buildHelpText(argv[0]);
+        }
         return ExitUsageError;
     }
 
@@ -35,6 +37,11 @@ int main(int argc, char** argv)
 
     if (commandLine.showVersion) {
         std::cout << jonImageProcessorVersionText() << '\n';
+        return ExitOk;
+    }
+
+    if (commandLine.testConfig) {
+        LOG_INFO("Configuration OK");
         return ExitOk;
     }
 
