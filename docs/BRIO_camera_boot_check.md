@@ -200,7 +200,7 @@ systemctl status jon-image-processor.service
 ## Notes
 
 - The script identifies the BRIO by USB Vendor ID `046d` / Product ID `085e`. If you use a different camera, adjust these values. Find them with `lsusb`.
-- The USB reset is performed **once only**. If the camera is missing or unplugged later, JONImageProcessor shows a `Camera DISCONNECTED` test image and periodically tries to reopen the configured camera device after it has been visible for a short settle period.
+- The USB reset is performed **once only**. If the camera is missing or unplugged later, JONImageProcessor shows a `Camera DISCONNECTED` test image and periodically tries to reopen the configured camera device after it has been visible for a short settle period. Reconnect is accepted only after several valid frames have been read from V4L2.
 - If the Jetson kernel does not recreate `/dev/video0` after a USB reconnect, JONImageProcessor cannot recover the device by itself and keeps showing `Camera DISCONNECTED`.
 - This issue is observed on NVIDIA Jetson (Tegra) hardware with a 3 m USB 3 cable. A shorter cable or an active (powered) USB extension may reduce the frequency of the problem at the hardware level.
 - JONImageProcessor runs as a normal foreground process by default, which is the correct mode for systemd `Type=simple`.

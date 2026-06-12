@@ -104,7 +104,7 @@ flowchart TD
     N --> I
 ```
 
-For camera input, failed startup open or USB disconnect does not terminate the process. The pipeline renders a `Camera DISCONNECTED` test image and periodically attempts to reopen the configured V4L2 device after the device node has been visible for a short settle period. If runtime IPC sets `camera.enabled=false`, camera capture is stopped and a `Camera OFF` test image is rendered until it is enabled again.
+For camera input, failed startup open or USB disconnect does not terminate the process. The pipeline renders a `Camera DISCONNECTED` test image and periodically attempts to reopen the configured V4L2 device after the device node has been visible for a short settle period. Reconnect is accepted only after several valid frames have been read from V4L2. If runtime IPC sets `camera.enabled=false`, camera capture is stopped and a `Camera OFF` test image is rendered until it is enabled again.
 
 For `--input <path>`, `OpenCvFileCaptureBackend` is used instead of V4L2 and frames are processed sequentially. For `--display-backend highgui`, `OpenCvDisplayBackend` replaces the DRM/KMS backend.
 

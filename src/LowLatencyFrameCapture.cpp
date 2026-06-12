@@ -98,6 +98,10 @@ void LowLatencyFrameCapture::captureLoop()
 
         cv::Mat frame;
         if (capture_ == nullptr || !capture_->read(frame)) {
+            std::lock_guard<std::mutex> lock(mutex_);
+            if (!stopRequested_) {
+                LOG_WARNING("Capture thread stopped because no frame could be read");
+            }
             break;
         }
 
