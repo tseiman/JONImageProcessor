@@ -47,6 +47,11 @@ void LowLatencyFrameCapture::stop()
     if (thread_.joinable()) {
         thread_.join();
     }
+
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        capture_ = nullptr;
+    }
 }
 
 bool LowLatencyFrameCapture::waitForLatestFrame(

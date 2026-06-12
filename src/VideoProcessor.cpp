@@ -37,7 +37,6 @@ constexpr int ExitOk = 0;
 constexpr int ExitRuntimeError = 2;
 constexpr auto CameraReconnectInterval = std::chrono::seconds(5);
 constexpr auto CameraReconnectSettleTime = std::chrono::seconds(3);
-constexpr int CameraReconnectValidationFrames = 10;
 
 struct BackgroundEffectBuffers {
     cv::Mat downscaledFrame;
@@ -603,25 +602,15 @@ int VideoProcessor::run()
                         captureOpened = captureBackend->open(config_);
                         if (captureOpened) {
                             cv::Mat reconnectFrame;
-                            int validReconnectFrames = 0;
-                            for (int attempt = 0; attempt < CameraReconnectValidationFrames; ++attempt) {
-                                cv::Mat candidateFrame;
-                                if (!captureBackend->read(candidateFrame) || candidateFrame.empty()) {
-                                    break;
-                                }
-                                reconnectFrame = candidateFrame;
-                                ++validReconnectFrames;
-                            }
-                            if (validReconnectFrames == CameraReconnectValidationFrames) {
+                            if (captureBackend->read(reconnectFrame) && !reconnectFrame.empty()) {
                                 frame = reconnectFrame;
                                 readOk = true;
-                                LOG_INFO("Camera reconnected after " << validReconnectFrames << " valid frames");
+                                LOG_INFO("Camera reconnected");
                                 cameraDevicePresentSince = {};
                             } else {
                                 captureBackend->close();
                                 captureOpened = false;
-                                LOG_WARNING("Camera reconnect validation failed after "
-                                    << validReconnectFrames << " valid frames, keeping disconnected test image");
+                                LOG_WARNING("Camera device opened but did not deliver a frame, keeping disconnected test image");
                             }
                         }
                         nextReconnectAttempt = now + CameraReconnectInterval;

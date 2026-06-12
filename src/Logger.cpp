@@ -1,15 +1,18 @@
 #include "Logger.h"
 
 #include <iostream>
+#include <mutex>
 #include <syslog.h>
 
 namespace {
 
 bool verboseEnabled = false;
 bool syslogEnabled = false;
+std::mutex logMutex;
 
 void writeLog(const char* level, int priority, const std::string& message)
 {
+    std::lock_guard<std::mutex> lock(logMutex);
     if (syslogEnabled) {
         syslog(priority, "%s", (std::string("[") + level + "] " + message).c_str());
         return;
@@ -25,16 +28,19 @@ namespace Logger {
 
 void setVerbose(bool enabled)
 {
+    std::lock_guard<std::mutex> lock(logMutex);
     verboseEnabled = enabled;
 }
 
 bool isVerbose()
 {
+    std::lock_guard<std::mutex> lock(logMutex);
     return verboseEnabled;
 }
 
 void setSyslog(bool enabled)
 {
+    std::lock_guard<std::mutex> lock(logMutex);
     syslogEnabled = enabled;
     if (syslogEnabled) {
         openlog("JONImageProcessor", LOG_PID, LOG_DAEMON);
@@ -43,6 +49,7 @@ void setSyslog(bool enabled)
 
 void shutdown()
 {
+    std::lock_guard<std::mutex> lock(logMutex);
     if (syslogEnabled) {
         closelog();
         syslogEnabled = false;
@@ -66,9 +73,13 @@ void error(const std::string& message)
 
 void verbose(const std::string& message)
 {
-    if (verboseEnabled) {
-        writeLog("VERBOSE", LOG_DEBUG, message);
+    {
+        std::lock_guard<std::mutex> lock(logMutex);
+        if (!verboseEnabled) {
+            return;
+        }
     }
+    writeLog("VERBOSE", LOG_DEBUG, message);
 }
 
 void bench(const std::string& message)
