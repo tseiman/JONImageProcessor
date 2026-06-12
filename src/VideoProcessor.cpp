@@ -607,6 +607,9 @@ int VideoProcessor::run()
                                 readOk = true;
                                 LOG_INFO("Camera reconnected");
                                 cameraDevicePresentSince = {};
+                                lowLatencyCapture.start(*captureBackend);
+                                captureActive = true;
+                                LOG_INFO("Camera input enabled by runtime config");
                             } else {
                                 captureBackend->close();
                                 captureOpened = false;

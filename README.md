@@ -202,6 +202,8 @@ MODEL_PATH="$HOME/JONImageProcessor/models/modnet_photographic_portrait_matting.
 
 JONImageProcessor now runs as a normal foreground process by default. This is the preferred mode for systemd `Type=simple`: systemd starts the process, keeps it attached, handles restart policy, sends `SIGTERM`, and collects stdout/stderr in the journal.
 
+When `JOURNAL_STREAM` is present, JONImageProcessor writes through syslog so journald receives the correct log priority for INFO, WARNING, ERROR, and BENCH messages.
+
 ```bash
 ./JONImageProcessor --device /dev/video0 --processing-size 1280x720 --mask-model "$MODEL_PATH" --segmentation-size 384x384 --background-effect blur --display-backend drm --fullscreen --benchmark
 ```

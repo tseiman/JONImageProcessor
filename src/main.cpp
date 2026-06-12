@@ -5,6 +5,7 @@
 #include "Version.h"
 #include "VideoProcessor.h"
 
+#include <cstdlib>
 #include <iostream>
 
 namespace {
@@ -43,6 +44,8 @@ int main(int argc, char** argv)
             LOG_ERROR("Cannot daemonize process: " << daemonError);
             return 2;
         }
+        Logger::setSyslog(true);
+    } else if (std::getenv("JOURNAL_STREAM") != nullptr) {
         Logger::setSyslog(true);
     }
 
