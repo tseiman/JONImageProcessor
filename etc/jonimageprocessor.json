@@ -18,8 +18,17 @@
     "overlayColor": "0,255,0",
     "overlayAlpha": 1.0
   },
+  "output": {
+    "size": "auto"
+  },
+  "ipc": {
+    "socket": "/tmp/jonimageprocessor.sock"
+  },
   "display": {
     "backend": "drm",
     "mode": "fullscreen"
+  },
+  "diagnostics": {
+    "benchmark": false
   }
 }

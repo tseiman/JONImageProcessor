@@ -64,7 +64,8 @@ struct ProcessorConfig {
     bool noDisplay = false;
     bool noMask = false;
     bool noOverlay = false;
-    bool noDaemon = false;
+    bool noDaemon = true;
+    bool cameraEnabled = true;
 };
 
 struct CommandLineResult {

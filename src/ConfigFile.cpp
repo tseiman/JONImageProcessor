@@ -172,6 +172,18 @@ bool readNumber(const Json& object, const std::string& key, double& out, std::st
     return true;
 }
 
+bool readBoolean(const Json& object, const std::string& key, bool& out, std::string& error)
+{
+    const Json* value = objectChild(object, key);
+    if (!value) return true;
+    if (value->type != Json::Type::Boolean) {
+        error = "Invalid JSON type for " + key;
+        return false;
+    }
+    out = value->boolean;
+    return true;
+}
+
 bool parsePositiveInt(const std::string& value, int& out)
 {
     char* end = nullptr;
@@ -231,7 +243,7 @@ bool applyConfig(const Json& root, ProcessorConfig& config, ConfigLoadResult& re
         error = "JSON config root must be an object";
         return false;
     }
-    warnUnknownFields(root, "", {"camera", "processing", "segmentation", "background", "output", "ipc", "display"});
+    warnUnknownFields(root, "", {"camera", "processing", "segmentation", "background", "output", "ipc", "display", "diagnostics"});
 
     if (const Json* camera = objectChild(root, "camera")) {
         if (camera->type != Json::Type::Object) { error = "camera must be an object"; return false; }
@@ -330,6 +342,12 @@ bool applyConfig(const Json& root, ProcessorConfig& config, ConfigLoadResult& re
         if (!readString(*display, "mode", mode, error)) return false;
         if (mode == "fullscreen") config.fullscreen = true;
         else if (!mode.empty()) LOG_WARNING("Ignoring unsupported JSON config field value: display.mode=" << mode);
+    }
+
+    if (const Json* diagnostics = objectChild(root, "diagnostics")) {
+        if (diagnostics->type != Json::Type::Object) { error = "diagnostics must be an object"; return false; }
+        warnUnknownFields(*diagnostics, "diagnostics.", {"benchmark"});
+        if (!readBoolean(*diagnostics, "benchmark", config.benchmark, error)) return false;
     }
 
     return true;

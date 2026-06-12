@@ -41,6 +41,7 @@ enum OptionId {
     OptionNoDisplay,
     OptionNoMask,
     OptionNoOverlay,
+    OptionDaemon,
     OptionVersion
 };
 
@@ -61,7 +62,7 @@ const std::vector<OptionDefinition>& optionDefinitions()
         {OptionConfig, 'c', "config", required_argument, "path", "Read configuration from JSON file", ""},
         {OptionInput, 'i', "input", required_argument, "path", "Use a video file as input", ""},
         {OptionDevice, 'd', "device", required_argument, "path", "Use a V4L2 camera device", "/dev/video0"},
-        {OptionNoDaemon, 'n', "no-daemon", no_argument, "", "Run as foreground process instead of daemon mode", ""},
+        {OptionNoDaemon, 'n', "no-daemon", no_argument, "", "Run as foreground process; accepted for compatibility because this is now the default", ""},
         {OptionProcessingSize, 'p', "processing-size", required_argument, "WxH", "Processing size and requested camera size", "1920x1080"},
         {OptionOutputSize, 'o', "output-size", required_argument, "WxH", "Explicit display render size", "auto"},
         {OptionSegmentationSize, 's', "segmentation-size", required_argument, "WxH", "TensorRT segmentation size", "384x384"},
@@ -82,6 +83,7 @@ const std::vector<OptionDefinition>& optionDefinitions()
         {OptionNoDisplay, 0, "no-display", no_argument, "", "Disable display output", ""},
         {OptionNoMask, 0, "no-mask", no_argument, "", "Disable TensorRT mask generation", ""},
         {OptionNoOverlay, 0, "no-overlay", no_argument, "", "Disable background effect rendering", ""},
+        {OptionDaemon, 0, "daemon", no_argument, "", "Detach into legacy self-daemon mode", ""},
         {OptionVerbose, 'v', "verbose", no_argument, "", "Enable detailed logs", ""},
         {OptionVersion, 0, "version", no_argument, "", "Show version information", ""},
     };
@@ -346,6 +348,9 @@ bool parseCommandLine(int argc, char** argv, CommandLineResult& result, std::str
             break;
         case OptionNoDaemon:
             result.config.noDaemon = true;
+            break;
+        case OptionDaemon:
+            result.config.noDaemon = false;
             break;
         case OptionProcessingSize:
             if (!parseSize(optarg, "--processing-size", result.config.width, result.config.height, error)) return false;

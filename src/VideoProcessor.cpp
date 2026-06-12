@@ -26,6 +26,7 @@
 #include <sstream>
 #include <string>
 #include <sys/utsname.h>
+#include <thread>
 #include <utility>
 #include <vector>
 
@@ -41,6 +42,17 @@ struct BackgroundEffectBuffers {
     cv::Mat scaledBackgroundImage;
     cv::Mat result;
 };
+
+cv::Mat makeCameraOffFrame(const cv::Size& size)
+{
+    cv::Mat frame(size, CV_8UC3, cv::Scalar(32, 32, 32));
+    for (int x = -size.height; x < size.width; x += 80) {
+        cv::line(frame, cv::Point(x, 0), cv::Point(x + size.height, size.height), cv::Scalar(58, 58, 58), 2);
+    }
+    cv::putText(frame, "Camera OFF", cv::Point(48, 92), cv::FONT_HERSHEY_SIMPLEX, 1.5, cv::Scalar(255, 255, 255), 3, cv::LINE_AA);
+    cv::putText(frame, "JONImageProcessor test image", cv::Point(50, 140), cv::FONT_HERSHEY_SIMPLEX, 0.8, cv::Scalar(180, 220, 255), 2, cv::LINE_AA);
+    return frame;
+}
 
 cv::Mat applyBackgroundOverlay(
     const cv::Mat& frame,
@@ -509,7 +521,8 @@ int VideoProcessor::run()
     cv::Mat frame;
     BenchmarkRecorder benchmark(config_.benchmark);
     LowLatencyFrameCapture lowLatencyCapture;
-    if (lowLatencyMode) {
+    bool captureActive = lowLatencyMode && config_.cameraEnabled;
+    if (captureActive) {
         lowLatencyCapture.start(*captureBackend);
     }
     const auto startedAt = std::chrono::steady_clock::now();
@@ -536,9 +549,24 @@ int VideoProcessor::run()
             break;
         }
 
+        ProcessorConfig runtimeConfig = runtimeState.configSnapshot();
         const auto pipelineStartedAt = std::chrono::steady_clock::now();
         bool readOk = false;
-        if (lowLatencyMode) {
+        if (lowLatencyMode && usingCamera && !runtimeConfig.cameraEnabled) {
+            if (captureActive) {
+                lowLatencyCapture.stop();
+                captureActive = false;
+                LOG_INFO("Camera input disabled by runtime config");
+            }
+            frame = makeCameraOffFrame(outputSize);
+            std::this_thread::sleep_for(std::chrono::milliseconds(33));
+            readOk = true;
+        } else if (lowLatencyMode) {
+            if (!captureActive) {
+                lowLatencyCapture.start(*captureBackend);
+                captureActive = true;
+                LOG_INFO("Camera input enabled by runtime config");
+            }
             std::chrono::steady_clock::duration captureWait {};
             std::chrono::steady_clock::duration frameHandover {};
             readOk = lowLatencyCapture.waitForLatestFrame(frame, captureWait, frameHandover);
@@ -565,7 +593,6 @@ int VideoProcessor::run()
         if (frame.empty()) {
             continue;
         }
-        ProcessorConfig runtimeConfig = runtimeState.configSnapshot();
 
         const auto processingStartedAt = std::chrono::steady_clock::now();
 
@@ -694,8 +721,10 @@ int VideoProcessor::run()
         stoppedBySignal = true;
     }
 
-    if (lowLatencyMode) {
+    if (captureActive) {
         lowLatencyCapture.stop();
+    }
+    if (lowLatencyMode) {
         const auto stats = lowLatencyCapture.stats();
         const std::size_t droppedFrames = effectiveDroppedFrames(stats, frameIndex);
         LOG_VERBOSE("Frames captured: " << stats.capturedFrames);

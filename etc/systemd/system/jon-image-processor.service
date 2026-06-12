@@ -7,8 +7,7 @@ Requires=brio-startup-check.service
 Type=simple
 WorkingDirectory=/opt/JONImageProcessor
 ExecStart=/opt/JONImageProcessor/bin/JONImageProcessor \
-    --config /opt/JONImageProcessor/etc/jonimageprocessor.json \
-    --benchmark --no-daemon
+    --config /opt/JONImageProcessor/etc/jonimageprocessor.json
 Restart=on-failure
 RestartSec=5
 StartLimitIntervalSec=60

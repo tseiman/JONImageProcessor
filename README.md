@@ -18,7 +18,7 @@ JONImageProcessor is a C++17 video processing prototype for NVIDIA Jetson Orin N
   - [Image Background](#image-background)
   - [HighGUI Window](#highgui-window)
   - [Video File Test](#video-file-test)
-- [Running As Daemon](#running-as-daemon)
+- [Process Mode](#process-mode)
 - [Running As Systemd Service](#running-as-systemd-service)
 - [Command Line Options](#command-line-options)
 - [JSON Configuration](#json-configuration)
@@ -171,48 +171,48 @@ MODEL_PATH="$HOME/JONImageProcessor/models/modnet_photographic_portrait_matting.
 ### Blur Background
 
 ```bash
-./JONImageProcessor --no-daemon --device /dev/video0 --processing-size 1280x720 --mask-model "$MODEL_PATH" --segmentation-size 384x384 --mask-threshold 0.7 --mask-smoothing 0.65 --mask-morphology light --background-effect blur --blur-strength 85 --display-backend drm --fullscreen --benchmark
+./JONImageProcessor --device /dev/video0 --processing-size 1280x720 --mask-model "$MODEL_PATH" --segmentation-size 384x384 --mask-threshold 0.7 --mask-smoothing 0.65 --mask-morphology light --background-effect blur --blur-strength 85 --display-backend drm --fullscreen --benchmark
 ```
 
 ### Color Background
 
 ```bash
-./JONImageProcessor --no-daemon --device /dev/video0 --processing-size 1280x720 --mask-model "$MODEL_PATH" --segmentation-size 384x384 --mask-threshold 0.5 --mask-smoothing 0.65 --mask-morphology light --background-effect color --background-overlay-color 0,255,0 --background-overlay-alpha 1.0 --display-backend drm --fullscreen --benchmark
+./JONImageProcessor --device /dev/video0 --processing-size 1280x720 --mask-model "$MODEL_PATH" --segmentation-size 384x384 --mask-threshold 0.5 --mask-smoothing 0.65 --mask-morphology light --background-effect color --background-overlay-color 0,255,0 --background-overlay-alpha 1.0 --display-backend drm --fullscreen --benchmark
 ```
 
 ### Image Background
 
 ```bash
-./JONImageProcessor --no-daemon --device /dev/video0 --processing-size 1280x720 --mask-model "$MODEL_PATH" --segmentation-size 384x384 --mask-threshold 0.7 --mask-smoothing 0.65 --mask-morphology light --background-effect image --background-image "$HOME/JONImageProcessor/background.jpg" --display-backend drm --fullscreen --benchmark
+./JONImageProcessor --device /dev/video0 --processing-size 1280x720 --mask-model "$MODEL_PATH" --segmentation-size 384x384 --mask-threshold 0.7 --mask-smoothing 0.65 --mask-morphology light --background-effect image --background-image "$HOME/JONImageProcessor/background.jpg" --display-backend drm --fullscreen --benchmark
 ```
 
 ### HighGUI Window
 
 ```bash
-./JONImageProcessor --no-daemon --device /dev/video0 --processing-size 1280x720 --mask-model "$MODEL_PATH" --segmentation-size 384x384 --background-effect blur --display-backend highgui
+./JONImageProcessor --device /dev/video0 --processing-size 1280x720 --mask-model "$MODEL_PATH" --segmentation-size 384x384 --background-effect blur --display-backend highgui
 ```
 
 ### Video File Test
 
 ```bash
-./JONImageProcessor --no-daemon --input test.mp4 --mask-model "$MODEL_PATH" --background-effect blur --display-backend highgui
+./JONImageProcessor --input test.mp4 --mask-model "$MODEL_PATH" --background-effect blur --display-backend highgui
 ```
 
-## Running As Daemon
+## Process Mode
 
-Without `--no-daemon`, JONImageProcessor starts in daemon mode, detaches from the terminal, redirects standard streams to `/dev/null`, and writes logs through syslog/journald. Use foreground mode for development and benchmarking:
+JONImageProcessor now runs as a normal foreground process by default. This is the preferred mode for systemd `Type=simple`: systemd starts the process, keeps it attached, handles restart policy, sends `SIGTERM`, and collects stdout/stderr in the journal.
 
 ```bash
-./JONImageProcessor --no-daemon --device /dev/video0 --processing-size 1280x720 --mask-model "$MODEL_PATH" --segmentation-size 384x384 --background-effect blur --display-backend drm --fullscreen --benchmark
+./JONImageProcessor --device /dev/video0 --processing-size 1280x720 --mask-model "$MODEL_PATH" --segmentation-size 384x384 --background-effect blur --display-backend drm --fullscreen --benchmark
 ```
 
-Daemon example:
+Legacy self-daemon mode is still available when explicitly requested:
 
 ```bash
-./JONImageProcessor --device /dev/video0 --processing-size 1280x720 --mask-model "$MODEL_PATH" --segmentation-size 384x384 --background-effect blur --display-backend drm --fullscreen
+./JONImageProcessor --daemon --device /dev/video0 --processing-size 1280x720 --mask-model "$MODEL_PATH" --segmentation-size 384x384 --background-effect blur --display-backend drm --fullscreen
 ```
 
-Stop a daemonized process with `SIGTERM`, for example:
+Stop a legacy daemonized process with `SIGTERM`, for example:
 
 ```bash
 pkill -TERM JONImageProcessor
@@ -220,7 +220,7 @@ pkill -TERM JONImageProcessor
 
 ## Running As Systemd Service
 
-The example unit is in `packaging/systemd/JONImageProcessor.service` and uses daemon mode. It does not pass `--no-daemon`.
+The example unit is in `packaging/systemd/JONImageProcessor.service` and uses systemd `Type=simple`. It does not pass `--daemon` or `--no-daemon`.
 
 Copy files from the build host:
 
@@ -279,7 +279,8 @@ journalctl -u JONImageProcessor.service -f
 - `-h`, `--help`: show help.
 - `-c`, `--config <path>`: read configuration from JSON file.
 - `--version`: show release/git version.
-- `-n`, `--no-daemon`: run as foreground process instead of daemon mode.
+- `--daemon`: detach into legacy self-daemon mode.
+- `-n`, `--no-daemon`: run as foreground process; accepted for compatibility because this is now the default.
 - `-v`, `--verbose`: enable detailed logs.
 - `-i`, `--input <path>`: use a video file as input. Without this option, the V4L2 camera is used.
 - `-d`, `--device <path>`: V4L2 camera device. Default: `/dev/video0`.
@@ -363,11 +364,14 @@ Supported JSON groups:
   "display": {
     "backend": "drm",
     "mode": "fullscreen"
+  },
+  "diagnostics": {
+    "benchmark": false
   }
 }
 ```
 
-All fields are optional. Unknown JSON fields log warnings and are ignored. Invalid JSON, invalid types, and invalid values stop startup with an error. In daemon mode, display output is forced to fullscreen DRM; JSON `display` settings are ignored with a warning. In `--no-daemon` mode, `display.backend` can be used and `display.mode: "fullscreen"` enables fullscreen.
+All fields are optional. Unknown JSON fields log warnings and are ignored. Invalid JSON, invalid types, and invalid values stop startup with an error. `diagnostics.benchmark` enables benchmark collection and logging without passing `--benchmark`.
 
 ## Runtime Behavior
 
@@ -401,29 +405,32 @@ Commands:
 
 Writable keys:
 
-- `mask_threshold`: float `0.0..1.0`
-- `mask_smoothing`: float `0.0..1.0`
-- `mask_morphology`: `off`, `light`, `strong`
-- `background_effect`: `color`, `blur`, `image`
-- `background_image`: string path
-- `background_overlay_color`: `R,G,B`
-- `background_overlay_alpha`: float `0.0..1.0`
-- `blur_strength`: integer `1..100`
-- `no_mask`: boolean
-- `no_overlay`: boolean
+- `camera.enabled`: boolean. When false, camera capture stops and a generated `Camera OFF` test image is rendered.
+- `segmentation.threshold`: float `0.0..1.0`
+- `segmentation.smoothing`: float `0.0..1.0`
+- `segmentation.morphology`: `off`, `light`, `strong`
+- `background.effect`: `color`, `blur`, `image`
+- `background.image`: string path
+- `background.overlayColor`: `R,G,B`
+- `background.overlayAlpha`: float `0.0..1.0`
+- `background.blurStrength`: integer `1..100`
+- `runtime.noMask`: boolean
+- `runtime.noOverlay`: boolean
+
+The older flat key names such as `mask_threshold` and `background_effect` are still accepted for compatibility. `list` returns grouped JSON matching the configuration shape for runtime-adjustable values.
 
 Read-only key:
 
-- `benchmark`: current benchmark snapshot
+- `benchmark`: current benchmark snapshot. This key is available only when benchmark mode is enabled with `--benchmark` or `diagnostics.benchmark`.
 
 Examples:
 
 ```bash
-echo '{"cmd":"get","key":"mask_threshold"}' | socat - UNIX-CONNECT:/tmp/jonimageprocessor.sock
+echo '{"cmd":"get","key":"segmentation.threshold"}' | socat - UNIX-CONNECT:/tmp/jonimageprocessor.sock
 ```
 
 ```bash
-echo '{"cmd":"set","key":"mask_threshold","value":0.6}' | socat - UNIX-CONNECT:/tmp/jonimageprocessor.sock
+echo '{"cmd":"set","key":"segmentation.threshold","value":0.6}' | socat - UNIX-CONNECT:/tmp/jonimageprocessor.sock
 ```
 
 ```bash
@@ -434,7 +441,11 @@ echo '{"cmd":"list"}' | socat - UNIX-CONNECT:/tmp/jonimageprocessor.sock
 echo '{"cmd":"get","key":"benchmark"}' | socat - UNIX-CONNECT:/tmp/jonimageprocessor.sock
 ```
 
-Invalid JSON, unknown commands, unknown keys, invalid value types, invalid ranges, and attempts to set `benchmark` return `{"ok":false,...}`. There is intentionally no shutdown command.
+```bash
+echo '{"cmd":"set","key":"camera.enabled","value":false}' | socat - UNIX-CONNECT:/tmp/jonimageprocessor.sock
+```
+
+Invalid JSON, unknown commands, unknown keys, invalid value types, invalid ranges, disabled benchmark reads, and attempts to set `benchmark` return `{"ok":false,...}`. There is intentionally no shutdown command.
 
 ## Notes
 

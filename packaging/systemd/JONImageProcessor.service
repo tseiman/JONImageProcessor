@@ -1,11 +1,11 @@
 [Unit]
 Description=JONImageProcessor
-After=network.target
+After=local-fs.target
 
 [Service]
-Type=forking
-ExecStart=/opt/JONImageProcessor/JONImageProcessor --device /dev/video0 --processing-size 1280x720 --mask-model /opt/JONImageProcessor/models/modnet_photographic_portrait_matting.onnx --segmentation-size 384x384 --background-effect blur --blur-strength 85 --display-backend drm --fullscreen --ipc-socket /tmp/jonimageprocessor.sock
+Type=simple
 WorkingDirectory=/opt/JONImageProcessor
+ExecStart=/opt/JONImageProcessor/bin/JONImageProcessor --config /opt/JONImageProcessor/etc/jonimageprocessor.json
 Restart=on-failure
 RestartSec=3
 KillSignal=SIGTERM

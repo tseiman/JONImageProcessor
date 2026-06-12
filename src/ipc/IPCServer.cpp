@@ -157,14 +157,14 @@ bool parseColor(const std::string& value, RgbColor& color)
 
 bool setStringEnum(const std::string& value, ProcessorConfig& config, const std::string& key)
 {
-    if (key == "mask_morphology") {
+    if (key == "mask_morphology" || key == "segmentation.morphology") {
         if (value == "off") config.maskMorphology = MaskMorphologyMode::Off;
         else if (value == "light") config.maskMorphology = MaskMorphologyMode::Light;
         else if (value == "strong") config.maskMorphology = MaskMorphologyMode::Strong;
         else return false;
         return true;
     }
-    if (key == "background_effect") {
+    if (key == "background_effect" || key == "background.effect") {
         if (value == "color") config.backgroundEffect = BackgroundEffect::Color;
         else if (value == "blur") config.backgroundEffect = BackgroundEffect::Blur;
         else if (value == "image") config.backgroundEffect = BackgroundEffect::Image;
@@ -188,16 +188,17 @@ std::string benchmarkJson(const BenchmarkSnapshot& b)
 
 std::string valueJson(const ProcessorConfig& c, const std::string& key, const BenchmarkSnapshot& b)
 {
-    if (key == "mask_threshold") return std::to_string(c.maskThreshold);
-    if (key == "mask_smoothing") return std::to_string(c.maskSmoothing);
-    if (key == "mask_morphology") return "\"" + maskMorphologyModeToString(c.maskMorphology) + "\"";
-    if (key == "background_effect") return "\"" + backgroundEffectToString(c.backgroundEffect) + "\"";
-    if (key == "background_image") return "\"" + escapeJson(c.backgroundImagePath) + "\"";
-    if (key == "background_overlay_color") return "\"" + colorToString(c.backgroundOverlayColor) + "\"";
-    if (key == "background_overlay_alpha") return std::to_string(c.backgroundOverlayAlpha);
-    if (key == "blur_strength") return std::to_string(c.blurStrength);
-    if (key == "no_mask") return c.noMask ? "true" : "false";
-    if (key == "no_overlay") return c.noOverlay ? "true" : "false";
+    if (key == "mask_threshold" || key == "segmentation.threshold") return std::to_string(c.maskThreshold);
+    if (key == "mask_smoothing" || key == "segmentation.smoothing") return std::to_string(c.maskSmoothing);
+    if (key == "mask_morphology" || key == "segmentation.morphology") return "\"" + maskMorphologyModeToString(c.maskMorphology) + "\"";
+    if (key == "background_effect" || key == "background.effect") return "\"" + backgroundEffectToString(c.backgroundEffect) + "\"";
+    if (key == "background_image" || key == "background.image") return "\"" + escapeJson(c.backgroundImagePath) + "\"";
+    if (key == "background_overlay_color" || key == "background.overlayColor") return "\"" + colorToString(c.backgroundOverlayColor) + "\"";
+    if (key == "background_overlay_alpha" || key == "background.overlayAlpha") return std::to_string(c.backgroundOverlayAlpha);
+    if (key == "blur_strength" || key == "background.blurStrength") return std::to_string(c.blurStrength);
+    if (key == "no_mask" || key == "runtime.noMask") return c.noMask ? "true" : "false";
+    if (key == "no_overlay" || key == "runtime.noOverlay") return c.noOverlay ? "true" : "false";
+    if (key == "camera.enabled") return c.cameraEnabled ? "true" : "false";
     if (key == "benchmark") return benchmarkJson(b);
     return {};
 }
@@ -207,7 +208,11 @@ bool knownKey(const std::string& key)
     return key == "mask_threshold" || key == "mask_smoothing" || key == "mask_morphology"
         || key == "background_effect" || key == "background_image" || key == "background_overlay_color"
         || key == "background_overlay_alpha" || key == "blur_strength" || key == "no_mask"
-        || key == "no_overlay" || key == "benchmark";
+        || key == "no_overlay" || key == "benchmark"
+        || key == "segmentation.threshold" || key == "segmentation.smoothing" || key == "segmentation.morphology"
+        || key == "background.effect" || key == "background.image" || key == "background.overlayColor"
+        || key == "background.overlayAlpha" || key == "background.blurStrength"
+        || key == "runtime.noMask" || key == "runtime.noOverlay" || key == "camera.enabled";
 }
 
 std::string validateRuntimeConfig(const ProcessorConfig& config)
@@ -315,18 +320,21 @@ std::string IPCServer::handleLine(const std::string& line)
     if (cmd == "list") {
         std::ostringstream out;
         out << "{\"ok\":true,\"values\":{"
-            << "\"mask_threshold\":" << current.maskThreshold
-            << ",\"mask_smoothing\":" << current.maskSmoothing
-            << ",\"mask_morphology\":\"" << maskMorphologyModeToString(current.maskMorphology)
-            << "\",\"background_effect\":\"" << backgroundEffectToString(current.backgroundEffect)
-            << "\",\"background_image\":\"" << escapeJson(current.backgroundImagePath)
-            << "\",\"background_overlay_color\":\"" << colorToString(current.backgroundOverlayColor)
-            << "\",\"background_overlay_alpha\":" << current.backgroundOverlayAlpha
-            << ",\"blur_strength\":" << current.blurStrength
-            << ",\"no_mask\":" << (current.noMask ? "true" : "false")
-            << ",\"no_overlay\":" << (current.noOverlay ? "true" : "false")
-            << ",\"benchmark\":" << benchmarkJson(benchmark)
-            << "}}\n";
+            << "\"camera\":{\"enabled\":" << (current.cameraEnabled ? "true" : "false") << "}"
+            << ",\"segmentation\":{\"threshold\":" << current.maskThreshold
+            << ",\"smoothing\":" << current.maskSmoothing
+            << ",\"morphology\":\"" << maskMorphologyModeToString(current.maskMorphology) << "\"}"
+            << ",\"background\":{\"effect\":\"" << backgroundEffectToString(current.backgroundEffect)
+            << "\",\"image\":\"" << escapeJson(current.backgroundImagePath)
+            << "\",\"overlayColor\":\"" << colorToString(current.backgroundOverlayColor)
+            << "\",\"overlayAlpha\":" << current.backgroundOverlayAlpha
+            << ",\"blurStrength\":" << current.blurStrength << "}"
+            << ",\"runtime\":{\"noMask\":" << (current.noMask ? "true" : "false")
+            << ",\"noOverlay\":" << (current.noOverlay ? "true" : "false") << "}";
+        if (current.benchmark) {
+            out << ",\"benchmark\":" << benchmarkJson(benchmark);
+        }
+        out << "}}\n";
         return out.str();
     }
 
@@ -337,6 +345,9 @@ std::string IPCServer::handleLine(const std::string& line)
     if (cmd == "get") {
         if (!knownKey(key)) {
             return errorResponse("unknown key");
+        }
+        if (key == "benchmark" && !current.benchmark) {
+            return errorResponse("benchmark is not enabled");
         }
         return "{\"ok\":true,\"key\":\"" + key + "\",\"value\":" + valueJson(current, key, benchmark) + "}\n";
     }
@@ -352,30 +363,35 @@ std::string IPCServer::handleLine(const std::string& line)
 
     ProcessorConfig updated = current;
     const JsonValue value = request["value"];
-    if (key == "mask_threshold" || key == "mask_smoothing" || key == "background_overlay_alpha") {
+    if (key == "mask_threshold" || key == "segmentation.threshold"
+        || key == "mask_smoothing" || key == "segmentation.smoothing"
+        || key == "background_overlay_alpha" || key == "background.overlayAlpha") {
         if (value.type != JsonValue::Type::Number) return errorResponse("invalid value type");
         if (value.number < 0.0 || value.number > 1.0) return errorResponse("invalid value");
-        if (key == "mask_threshold") updated.maskThreshold = value.number;
-        else if (key == "mask_smoothing") updated.maskSmoothing = value.number;
+        if (key == "mask_threshold" || key == "segmentation.threshold") updated.maskThreshold = value.number;
+        else if (key == "mask_smoothing" || key == "segmentation.smoothing") updated.maskSmoothing = value.number;
         else updated.backgroundOverlayAlpha = value.number;
-    } else if (key == "blur_strength") {
+    } else if (key == "blur_strength" || key == "background.blurStrength") {
         if (value.type != JsonValue::Type::Number) return errorResponse("invalid value type");
         const int blur = static_cast<int>(value.number);
         if (value.number != static_cast<double>(blur) || blur < 1 || blur > 100) return errorResponse("invalid value");
         updated.blurStrength = blur;
-    } else if (key == "mask_morphology" || key == "background_effect") {
+    } else if (key == "mask_morphology" || key == "segmentation.morphology" || key == "background_effect" || key == "background.effect") {
         if (value.type != JsonValue::Type::String) return errorResponse("invalid value type");
         if (!setStringEnum(value.text, updated, key)) return errorResponse("invalid value");
-    } else if (key == "background_image") {
+    } else if (key == "background_image" || key == "background.image") {
         if (value.type != JsonValue::Type::String) return errorResponse("invalid value type");
         updated.backgroundImagePath = value.text;
-    } else if (key == "background_overlay_color") {
+    } else if (key == "background_overlay_color" || key == "background.overlayColor") {
         if (value.type != JsonValue::Type::String) return errorResponse("invalid value type");
         if (!parseColor(value.text, updated.backgroundOverlayColor)) return errorResponse("invalid value");
-    } else if (key == "no_mask" || key == "no_overlay") {
+    } else if (key == "no_mask" || key == "runtime.noMask" || key == "no_overlay" || key == "runtime.noOverlay") {
         if (value.type != JsonValue::Type::Boolean) return errorResponse("invalid value type");
-        if (key == "no_mask") updated.noMask = value.boolean;
+        if (key == "no_mask" || key == "runtime.noMask") updated.noMask = value.boolean;
         else updated.noOverlay = value.boolean;
+    } else if (key == "camera.enabled") {
+        if (value.type != JsonValue::Type::Boolean) return errorResponse("invalid value type");
+        updated.cameraEnabled = value.boolean;
     }
     const std::string configError = validateRuntimeConfig(updated);
     if (!configError.empty()) {
