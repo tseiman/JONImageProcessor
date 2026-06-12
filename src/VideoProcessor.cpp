@@ -48,12 +48,67 @@ struct BackgroundEffectBuffers {
 
 cv::Mat makeStatusFrame(const cv::Size& size, const std::string& status)
 {
-    cv::Mat frame(size, CV_8UC3, cv::Scalar(32, 32, 32));
-    for (int x = -size.height; x < size.width; x += 80) {
-        cv::line(frame, cv::Point(x, 0), cv::Point(x + size.height, size.height), cv::Scalar(58, 58, 58), 2);
+    cv::Mat frame(size, CV_8UC3, cv::Scalar(128, 128, 128));
+
+    const int grid = std::max(40, size.width / 32);
+    for (int x = 0; x < size.width; x += grid) {
+        cv::line(frame, cv::Point(x, 0), cv::Point(x, size.height), cv::Scalar(220, 220, 220), 1);
     }
-    cv::putText(frame, status, cv::Point(48, 92), cv::FONT_HERSHEY_SIMPLEX, 1.5, cv::Scalar(255, 255, 255), 3, cv::LINE_AA);
-    cv::putText(frame, "JONImageProcessor test image", cv::Point(50, 140), cv::FONT_HERSHEY_SIMPLEX, 0.8, cv::Scalar(180, 220, 255), 2, cv::LINE_AA);
+    for (int y = 0; y < size.height; y += grid) {
+        cv::line(frame, cv::Point(0, y), cv::Point(size.width, y), cv::Scalar(220, 220, 220), 1);
+    }
+
+    cv::ellipse(frame, cv::Point(size.width / 2, size.height / 2), cv::Size(size.width / 3, size.height / 2), 0.0, 0.0, 360.0, cv::Scalar(230, 230, 230), 2);
+    cv::line(frame, cv::Point(size.width / 2, 0), cv::Point(size.width / 2, size.height), cv::Scalar(230, 230, 230), 1);
+    cv::line(frame, cv::Point(0, size.height / 2), cv::Point(size.width, size.height / 2), cv::Scalar(230, 230, 230), 1);
+
+    const int marginX = size.width / 8;
+    const int top = size.height / 6;
+    const int barHeight = std::max(60, size.height / 7);
+    const std::array<cv::Scalar, 8> bars {
+        cv::Scalar(255, 255, 255),
+        cv::Scalar(0, 255, 255),
+        cv::Scalar(255, 255, 0),
+        cv::Scalar(0, 255, 0),
+        cv::Scalar(255, 0, 255),
+        cv::Scalar(0, 0, 255),
+        cv::Scalar(255, 0, 0),
+        cv::Scalar(0, 0, 0),
+    };
+    const int barWidth = (size.width - 2 * marginX) / static_cast<int>(bars.size());
+    for (std::size_t i = 0; i < bars.size(); ++i) {
+        cv::rectangle(frame, cv::Rect(marginX + static_cast<int>(i) * barWidth, top, barWidth, barHeight), bars[i], cv::FILLED);
+    }
+
+    const int grayTop = top + barHeight;
+    const int graySteps = 24;
+    const int grayWidth = (size.width - 2 * marginX) / graySteps;
+    for (int i = 0; i < graySteps; ++i) {
+        const int value = static_cast<int>((255.0 * i) / std::max(1, graySteps - 1));
+        cv::rectangle(frame, cv::Rect(marginX + i * grayWidth, grayTop, grayWidth, barHeight / 2), cv::Scalar(value, value, value), cv::FILLED);
+    }
+
+    const int stripeTop = grayTop + barHeight / 2;
+    for (int x = marginX; x < size.width - marginX; x += 6) {
+        const bool dark = ((x - marginX) / 6) % 2 == 0;
+        cv::line(frame, cv::Point(x, stripeTop), cv::Point(x, stripeTop + barHeight / 2), dark ? cv::Scalar(0, 0, 0) : cv::Scalar(255, 255, 255), 3);
+    }
+
+    const int rampTop = size.height - top - barHeight;
+    for (int y = 0; y < barHeight; ++y) {
+        const double fade = static_cast<double>(y) / std::max(1, barHeight - 1);
+        for (int x = marginX; x < size.width - marginX; ++x) {
+            const double level = static_cast<double>(x - marginX) / std::max(1, size.width - 2 * marginX - 1);
+            frame.at<cv::Vec3b>(rampTop + y, x) = cv::Vec3b(
+                static_cast<unsigned char>(255.0 * (1.0 - level) * (0.35 + 0.65 * fade)),
+                static_cast<unsigned char>(255.0 * level * (0.35 + 0.65 * fade)),
+                static_cast<unsigned char>(255.0 * (0.15 + 0.85 * level)));
+        }
+    }
+
+    cv::rectangle(frame, cv::Rect(marginX, size.height / 2 - 70, size.width - 2 * marginX, 140), cv::Scalar(245, 245, 245), cv::FILLED);
+    cv::putText(frame, status, cv::Point(marginX + 32, size.height / 2 - 10), cv::FONT_HERSHEY_SIMPLEX, 1.6, cv::Scalar(20, 20, 20), 4, cv::LINE_AA);
+    cv::putText(frame, "JONImageProcessor generated test pattern", cv::Point(marginX + 34, size.height / 2 + 42), cv::FONT_HERSHEY_SIMPLEX, 0.8, cv::Scalar(60, 60, 60), 2, cv::LINE_AA);
     return frame;
 }
 
