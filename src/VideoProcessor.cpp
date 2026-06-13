@@ -57,6 +57,14 @@ struct StatusFrameBuffers {
     std::time_t loadedPauseImageMtime = 0;
 };
 
+std::string joinPath(const std::string& folder, const std::string& relativePath)
+{
+    if (folder.empty() || folder == ".") return relativePath;
+    if (folder.back() == '/') return folder + relativePath;
+    return folder + "/" + relativePath;
+}
+
+
 std::time_t fileMtime(const std::string& path)
 {
     struct stat statBuffer {};
@@ -87,7 +95,8 @@ cv::Mat makeStatusFrame(
     if (config != nullptr && buffers != nullptr && config->pauseImageEnabled && !config->pauseImagePath.empty()) {
         const std::time_t pauseImageMtime = fileMtime(config->pauseImagePath);
         if (buffers->loadedPauseImagePath != config->pauseImagePath || buffers->loadedPauseImageMtime != pauseImageMtime) {
-            buffers->pauseImage = cv::imread(config->pauseImagePath, cv::IMREAD_COLOR);
+//            buffers->pauseImage = cv::imread(config->pauseImagePath, cv::IMREAD_COLOR);
+            buffers->pauseImage = cv::imread(joinPath(config->pauseImageFolder, config->pauseImagePath), cv::IMREAD_COLOR);
             buffers->scaledPauseImage.release();
             buffers->loadedPauseImagePath = config->pauseImagePath;
             buffers->loadedPauseImageMtime = pauseImageMtime;
@@ -107,11 +116,12 @@ cv::Mat makeStatusFrame(
                     config->pauseImageTextPosition.x >= 0 ? config->pauseImageTextPosition.x : marginX + 32,
                     config->pauseImageTextPosition.y >= 0 ? config->pauseImageTextPosition.y : size.height / 2 - 10);
                 const double textSize = std::clamp(config->pauseImageTextSize, 0.1, 10.0);
-                const int boxHeight = static_cast<int>(std::round(140.0 * textSize / 1.6));
-                const int boxTop = std::max(0, textPosition.y - static_cast<int>(std::round(60.0 * textSize / 1.6)));
-                const int boxLeft = std::max(0, textPosition.x - 32);
-                const int boxWidth = std::min(size.width - boxLeft, size.width - 2 * marginX);
-                cv::rectangle(frame, cv::Rect(boxLeft, boxTop, boxWidth, std::min(boxHeight, size.height - boxTop)), cv::Scalar(245, 245, 245), cv::FILLED);
+              //  const int boxHeight = static_cast<int>(std::round(140.0 * textSize / 1.6));
+              //  const int boxTop = std::max(0, textPosition.y - static_cast<int>(std::round(60.0 * textSize / 1.6)));
+             //   const int boxLeft = std::max(0, textPosition.x - 32);
+           //     const int boxWidth = std::min(size.width - boxLeft, size.width - 2 * marginX);
+//                cv::rectangle(frame, cv::Rect(boxLeft, boxTop, boxWidth, std::min(boxHeight, size.height - boxTop)), cv::Scalar(245, 245, 245), cv::FILLED);
+
                 cv::Mat textOverlay = frame.clone();
                 const cv::Scalar textColor(
                     std::clamp(config->pauseImageTextColor.b, 0, 255),
@@ -711,7 +721,8 @@ int VideoProcessor::run()
     cv::Mat backgroundImage;
     std::string loadedBackgroundImagePath;
     if (config_.backgroundEffect == BackgroundEffect::Image && overlayEnabled) {
-        backgroundImage = cv::imread(config_.backgroundImagePath, cv::IMREAD_COLOR);
+//        backgroundImage = cv::imread(config_.backgroundImagePath, cv::IMREAD_COLOR);
+        backgroundImage = cv::imread(joinPath(config_.backgroundImageFolder, config_.backgroundImagePath), cv::IMREAD_COLOR);
         if (backgroundImage.empty()) {
             LOG_ERROR("Cannot read background image: " << config_.backgroundImagePath);
             return ExitRuntimeError;
@@ -937,7 +948,8 @@ int VideoProcessor::run()
                     backgroundEffectBuffers);
             } else if (runtimeConfig.backgroundEffect == BackgroundEffect::Image) {
                 if (loadedBackgroundImagePath != runtimeConfig.backgroundImagePath) {
-                    backgroundImage = cv::imread(runtimeConfig.backgroundImagePath, cv::IMREAD_COLOR);
+                    // backgroundImage = cv::imread(runtimeConfig.backgroundImagePath, cv::IMREAD_COLOR);
+                    backgroundImage = cv::imread(joinPath(runtimeConfig.backgroundImageFolder, runtimeConfig.backgroundImagePath), cv::IMREAD_COLOR);
                     loadedBackgroundImagePath = runtimeConfig.backgroundImagePath;
                     if (backgroundImage.empty()) {
                         LOG_WARNING("Cannot read background image: " << runtimeConfig.backgroundImagePath);

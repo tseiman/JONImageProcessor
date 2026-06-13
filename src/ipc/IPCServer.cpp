@@ -323,15 +323,16 @@ std::string validateRuntimeConfig(const ProcessorConfig& config)
         if (config.backgroundImagePath.empty()) {
             return "background_image is required for background_effect image";
         }
-        if (cv::imread(config.backgroundImagePath, cv::IMREAD_COLOR).empty()) {
-            return "background_image cannot be read";
+
+        if (cv::imread(joinPath(config.backgroundImageFolder, config.backgroundImagePath), cv::IMREAD_COLOR).empty()) {
+            return "background_image cannot be read: " + config.backgroundImagePath;
         }
     }
     if (config.pauseImageEnabled && config.pauseImagePath.empty()) {
         return "pause.image is required when pause.enabled is true";
     }
-    if (config.pauseImageEnabled && cv::imread(config.pauseImagePath, cv::IMREAD_COLOR).empty()) {
-        return "pause.image cannot be read";
+    if (config.pauseImageEnabled && cv::imread(joinPath(config.pauseImageFolder, config.pauseImagePath), cv::IMREAD_COLOR).empty()) {
+        return "pause.image cannot be read: " + config.pauseImagePath;
     }
     return {};
 }
@@ -502,13 +503,18 @@ std::string IPCServer::handleLine(const std::string& line)
     } else if (key == "background_image" || key == "background.image") {
         if (value.type != JsonValue::Type::String) return errorResponse("invalid value type");
         if (!isSafeRelativePath(value.text)) return errorResponse("invalid relative image path");
-        updated.backgroundImagePath = joinPath(updated.backgroundImageFolder, value.text);
-        if (cv::imread(updated.backgroundImagePath, cv::IMREAD_COLOR).empty()) return errorResponse("background_image cannot be read");
+        // updated.backgroundImagePath = joinPath(updated.backgroundImageFolder, value.text);
+        updated.backgroundImagePath = value.text; // joinPath(value.text);
+//        if (cv::imread(updated.backgroundImagePath, cv::IMREAD_COLOR).empty()) return errorResponse("background_image cannot be read");
+        if (cv::imread(joinPath(updated.backgroundImageFolder, updated.backgroundImagePath), cv::IMREAD_COLOR).empty()) return errorResponse("background_image cannot be read");
+
     } else if (key == "pause.image") {
         if (value.type != JsonValue::Type::String) return errorResponse("invalid value type");
         if (!isSafeRelativePath(value.text)) return errorResponse("invalid relative image path");
-        updated.pauseImagePath = joinPath(updated.pauseImageFolder, value.text);
-        if (cv::imread(updated.pauseImagePath, cv::IMREAD_COLOR).empty()) return errorResponse("pause.image cannot be read");
+       // updated.pauseImagePath = joinPath(updated.pauseImageFolder, value.text);
+         updated.pauseImagePath = value.text;
+        //if (cv::imread(updated.pauseImagePath, cv::IMREAD_COLOR).empty()) return errorResponse("pause.image cannot be read");
+        if (cv::imread(joinPath(updated.pauseImageFolder,updated.pauseImagePath), cv::IMREAD_COLOR).empty()) return errorResponse("pause.image cannot be read");
     } else if (key == "pause.textColor") {
         if (value.type != JsonValue::Type::String) return errorResponse("invalid value type");
         if (!parseRgbaHexColor(value.text, updated.pauseImageTextColor)) return errorResponse("invalid value");
