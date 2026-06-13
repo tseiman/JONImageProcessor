@@ -7,6 +7,7 @@
 
 #include <cstdlib>
 #include <cstring>
+#include <fstream>
 #include <iomanip>
 #include <sstream>
 #include <string_view>
@@ -233,6 +234,48 @@ bool parsePauseFont(const char* value, std::string& target, std::string& error)
     }
     error = "Invalid pause image font: " + parsed;
     return false;
+}
+
+bool fileExists(const std::string& path)
+{
+    std::ifstream file(path);
+    return static_cast<bool>(file);
+}
+
+void warnMissingConfiguredFiles(const ProcessorConfig& config)
+{
+    if (!config.noMask && !config.maskModelPath.empty() && !fileExists(config.maskModelPath)) {
+        LOG_WARNING("Configured segmentation model does not exist: " << config.maskModelPath);
+    }
+    if (config.backgroundEffect == BackgroundEffect::Image && !config.backgroundImagePath.empty() && !fileExists(config.backgroundImagePath)) {
+        LOG_WARNING("Configured background image does not exist: " << config.backgroundImagePath);
+    }
+    if (config.pauseImageEnabled && !config.pauseImagePath.empty() && !fileExists(config.pauseImagePath)) {
+        LOG_WARNING("Configured pause image does not exist: " << config.pauseImagePath);
+    }
+}
+
+bool validateStartupFiles(const ProcessorConfig& config, std::string& error)
+{
+    if (!config.noMask && !config.maskModelPath.empty() && !fileExists(config.maskModelPath)) {
+        error = "Segmentation model does not exist: " + config.maskModelPath;
+        return false;
+    }
+    if (config.backgroundEffect == BackgroundEffect::Image && !config.backgroundImagePath.empty() && !fileExists(config.backgroundImagePath)) {
+        error = "Background image does not exist: " + config.backgroundImagePath;
+        return false;
+    }
+    if (config.pauseImageEnabled) {
+        if (config.pauseImagePath.empty()) {
+            error = "Pause image is required when pause image is enabled.";
+            return false;
+        }
+        if (!fileExists(config.pauseImagePath)) {
+            error = "Pause image does not exist: " + config.pauseImagePath;
+            return false;
+        }
+    }
+    return true;
 }
 
 bool parseDisplayBackend(const char* value, DisplayBackendType& backend, std::string& error)
@@ -632,6 +675,10 @@ bool parseCommandLine(int argc, char** argv, CommandLineResult& result, std::str
     if (result.showHelp || result.showVersion) {
         return true;
     }
+    if (result.testConfig) {
+        warnMissingConfiguredFiles(result.config);
+        return true;
+    }
     if (!result.config.noDaemon) {
         if (configLoad.displayConfigured) {
             LOG_WARNING("Ignoring JSON display settings in daemon mode; using fullscreen DRM output");
@@ -645,6 +692,10 @@ bool parseCommandLine(int argc, char** argv, CommandLineResult& result, std::str
     }
     if (result.config.backgroundEffect == BackgroundEffect::Image && result.config.backgroundImagePath.empty()) {
         error = "--background-image is required when --background-effect image is used.";
+        return false;
+    }
+    if (!validateStartupFiles(result.config, error)) {
+        result.showHelpOnError = false;
         return false;
     }
     return true;

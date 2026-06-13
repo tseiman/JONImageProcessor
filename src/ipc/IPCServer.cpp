@@ -296,13 +296,23 @@ bool knownKey(const std::string& key)
 
 std::string validateRuntimeConfig(const ProcessorConfig& config)
 {
+    if (!config.backgroundImagePath.empty()) {
+        if (cv::imread(config.backgroundImagePath, cv::IMREAD_COLOR).empty()) {
+            return "background_image cannot be read";
+        }
+    }
     if (config.backgroundEffect == BackgroundEffect::Image) {
         if (config.backgroundImagePath.empty()) {
             return "background_image is required for background_effect image";
         }
-        if (cv::imread(config.backgroundImagePath, cv::IMREAD_COLOR).empty()) {
-            return "background_image cannot be read";
+    }
+    if (!config.pauseImagePath.empty()) {
+        if (cv::imread(config.pauseImagePath, cv::IMREAD_COLOR).empty()) {
+            return "pause.image cannot be read";
         }
+    }
+    if (config.pauseImageEnabled && config.pauseImagePath.empty()) {
+        return "pause.image is required when pause.enabled is true";
     }
     return {};
 }
