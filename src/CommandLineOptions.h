@@ -67,7 +67,9 @@ struct ProcessorConfig {
     int cameraConnectTimeoutSeconds = 10;
     BackgroundEffect backgroundEffect = BackgroundEffect::Color;
     std::string backgroundImagePath;
+    std::string backgroundImageFolder = ".";
     std::string pauseImagePath;
+    std::string pauseImageFolder = ".";
     std::string pauseImageFont = "simplex";
     std::string ipcSocketPath = "/tmp/jonimageprocessor.sock";
     RgbColor backgroundOverlayColor;

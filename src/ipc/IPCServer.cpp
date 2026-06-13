@@ -179,6 +179,27 @@ bool parsePauseFont(const std::string& value)
         || value == "script-simplex" || value == "script-complex";
 }
 
+bool isSafeRelativePath(const std::string& path)
+{
+    if (path.empty() || path.front() == '/') return false;
+    std::size_t start = 0;
+    while (start <= path.size()) {
+        const std::size_t end = path.find('/', start);
+        const std::string segment = path.substr(start, end == std::string::npos ? std::string::npos : end - start);
+        if (segment.empty() || segment == "." || segment == "..") return false;
+        if (end == std::string::npos) break;
+        start = end + 1;
+    }
+    return true;
+}
+
+std::string joinPath(const std::string& folder, const std::string& relativePath)
+{
+    if (folder.empty() || folder == ".") return relativePath;
+    if (folder.back() == '/') return folder + relativePath;
+    return folder + "/" + relativePath;
+}
+
 int hexValue(char c)
 {
     if (c >= '0' && c <= '9') return c - '0';
@@ -263,11 +284,13 @@ std::string valueJson(const ProcessorConfig& c, const std::string& key, const Be
     if (key == "mask_morphology" || key == "segmentation.morphology") return "\"" + maskMorphologyModeToString(c.maskMorphology) + "\"";
     if (key == "background_effect" || key == "background.effect") return "\"" + backgroundEffectToString(c.backgroundEffect) + "\"";
     if (key == "background_image" || key == "background.image") return "\"" + escapeJson(c.backgroundImagePath) + "\"";
+    if (key == "background.folder") return "\"" + escapeJson(c.backgroundImageFolder) + "\"";
     if (key == "background_overlay_color" || key == "background.overlayColor") return "\"" + colorToString(c.backgroundOverlayColor) + "\"";
     if (key == "background_overlay_alpha" || key == "background.overlayAlpha") return std::to_string(c.backgroundOverlayAlpha);
     if (key == "blur_strength" || key == "background.blurStrength") return std::to_string(c.blurStrength);
     if (key == "pause.enabled") return c.pauseImageEnabled ? "true" : "false";
     if (key == "pause.image") return "\"" + escapeJson(c.pauseImagePath) + "\"";
+    if (key == "pause.folder") return "\"" + escapeJson(c.pauseImageFolder) + "\"";
     if (key == "pause.showStatusText") return c.pauseImageShowStatusText ? "true" : "false";
     if (key == "pause.textColor") return "\"" + rgbaColorToHex(c.pauseImageTextColor) + "\"";
     if (key == "pause.textPosition") return "\"" + positionToString(c.pauseImageTextPosition) + "\"";
@@ -288,31 +311,27 @@ bool knownKey(const std::string& key)
         || key == "no_overlay" || key == "benchmark"
         || key == "segmentation.threshold" || key == "segmentation.smoothing" || key == "segmentation.morphology"
         || key == "background.effect" || key == "background.image" || key == "background.overlayColor"
-        || key == "background.overlayAlpha" || key == "background.blurStrength"
-        || key == "pause.enabled" || key == "pause.image" || key == "pause.showStatusText" || key == "pause.textColor"
+        || key == "background.overlayAlpha" || key == "background.blurStrength" || key == "background.folder"
+        || key == "pause.enabled" || key == "pause.image" || key == "pause.folder" || key == "pause.showStatusText" || key == "pause.textColor"
         || key == "pause.textPosition" || key == "pause.textSize" || key == "pause.font"
         || key == "runtime.noMask" || key == "runtime.noOverlay" || key == "camera.enabled";
 }
 
 std::string validateRuntimeConfig(const ProcessorConfig& config)
 {
-    if (!config.backgroundImagePath.empty()) {
-        if (cv::imread(config.backgroundImagePath, cv::IMREAD_COLOR).empty()) {
-            return "background_image cannot be read";
-        }
-    }
     if (config.backgroundEffect == BackgroundEffect::Image) {
         if (config.backgroundImagePath.empty()) {
             return "background_image is required for background_effect image";
         }
-    }
-    if (!config.pauseImagePath.empty()) {
-        if (cv::imread(config.pauseImagePath, cv::IMREAD_COLOR).empty()) {
-            return "pause.image cannot be read";
+        if (cv::imread(config.backgroundImagePath, cv::IMREAD_COLOR).empty()) {
+            return "background_image cannot be read";
         }
     }
     if (config.pauseImageEnabled && config.pauseImagePath.empty()) {
         return "pause.image is required when pause.enabled is true";
+    }
+    if (config.pauseImageEnabled && cv::imread(config.pauseImagePath, cv::IMREAD_COLOR).empty()) {
+        return "pause.image cannot be read";
     }
     return {};
 }
@@ -415,11 +434,13 @@ std::string IPCServer::handleLine(const std::string& line)
             << ",\"morphology\":\"" << maskMorphologyModeToString(current.maskMorphology) << "\"}"
             << ",\"background\":{\"effect\":\"" << backgroundEffectToString(current.backgroundEffect)
             << "\",\"image\":\"" << escapeJson(current.backgroundImagePath)
+            << "\",\"folder\":\"" << escapeJson(current.backgroundImageFolder)
             << "\",\"overlayColor\":\"" << colorToString(current.backgroundOverlayColor)
             << "\",\"overlayAlpha\":" << current.backgroundOverlayAlpha
             << ",\"blurStrength\":" << current.blurStrength << "}"
             << ",\"pause\":{\"enabled\":" << (current.pauseImageEnabled ? "true" : "false")
             << ",\"image\":\"" << escapeJson(current.pauseImagePath)
+            << "\",\"folder\":\"" << escapeJson(current.pauseImageFolder)
             << "\",\"showStatusText\":" << (current.pauseImageShowStatusText ? "true" : "false")
             << ",\"textColor\":\"" << rgbaColorToHex(current.pauseImageTextColor)
             << "\",\"textPosition\":\"" << positionToString(current.pauseImageTextPosition)
@@ -453,6 +474,9 @@ std::string IPCServer::handleLine(const std::string& line)
     if (key == "benchmark") {
         return errorResponse("benchmark is read-only");
     }
+    if (key == "background.folder" || key == "pause.folder") {
+        return errorResponse(key + " is read-only");
+    }
     if (!knownKey(key)) {
         return errorResponse("unknown key");
     }
@@ -477,10 +501,14 @@ std::string IPCServer::handleLine(const std::string& line)
         if (!setStringEnum(value.text, updated, key)) return errorResponse("invalid value");
     } else if (key == "background_image" || key == "background.image") {
         if (value.type != JsonValue::Type::String) return errorResponse("invalid value type");
-        updated.backgroundImagePath = value.text;
+        if (!isSafeRelativePath(value.text)) return errorResponse("invalid relative image path");
+        updated.backgroundImagePath = joinPath(updated.backgroundImageFolder, value.text);
+        if (cv::imread(updated.backgroundImagePath, cv::IMREAD_COLOR).empty()) return errorResponse("background_image cannot be read");
     } else if (key == "pause.image") {
         if (value.type != JsonValue::Type::String) return errorResponse("invalid value type");
-        updated.pauseImagePath = value.text;
+        if (!isSafeRelativePath(value.text)) return errorResponse("invalid relative image path");
+        updated.pauseImagePath = joinPath(updated.pauseImageFolder, value.text);
+        if (cv::imread(updated.pauseImagePath, cv::IMREAD_COLOR).empty()) return errorResponse("pause.image cannot be read");
     } else if (key == "pause.textColor") {
         if (value.type != JsonValue::Type::String) return errorResponse("invalid value type");
         if (!parseRgbaHexColor(value.text, updated.pauseImageTextColor)) return errorResponse("invalid value");

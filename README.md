@@ -298,7 +298,9 @@ journalctl -u JONImageProcessor.service -f
 - `--mask-morphology <off|light|strong>`: mask cleanup mode. Default: `light`.
 - `--background-effect <color|blur|image>`: background effect. Default: `color`.
 - `--background-image <path>`: JPEG or PNG image used by `--background-effect image`.
+- `--background-image-folder <path>`: base folder for background images selected through IPC. Default: `.`.
 - `--pause-image <path>`: JPEG or PNG image used for camera status screens.
+- `--pause-image-folder <path>`: base folder for pause images selected through IPC. Default: `.`.
 - `--pause-image-enabled <true|false>`: use pause image instead of generated camera status screens. Default: `false`.
 - `--pause-image-status-text <true|false>`: render camera status text over the pause image. Default: `true`.
 - `--pause-image-text-color <RRGGBBAA>`: status text color for the pause image overlay. Default: `ffffffff`.
@@ -369,6 +371,7 @@ Supported JSON groups:
   "background": {
     "effect": "color",
     "image": "/opt/JONImageProcessor/backgrounds/background.png",
+    "folder": "/opt/JONImageProcessor/backgrounds",
     "overlayColor": "0,255,0",
     "overlayAlpha": 0.35,
     "blurStrength": 15
@@ -376,6 +379,7 @@ Supported JSON groups:
   "pause": {
     "enabled": false,
     "image": "testdata/sample_pause.jpg",
+    "folder": "testdata",
     "showStatusText": true,
     "textColor": "ffffffff",
     "textPosition": "auto",
@@ -398,7 +402,7 @@ Supported JSON groups:
 }
 ```
 
-All fields are optional. Unknown JSON fields log warnings and are ignored. Invalid JSON, invalid types, and invalid values stop startup with an error. JSON syntax errors include line and column information where possible. `--test-config` warns about missing referenced files. Normal startup fails if an active segmentation model, background image, or pause image path does not exist. Runtime IPC updates for image paths also validate that the file can be read and return a JSON error if not. `camera.connectTimeoutSeconds` controls how long `Camera connecting...` is shown after runtime camera re-enable before falling back to `Camera DISCONNECTED`. `pause.enabled` switches camera status screens from the generated pattern to `pause.image`; `pause.showStatusText` controls whether the status label is rendered over that image. `pause.textColor` uses `RRGGBBAA` hex, for example `ffffff0a`. `pause.textPosition` uses `XxY` or `auto`; `pause.textSize` controls the rendered text scale. `pause.font` uses a fixed OpenCV Hershey font name, not a dynamic operating-system font list. `diagnostics.benchmark` enables benchmark collection for IPC without passing `--benchmark`.
+All fields are optional. Unknown JSON fields log warnings and are ignored. Invalid JSON, invalid types, and invalid values stop startup with an error. JSON syntax errors include line and column information where possible. `--test-config` warns about missing referenced files. Normal startup fails if an active segmentation model, background image, pause image path, background image folder, or pause image folder does not exist. Runtime IPC updates for image paths validate that the file can be read and return a JSON error if not. IPC only accepts relative image names under `background.folder` or `pause.folder`; absolute paths and `..` traversal are rejected. `camera.connectTimeoutSeconds` controls how long `Camera connecting...` is shown after runtime camera re-enable before falling back to `Camera DISCONNECTED`. `pause.enabled` switches camera status screens from the generated pattern to `pause.image`; `pause.showStatusText` controls whether the status label is rendered over that image. `pause.textColor` uses `RRGGBBAA` hex, for example `ffffff0a`. `pause.textPosition` uses `XxY` or `auto`; `pause.textSize` controls the rendered text scale. `pause.font` uses a fixed OpenCV Hershey font name, not a dynamic operating-system font list. `diagnostics.benchmark` enables benchmark collection for IPC without passing `--benchmark`.
 
 ## Runtime Behavior
 
@@ -434,7 +438,8 @@ Writable keys:
 
 - `camera.enabled`: boolean. When false, camera capture stops and a generated `Camera OFF` test image is rendered.
 - `pause.enabled`: boolean. When true, camera status screens use `pause.image`.
-- `pause.image`: string path.
+- `pause.image`: relative image name under `pause.folder` when set through IPC.
+- `pause.folder`: read-only base folder used when `pause.image` is set through IPC.
 - `pause.showStatusText`: boolean. When false, no status text is rendered over the pause image.
 - `pause.textColor`: `RRGGBBAA` hex color for the pause image status text.
 - `pause.textPosition`: `XxY` or `auto`.
@@ -444,7 +449,8 @@ Writable keys:
 - `segmentation.smoothing`: float `0.0..1.0`
 - `segmentation.morphology`: `off`, `light`, `strong`
 - `background.effect`: `color`, `blur`, `image`
-- `background.image`: string path
+- `background.image`: relative image name under `background.folder` when set through IPC.
+- `background.folder`: read-only base folder used when `background.image` is set through IPC.
 - `background.overlayColor`: `R,G,B`
 - `background.overlayAlpha`: float `0.0..1.0`
 - `background.blurStrength`: integer `1..100`

@@ -4,6 +4,7 @@
 #include "Logger.h"
 
 #include <getopt.h>
+#include <sys/stat.h>
 
 #include <cstdlib>
 #include <cstring>
@@ -34,7 +35,9 @@ enum OptionId {
     OptionCameraConnectTimeout,
     OptionBackgroundEffect,
     OptionBackgroundImage,
+    OptionBackgroundImageFolder,
     OptionPauseImage,
+    OptionPauseImageFolder,
     OptionPauseImageEnabled,
     OptionPauseImageStatusText,
     OptionPauseImageTextColor,
@@ -85,7 +88,9 @@ const std::vector<OptionDefinition>& optionDefinitions()
         {OptionCameraConnectTimeout, 0, "camera-connect-timeout", required_argument, "seconds", "Seconds to show Camera connecting before disconnected status", "10"},
         {OptionBackgroundEffect, 0, "background-effect", required_argument, "effect", "Background effect: color, blur, or image", "color"},
         {OptionBackgroundImage, 0, "background-image", required_argument, "path", "JPEG/PNG image for --background-effect image", ""},
+        {OptionBackgroundImageFolder, 0, "background-image-folder", required_argument, "path", "Base folder for background images set through IPC", "."},
         {OptionPauseImage, 0, "pause-image", required_argument, "path", "JPEG/PNG image for camera status screens", ""},
+        {OptionPauseImageFolder, 0, "pause-image-folder", required_argument, "path", "Base folder for pause images set through IPC", "."},
         {OptionPauseImageEnabled, 0, "pause-image-enabled", required_argument, "true|false", "Use pause image instead of generated camera status screens", "false"},
         {OptionPauseImageStatusText, 0, "pause-image-status-text", required_argument, "true|false", "Render camera status text over pause image", "true"},
         {OptionPauseImageTextColor, 0, "pause-image-text-color", required_argument, "RRGGBBAA", "Status text color for pause image overlay", "ffffffff"},
@@ -242,6 +247,12 @@ bool fileExists(const std::string& path)
     return static_cast<bool>(file);
 }
 
+bool directoryExists(const std::string& path)
+{
+    struct stat statBuffer {};
+    return ::stat(path.c_str(), &statBuffer) == 0 && S_ISDIR(statBuffer.st_mode);
+}
+
 void warnMissingConfiguredFiles(const ProcessorConfig& config)
 {
     if (!config.noMask && !config.maskModelPath.empty() && !fileExists(config.maskModelPath)) {
@@ -250,8 +261,14 @@ void warnMissingConfiguredFiles(const ProcessorConfig& config)
     if (config.backgroundEffect == BackgroundEffect::Image && !config.backgroundImagePath.empty() && !fileExists(config.backgroundImagePath)) {
         LOG_WARNING("Configured background image does not exist: " << config.backgroundImagePath);
     }
+    if (!directoryExists(config.backgroundImageFolder)) {
+        LOG_WARNING("Configured background image folder does not exist: " << config.backgroundImageFolder);
+    }
     if (config.pauseImageEnabled && !config.pauseImagePath.empty() && !fileExists(config.pauseImagePath)) {
         LOG_WARNING("Configured pause image does not exist: " << config.pauseImagePath);
+    }
+    if (!directoryExists(config.pauseImageFolder)) {
+        LOG_WARNING("Configured pause image folder does not exist: " << config.pauseImageFolder);
     }
 }
 
@@ -263,6 +280,14 @@ bool validateStartupFiles(const ProcessorConfig& config, std::string& error)
     }
     if (config.backgroundEffect == BackgroundEffect::Image && !config.backgroundImagePath.empty() && !fileExists(config.backgroundImagePath)) {
         error = "Background image does not exist: " + config.backgroundImagePath;
+        return false;
+    }
+    if (!directoryExists(config.backgroundImageFolder)) {
+        error = "Background image folder does not exist: " + config.backgroundImageFolder;
+        return false;
+    }
+    if (!directoryExists(config.pauseImageFolder)) {
+        error = "Pause image folder does not exist: " + config.pauseImageFolder;
         return false;
     }
     if (config.pauseImageEnabled) {
@@ -588,10 +613,24 @@ bool parseCommandLine(int argc, char** argv, CommandLineResult& result, std::str
                 return false;
             }
             break;
+        case OptionBackgroundImageFolder:
+            result.config.backgroundImageFolder = optarg;
+            if (result.config.backgroundImageFolder.empty()) {
+                error = "--background-image-folder must not be empty.";
+                return false;
+            }
+            break;
         case OptionPauseImage:
             result.config.pauseImagePath = optarg;
             if (result.config.pauseImagePath.empty()) {
                 error = "--pause-image must not be empty.";
+                return false;
+            }
+            break;
+        case OptionPauseImageFolder:
+            result.config.pauseImageFolder = optarg;
+            if (result.config.pauseImageFolder.empty()) {
+                error = "--pause-image-folder must not be empty.";
                 return false;
             }
             break;

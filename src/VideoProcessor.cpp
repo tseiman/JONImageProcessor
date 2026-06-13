@@ -539,8 +539,10 @@ void logStartupInfo(const ProcessorConfig& config, const ScreenInfo& screenInfo)
     LOG_VERBOSE("Mask morphology: " << maskMorphologyModeToString(config.maskMorphology));
     LOG_VERBOSE("Background effect: " << backgroundEffectToString(config.backgroundEffect));
     LOG_VERBOSE("Background image: " << (config.backgroundImagePath.empty() ? "none" : config.backgroundImagePath));
+    LOG_VERBOSE("Background image folder: " << config.backgroundImageFolder);
     LOG_VERBOSE("Pause image enabled: " << (config.pauseImageEnabled ? "true" : "false"));
     LOG_VERBOSE("Pause image: " << (config.pauseImagePath.empty() ? "none" : config.pauseImagePath));
+    LOG_VERBOSE("Pause image folder: " << config.pauseImageFolder);
     LOG_VERBOSE("Pause image status text: " << (config.pauseImageShowStatusText ? "true" : "false"));
     LOG_VERBOSE("Pause image text color: "
         << config.pauseImageTextColor.r << ","

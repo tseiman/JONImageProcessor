@@ -16,12 +16,14 @@
   },
   "background": {
     "effect": "color",
+    "folder": "testdata",
     "overlayColor": "0,255,0",
     "overlayAlpha": 1.0
   },
   "pause": {
     "enabled": false,
     "image": "testdata/sample_pause.jpg",
+    "folder": "testdata",
     "showStatusText": true,
     "textColor": "ffffffff",
     "textPosition": "auto",
