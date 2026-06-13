@@ -172,6 +172,13 @@ bool parsePosition(const std::string& value, Point2i& position)
     return true;
 }
 
+bool parsePauseFont(const std::string& value)
+{
+    return value == "plain" || value == "simplex" || value == "duplex"
+        || value == "complex" || value == "triplex" || value == "complex-small"
+        || value == "script-simplex" || value == "script-complex";
+}
+
 int hexValue(char c)
 {
     if (c >= '0' && c <= '9') return c - '0';
@@ -265,6 +272,7 @@ std::string valueJson(const ProcessorConfig& c, const std::string& key, const Be
     if (key == "pause.textColor") return "\"" + rgbaColorToHex(c.pauseImageTextColor) + "\"";
     if (key == "pause.textPosition") return "\"" + positionToString(c.pauseImageTextPosition) + "\"";
     if (key == "pause.textSize") return std::to_string(c.pauseImageTextSize);
+    if (key == "pause.font") return "\"" + escapeJson(c.pauseImageFont) + "\"";
     if (key == "no_mask" || key == "runtime.noMask") return c.noMask ? "true" : "false";
     if (key == "no_overlay" || key == "runtime.noOverlay") return c.noOverlay ? "true" : "false";
     if (key == "camera.enabled") return c.cameraEnabled ? "true" : "false";
@@ -282,7 +290,7 @@ bool knownKey(const std::string& key)
         || key == "background.effect" || key == "background.image" || key == "background.overlayColor"
         || key == "background.overlayAlpha" || key == "background.blurStrength"
         || key == "pause.enabled" || key == "pause.image" || key == "pause.showStatusText" || key == "pause.textColor"
-        || key == "pause.textPosition" || key == "pause.textSize"
+        || key == "pause.textPosition" || key == "pause.textSize" || key == "pause.font"
         || key == "runtime.noMask" || key == "runtime.noOverlay" || key == "camera.enabled";
 }
 
@@ -405,7 +413,8 @@ std::string IPCServer::handleLine(const std::string& line)
             << "\",\"showStatusText\":" << (current.pauseImageShowStatusText ? "true" : "false")
             << ",\"textColor\":\"" << rgbaColorToHex(current.pauseImageTextColor)
             << "\",\"textPosition\":\"" << positionToString(current.pauseImageTextPosition)
-            << "\",\"textSize\":" << current.pauseImageTextSize << "}"
+            << "\",\"textSize\":" << current.pauseImageTextSize
+            << ",\"font\":\"" << escapeJson(current.pauseImageFont) << "\"}"
             << ",\"runtime\":{\"noMask\":" << (current.noMask ? "true" : "false")
             << ",\"noOverlay\":" << (current.noOverlay ? "true" : "false") << "}";
         if (current.benchmark) {
@@ -472,6 +481,10 @@ std::string IPCServer::handleLine(const std::string& line)
         if (value.type != JsonValue::Type::Number) return errorResponse("invalid value type");
         if (value.number < 0.1 || value.number > 10.0) return errorResponse("invalid value");
         updated.pauseImageTextSize = value.number;
+    } else if (key == "pause.font") {
+        if (value.type != JsonValue::Type::String) return errorResponse("invalid value type");
+        if (!parsePauseFont(value.text)) return errorResponse("invalid value");
+        updated.pauseImageFont = value.text;
     } else if (key == "background_overlay_color" || key == "background.overlayColor") {
         if (value.type != JsonValue::Type::String) return errorResponse("invalid value type");
         if (!parseColor(value.text, updated.backgroundOverlayColor)) return errorResponse("invalid value");

@@ -18,10 +18,13 @@
 #include <opencv2/imgcodecs.hpp>
 #include <opencv2/imgproc.hpp>
 
+#include <sys/stat.h>
+
 #include <algorithm>
 #include <array>
 #include <chrono>
 #include <cmath>
+#include <ctime>
 #include <fstream>
 #include <memory>
 #include <sstream>
@@ -51,7 +54,29 @@ struct StatusFrameBuffers {
     cv::Mat pauseImage;
     cv::Mat scaledPauseImage;
     std::string loadedPauseImagePath;
+    std::time_t loadedPauseImageMtime = 0;
 };
+
+std::time_t fileMtime(const std::string& path)
+{
+    struct stat statBuffer {};
+    if (::stat(path.c_str(), &statBuffer) != 0) {
+        return 0;
+    }
+    return statBuffer.st_mtime;
+}
+
+int pauseImageFontFace(const std::string& font)
+{
+    if (font == "plain") return cv::FONT_HERSHEY_PLAIN;
+    if (font == "duplex") return cv::FONT_HERSHEY_DUPLEX;
+    if (font == "complex") return cv::FONT_HERSHEY_COMPLEX;
+    if (font == "triplex") return cv::FONT_HERSHEY_TRIPLEX;
+    if (font == "complex-small") return cv::FONT_HERSHEY_COMPLEX_SMALL;
+    if (font == "script-simplex") return cv::FONT_HERSHEY_SCRIPT_SIMPLEX;
+    if (font == "script-complex") return cv::FONT_HERSHEY_SCRIPT_COMPLEX;
+    return cv::FONT_HERSHEY_SIMPLEX;
+}
 
 cv::Mat makeStatusFrame(
     const cv::Size& size,
@@ -60,10 +85,12 @@ cv::Mat makeStatusFrame(
     StatusFrameBuffers* buffers = nullptr)
 {
     if (config != nullptr && buffers != nullptr && config->pauseImageEnabled && !config->pauseImagePath.empty()) {
-        if (buffers->loadedPauseImagePath != config->pauseImagePath) {
+        const std::time_t pauseImageMtime = fileMtime(config->pauseImagePath);
+        if (buffers->loadedPauseImagePath != config->pauseImagePath || buffers->loadedPauseImageMtime != pauseImageMtime) {
             buffers->pauseImage = cv::imread(config->pauseImagePath, cv::IMREAD_COLOR);
             buffers->scaledPauseImage.release();
             buffers->loadedPauseImagePath = config->pauseImagePath;
+            buffers->loadedPauseImageMtime = pauseImageMtime;
             if (buffers->pauseImage.empty()) {
                 LOG_WARNING("Cannot read pause image: " << config->pauseImagePath);
             }
@@ -90,8 +117,9 @@ cv::Mat makeStatusFrame(
                     std::clamp(config->pauseImageTextColor.b, 0, 255),
                     std::clamp(config->pauseImageTextColor.g, 0, 255),
                     std::clamp(config->pauseImageTextColor.r, 0, 255));
-                cv::putText(textOverlay, status, textPosition, cv::FONT_HERSHEY_SIMPLEX, textSize, textColor, std::max(1, static_cast<int>(std::round(4.0 * textSize / 1.6))), cv::LINE_AA);
-                cv::putText(textOverlay, "JONImageProcessor", cv::Point(textPosition.x + 2, textPosition.y + static_cast<int>(std::round(52.0 * textSize / 1.6))), cv::FONT_HERSHEY_SIMPLEX, textSize * 0.5, textColor, std::max(1, static_cast<int>(std::round(2.0 * textSize / 1.6))), cv::LINE_AA);
+                const int fontFace = pauseImageFontFace(config->pauseImageFont);
+                cv::putText(textOverlay, status, textPosition, fontFace, textSize, textColor, std::max(1, static_cast<int>(std::round(4.0 * textSize / 1.6))), cv::LINE_AA);
+                cv::putText(textOverlay, "JONImageProcessor", cv::Point(textPosition.x + 2, textPosition.y + static_cast<int>(std::round(52.0 * textSize / 1.6))), fontFace, textSize * 0.5, textColor, std::max(1, static_cast<int>(std::round(2.0 * textSize / 1.6))), cv::LINE_AA);
                 const double alpha = std::clamp(config->pauseImageTextColor.a, 0, 255) / 255.0;
                 cv::addWeighted(textOverlay, alpha, frame, 1.0 - alpha, 0.0, frame);
             }
@@ -524,6 +552,7 @@ void logStartupInfo(const ProcessorConfig& config, const ScreenInfo& screenInfo)
             ? std::string("auto")
             : std::to_string(config.pauseImageTextPosition.x) + "x" + std::to_string(config.pauseImageTextPosition.y)));
     LOG_VERBOSE("Pause image text size: " << config.pauseImageTextSize);
+    LOG_VERBOSE("Pause image font: " << config.pauseImageFont);
     LOG_VERBOSE("Background overlay color: "
         << config.backgroundOverlayColor.r << ","
         << config.backgroundOverlayColor.g << ","

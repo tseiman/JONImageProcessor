@@ -25,7 +25,8 @@
     "showStatusText": true,
     "textColor": "ffffffff",
     "textPosition": "auto",
-    "textSize": 1.6
+    "textSize": 1.6,
+    "font": "simplex"
   },
   "output": {
     "size": "auto"

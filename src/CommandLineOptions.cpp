@@ -39,6 +39,7 @@ enum OptionId {
     OptionPauseImageTextColor,
     OptionPauseImageTextPosition,
     OptionPauseImageTextSize,
+    OptionPauseImageFont,
     OptionBackgroundOverlayColor,
     OptionBackgroundOverlayAlpha,
     OptionBlurStrength,
@@ -89,6 +90,7 @@ const std::vector<OptionDefinition>& optionDefinitions()
         {OptionPauseImageTextColor, 0, "pause-image-text-color", required_argument, "RRGGBBAA", "Status text color for pause image overlay", "ffffffff"},
         {OptionPauseImageTextPosition, 0, "pause-image-text-position", required_argument, "XxY", "Status text position on pause image", "auto"},
         {OptionPauseImageTextSize, 0, "pause-image-text-size", required_argument, "value", "Status text size on pause image", "1.6"},
+        {OptionPauseImageFont, 0, "pause-image-font", required_argument, "font", "Pause image font: plain, simplex, duplex, complex, triplex, complex-small, script-simplex, script-complex", "simplex"},
         {OptionBackgroundOverlayColor, 0, "background-overlay-color", required_argument, "R,G,B", "Background color for --background-effect color; ignored for blur/image", "0,255,0"},
         {OptionBackgroundOverlayAlpha, 0, "background-overlay-alpha", required_argument, "0.0..1.0", "Background alpha for --background-effect color; ignored for blur/image", "0.35"},
         {OptionBlurStrength, 0, "blur-strength", required_argument, "value", "Blur strength for --background-effect blur", "15"},
@@ -218,6 +220,19 @@ bool parseTextSize(const char* value, const std::string& optionName, double& tar
     }
     target = parsed;
     return true;
+}
+
+bool parsePauseFont(const char* value, std::string& target, std::string& error)
+{
+    const std::string parsed(value);
+    if (parsed == "plain" || parsed == "simplex" || parsed == "duplex"
+        || parsed == "complex" || parsed == "triplex" || parsed == "complex-small"
+        || parsed == "script-simplex" || parsed == "script-complex") {
+        target = parsed;
+        return true;
+    }
+    error = "Invalid pause image font: " + parsed;
+    return false;
 }
 
 bool parseDisplayBackend(const char* value, DisplayBackendType& backend, std::string& error)
@@ -551,6 +566,9 @@ bool parseCommandLine(int argc, char** argv, CommandLineResult& result, std::str
             break;
         case OptionPauseImageTextSize:
             if (!parseTextSize(optarg, "--pause-image-text-size", result.config.pauseImageTextSize, error)) return false;
+            break;
+        case OptionPauseImageFont:
+            if (!parsePauseFont(optarg, result.config.pauseImageFont, error)) return false;
             break;
         case OptionBackgroundOverlayColor:
             if (!parseOverlayColor(optarg, result.config.backgroundOverlayColor, error)) return false;

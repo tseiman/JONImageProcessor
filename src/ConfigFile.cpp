@@ -323,6 +323,13 @@ bool parseRgbaHexColor(const std::string& value, RgbaColor& color)
     return true;
 }
 
+bool parsePauseFont(const std::string& value)
+{
+    return value == "plain" || value == "simplex" || value == "duplex"
+        || value == "complex" || value == "triplex" || value == "complex-small"
+        || value == "script-simplex" || value == "script-complex";
+}
+
 void warnUnknownFields(const Json& object, const std::string& prefix, const std::initializer_list<const char*> allowed)
 {
     if (object.type != Json::Type::Object) return;
@@ -416,7 +423,7 @@ bool applyConfig(const Json& root, ProcessorConfig& config, ConfigLoadResult& re
 
     if (const Json* pause = objectChild(root, "pause")) {
         if (pause->type != Json::Type::Object) { error = "pause must be an object"; return false; }
-        warnUnknownFields(*pause, "pause.", {"enabled", "image", "showStatusText", "textColor", "textPosition", "textSize"});
+        warnUnknownFields(*pause, "pause.", {"enabled", "image", "showStatusText", "textColor", "textPosition", "textSize", "font"});
         if (!readBoolean(*pause, "enabled", config.pauseImageEnabled, error)) return false;
         if (!readString(*pause, "image", config.pauseImagePath, error)) return false;
         if (!readBoolean(*pause, "showStatusText", config.pauseImageShowStatusText, error)) return false;
@@ -430,6 +437,12 @@ bool applyConfig(const Json& root, ProcessorConfig& config, ConfigLoadResult& re
         if (!readNumber(*pause, "textSize", textSize, error)) return false;
         if (textSize < 0.1 || textSize > 10.0) { error = "Invalid pause.textSize"; return false; }
         config.pauseImageTextSize = textSize;
+        std::string font;
+        if (!readString(*pause, "font", font, error)) return false;
+        if (!font.empty()) {
+            if (!parsePauseFont(font)) { error = "Invalid pause.font"; return false; }
+            config.pauseImageFont = font;
+        }
     }
 
     if (const Json* output = objectChild(root, "output")) {

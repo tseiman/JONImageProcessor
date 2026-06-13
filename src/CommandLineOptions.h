@@ -68,6 +68,7 @@ struct ProcessorConfig {
     BackgroundEffect backgroundEffect = BackgroundEffect::Color;
     std::string backgroundImagePath;
     std::string pauseImagePath;
+    std::string pauseImageFont = "simplex";
     std::string ipcSocketPath = "/tmp/jonimageprocessor.sock";
     RgbColor backgroundOverlayColor;
     RgbaColor pauseImageTextColor;
