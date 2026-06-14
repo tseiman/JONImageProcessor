@@ -24,12 +24,14 @@
 
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <chrono>
 #include <cctype>
 #include <cmath>
 #include <ctime>
 #include <fstream>
 #include <memory>
+#include <mutex>
 #include <sstream>
 #include <string>
 #include <sys/utsname.h>
@@ -96,30 +98,74 @@ struct MediaFile {
     std::string path;
     std::time_t mtime = 0;
     cv::Size htmlSize;
-    std::chrono::steady_clock::time_point videoStartedAt;
     double videoFps = 0.0;
     double videoFrameCount = 0.0;
+    std::thread videoThread;
+    std::mutex videoMutex;
+    std::atomic<bool> stopVideoThread {false};
     bool loop = false;
     bool isVideo = false;
     bool isHtml = false;
     bool warnedFrameFailure = false;
 
+    ~MediaFile()
+    {
+        release();
+    }
+
     void release()
     {
+        stopVideoThread = true;
+        if (videoThread.joinable()) {
+            videoThread.join();
+        }
         video.release();
         if (html) html->reset();
         image.release();
-        lastVideoFrame.release();
+        {
+            std::lock_guard<std::mutex> lock(videoMutex);
+            lastVideoFrame.release();
+        }
         path.clear();
         mtime = 0;
         htmlSize = {};
-        videoStartedAt = {};
         videoFps = 0.0;
         videoFrameCount = 0.0;
+        stopVideoThread = false;
         isVideo = false;
         isHtml = false;
         warnedFrameFailure = false;
         loop = false;
+    }
+
+    void startVideoDecoder()
+    {
+        const double fps = videoFps > 0.0 ? videoFps : 25.0;
+        const auto frameDelay = std::chrono::duration<double>(1.0 / fps);
+        videoThread = std::thread([this, frameDelay]() {
+            auto nextFrameAt = std::chrono::steady_clock::now();
+            while (!stopVideoThread) {
+                cv::Mat decoded;
+                if (!video.read(decoded) || decoded.empty()) {
+                    if (loop) {
+                        video.set(cv::CAP_PROP_POS_FRAMES, 0.0);
+                        nextFrameAt = std::chrono::steady_clock::now();
+                        continue;
+                    }
+                    std::this_thread::sleep_for(std::chrono::milliseconds(50));
+                    continue;
+                }
+                {
+                    std::lock_guard<std::mutex> lock(videoMutex);
+                    lastVideoFrame = decoded;
+                }
+                nextFrameAt += std::chrono::duration_cast<std::chrono::steady_clock::duration>(frameDelay);
+                std::this_thread::sleep_until(nextFrameAt);
+                if (std::chrono::steady_clock::now() > nextFrameAt + std::chrono::seconds(1)) {
+                    nextFrameAt = std::chrono::steady_clock::now();
+                }
+            }
+        });
     }
 
     bool ensureLoaded(const std::string& nextPath, bool nextLoop, const cv::Size& renderSize, const std::string& label)
@@ -128,47 +174,57 @@ struct MediaFile {
         if (path == nextPath && mtime == nextMtime && loop == nextLoop && (!isHtml || htmlSize == renderSize)) {
             return !image.empty() || video.isOpened() || !lastVideoFrame.empty() || isHtml;
         }
-
-        release();
-        path = nextPath;
-        mtime = nextMtime;
-        loop = nextLoop;
+        const bool hadMedia = !path.empty();
 
         if (looksLikeHtmlFile(nextPath)) {
             if (!HtmlMediaRenderer::supported()) {
                 LOG_ERROR("HTML media is not supported in this build: " << nextPath);
-                return false;
+                return hadMedia;
             }
-            html = std::make_unique<HtmlMediaRenderer>();
+            auto nextHtml = std::make_unique<HtmlMediaRenderer>();
             std::string error;
-            if (!html->load(nextPath, renderSize, error)) {
+            if (!nextHtml->load(nextPath, renderSize, error)) {
                 LOG_ERROR("Cannot load " << label << " HTML media: " << error);
-                html.reset();
-                return false;
+                return hadMedia;
             }
+            release();
+            path = nextPath;
+            mtime = nextMtime;
+            loop = nextLoop;
+            html = std::move(nextHtml);
             LOG_INFO("Loaded " << label << " HTML media: " << nextPath);
             isHtml = true;
             htmlSize = renderSize;
             return true;
         }
 
-        image = cv::imread(nextPath, cv::IMREAD_COLOR);
-        if (!image.empty()) {
+        cv::Mat nextImage = cv::imread(nextPath, cv::IMREAD_COLOR);
+        if (!nextImage.empty()) {
+            release();
+            path = nextPath;
+            mtime = nextMtime;
+            loop = nextLoop;
+            image = std::move(nextImage);
             LOG_INFO("Loaded " << label << " image media: " << nextPath);
             return true;
         }
 
-        video.open(nextPath);
-        if (!video.isOpened()) {
+        cv::VideoCapture nextVideo(nextPath);
+        if (!nextVideo.isOpened()) {
             LOG_ERROR("Cannot load " << label << " media: " << nextPath);
-            return false;
+            return hadMedia;
         }
+        release();
+        path = nextPath;
+        mtime = nextMtime;
+        loop = nextLoop;
+        video = std::move(nextVideo);
         videoFps = video.get(cv::CAP_PROP_FPS);
         videoFrameCount = video.get(cv::CAP_PROP_FRAME_COUNT);
-        videoStartedAt = std::chrono::steady_clock::now();
         LOG_INFO("Loaded " << label << " video media: " << nextPath
             << " fps=" << videoFps << " frames=" << videoFrameCount);
         isVideo = true;
+        startVideoDecoder();
         return true;
     }
 
@@ -182,40 +238,8 @@ struct MediaFile {
             frame = image;
             return true;
         }
-        if (!video.isOpened()) {
-            if (!lastVideoFrame.empty()) {
-                frame = lastVideoFrame;
-                return true;
-            }
-            return false;
-        }
-        if (videoFps > 0.0 && videoFrameCount > 0.0) {
-            const auto elapsed = std::chrono::steady_clock::now() - videoStartedAt;
-            double targetFrame = std::chrono::duration<double>(elapsed).count() * videoFps;
-            if (loop) {
-                targetFrame = std::fmod(targetFrame, videoFrameCount);
-            } else if (targetFrame >= videoFrameCount) {
-                if (!lastVideoFrame.empty()) {
-                    frame = lastVideoFrame;
-                    return true;
-                }
-                targetFrame = videoFrameCount - 1.0;
-            }
-            video.set(cv::CAP_PROP_POS_FRAMES, std::max(0.0, targetFrame));
-        }
-        if (!video.read(lastVideoFrame) || lastVideoFrame.empty()) {
-            if (loop) {
-                video.set(cv::CAP_PROP_POS_FRAMES, 0.0);
-                videoStartedAt = std::chrono::steady_clock::now();
-                if (video.read(lastVideoFrame) && !lastVideoFrame.empty()) {
-                    frame = lastVideoFrame;
-                    return true;
-                }
-            }
-            if (!lastVideoFrame.empty()) {
-                frame = lastVideoFrame;
-                return true;
-            }
+        std::lock_guard<std::mutex> lock(videoMutex);
+        if (lastVideoFrame.empty()) {
             return false;
         }
         frame = lastVideoFrame;
