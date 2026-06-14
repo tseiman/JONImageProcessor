@@ -370,15 +370,12 @@ std::string validateRuntimeConfig(const ProcessorConfig& config)
         }
 #endif
     }
-    if (config.pauseImageEnabled && config.pauseImagePath.empty()) {
-        return "pause.image is required when pause.enabled is true";
-    }
     const std::string pausePath = joinPath(config.pauseImageFolder, config.pauseImagePath);
-    if (config.pauseImageEnabled && !fileExists(pausePath)) {
+    if (!config.pauseImagePath.empty() && !fileExists(pausePath)) {
         return "pause.image cannot be read: " + config.pauseImagePath;
     }
 #if !defined(JON_ENABLE_WPE_HTML_RENDERER)
-    if (config.pauseImageEnabled && looksLikeHtmlFile(pausePath)) {
+    if (!config.pauseImagePath.empty() && looksLikeHtmlFile(pausePath)) {
         return "pause HTML media is not supported in this build";
     }
 #endif

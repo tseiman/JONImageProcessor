@@ -350,11 +350,7 @@ bool validateStartupFiles(const ProcessorConfig& config, std::string& error)
         error = "Pause image folder does not exist: " + config.pauseImageFolder;
         return false;
     }
-    if (config.pauseImageEnabled) {
-        if (config.pauseImagePath.empty()) {
-            error = "Pause image is required when pause image is enabled.";
-            return false;
-        }
+    if (!config.pauseImagePath.empty()) {
         const std::string pausePath = resolveMediaPath(config.pauseImageFolder, config.pauseImagePath);
         if (!fileExists(pausePath)) {
             error = "Pause media does not exist: " + pausePath;

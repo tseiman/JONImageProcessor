@@ -73,37 +73,14 @@ struct HtmlMediaRenderer::Impl {
 
     ~Impl()
     {
-        reset();
     }
 
     void reset()
     {
-        iterateMainContext();
-        if (webView) {
-            g_object_unref(webView);
-            webView = nullptr;
-        }
-        if (webViewBackend) {
-            g_object_unref(webViewBackend);
-            webViewBackend = nullptr;
-        }
-        if (exportable) {
-            wpe_view_backend_exportable_fdo_destroy(exportable);
-            exportable = nullptr;
-        }
-        if (eglDisplay != EGL_NO_DISPLAY) {
-            eglMakeCurrent(eglDisplay, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT);
-            if (eglSurface != EGL_NO_SURFACE) {
-                eglDestroySurface(eglDisplay, eglSurface);
-                eglSurface = EGL_NO_SURFACE;
-            }
-            if (eglContext != EGL_NO_CONTEXT) {
-                eglDestroyContext(eglDisplay, eglContext);
-                eglContext = EGL_NO_CONTEXT;
-            }
-            eglTerminate(eglDisplay);
-            eglDisplay = EGL_NO_DISPLAY;
-        }
+        // WPEBackend-fdo can crash on Jetson when its Wayland/EGL proxies are
+        // destroyed during runtime media switches. Keep those objects alive and
+        // only reset the exported frame state; the process is long-lived and
+        // switches media rarely compared to frame rendering.
         latestFrame.release();
         loaded = false;
         haveFrame = false;
