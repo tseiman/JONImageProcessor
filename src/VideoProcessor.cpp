@@ -279,6 +279,14 @@ cv::Mat makeStatusFrame(
     const ProcessorConfig* config = nullptr,
     StatusFrameBuffers* buffers = nullptr)
 {
+    auto logGeneratedStatusReason = [](const std::string& reason) {
+        static std::string lastReason;
+        if (lastReason != reason) {
+            LOG_INFO("Using generated camera status image: " << reason);
+            lastReason = reason;
+        }
+    };
+
     if (config != nullptr && buffers != nullptr && config->pauseImageEnabled && !config->pauseImagePath.empty()) {
         const std::string resolvedPath = mediaPath(config->pauseImageFolder, config->pauseImagePath);
         if (!buffers->pauseMedia.ensureLoaded(resolvedPath, config->pauseLoopIfVideo, size, "pause")) {
@@ -322,6 +330,12 @@ cv::Mat makeStatusFrame(
                 return frame;
             }
         }
+    } else if (config != nullptr && !config->pauseImageEnabled) {
+        logGeneratedStatusReason("pause.enabled=false");
+    } else if (config != nullptr && config->pauseImagePath.empty()) {
+        logGeneratedStatusReason("pause.image is empty");
+    } else {
+        logGeneratedStatusReason("pause media config unavailable");
     }
 
     cv::Mat frame(size, CV_8UC3, cv::Scalar(128, 128, 128));
