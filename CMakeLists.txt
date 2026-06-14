@@ -13,7 +13,7 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 find_package(OpenCV REQUIRED COMPONENTS core imgproc imgcodecs highgui videoio)
 find_package(PkgConfig QUIET)
 if (PkgConfig_FOUND)
-    pkg_check_modules(WPE_HTML_RENDERER QUIET
+    pkg_check_modules(WPE_HTML_RENDERER_11 QUIET
         wpe-webkit-1.1
         wpe-1.0
         wpebackend-fdo-1.0
@@ -23,17 +23,26 @@ if (PkgConfig_FOUND)
         gobject-2.0
         gio-2.0
     )
-    if (NOT WPE_HTML_RENDERER_FOUND)
-        pkg_check_modules(WPE_HTML_RENDERER QUIET
-            wpe-webkit-1.0
-            wpe-1.0
-            wpebackend-fdo-1.0
-            egl
-            glesv2
-            glib-2.0
-            gobject-2.0
-            gio-2.0
-        )
+    pkg_check_modules(WPE_HTML_RENDERER_10 QUIET
+        wpe-webkit-1.0
+        wpe-1.0
+        wpebackend-fdo-1.0
+        egl
+        glesv2
+        glib-2.0
+        gobject-2.0
+        gio-2.0
+    )
+    if (WPE_HTML_RENDERER_11_FOUND)
+        set(WPE_HTML_RENDERER_FOUND TRUE)
+        set(WPE_HTML_RENDERER_INCLUDE_DIRS ${WPE_HTML_RENDERER_11_INCLUDE_DIRS})
+        set(WPE_HTML_RENDERER_LIBRARY_DIRS ${WPE_HTML_RENDERER_11_LIBRARY_DIRS})
+        set(WPE_HTML_RENDERER_LIBRARIES ${WPE_HTML_RENDERER_11_LIBRARIES})
+    elseif (WPE_HTML_RENDERER_10_FOUND)
+        set(WPE_HTML_RENDERER_FOUND TRUE)
+        set(WPE_HTML_RENDERER_INCLUDE_DIRS ${WPE_HTML_RENDERER_10_INCLUDE_DIRS})
+        set(WPE_HTML_RENDERER_LIBRARY_DIRS ${WPE_HTML_RENDERER_10_LIBRARY_DIRS})
+        set(WPE_HTML_RENDERER_LIBRARIES ${WPE_HTML_RENDERER_10_LIBRARIES})
     endif()
 endif()
 if (WPE_HTML_RENDERER_FOUND)

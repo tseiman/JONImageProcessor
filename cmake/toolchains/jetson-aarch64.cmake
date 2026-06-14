@@ -33,6 +33,10 @@ elseif (EXISTS "/usr/bin/make")
     set(CMAKE_MAKE_PROGRAM "/usr/bin/make" CACHE FILEPATH "Host make program" FORCE)
 endif()
 
+if (EXISTS "/usr/bin/pkg-config")
+    set(PKG_CONFIG_EXECUTABLE "/usr/bin/pkg-config" CACHE FILEPATH "Host pkg-config program" FORCE)
+endif()
+
 if (_JETSON_SYSROOT)
     set(CMAKE_SYSROOT "${_JETSON_SYSROOT}")
     set(CMAKE_FIND_ROOT_PATH "${_JETSON_SYSROOT}")
