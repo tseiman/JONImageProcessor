@@ -33,6 +33,12 @@ std::string errorResponse(const std::string& error)
     return "{\"ok\":false,\"error\":\"" + error + "\"}\n";
 }
 
+std::string loggedErrorResponse(const std::string& error)
+{
+    LOG_WARNING("IPC request failed: " << error);
+    return errorResponse(error);
+}
+
 std::string escapeJson(const std::string& value)
 {
     std::string out;
@@ -461,7 +467,7 @@ std::string IPCServer::handleLine(const std::string& line)
 {
     std::map<std::string, JsonValue> request;
     if (!parseObject(line, request) || request["cmd"].type != JsonValue::Type::String) {
-        return errorResponse("invalid json");
+        return loggedErrorResponse("invalid json");
     }
     const std::string cmd = request["cmd"].text;
     const ProcessorConfig current = runtimeState_.configSnapshot();
@@ -478,14 +484,14 @@ std::string IPCServer::handleLine(const std::string& line)
             << "\",\"image\":\"" << escapeJson(current.backgroundImagePath)
             << "\",\"folder\":\"" << escapeJson(current.backgroundImageFolder)
             << "\",\"loopIfVideo\":" << (current.backgroundLoopIfVideo ? "true" : "false")
-            << "\",\"overlayColor\":\"" << colorToString(current.backgroundOverlayColor)
+            << ",\"overlayColor\":\"" << colorToString(current.backgroundOverlayColor)
             << "\",\"overlayAlpha\":" << current.backgroundOverlayAlpha
             << ",\"blurStrength\":" << current.blurStrength << "}"
             << ",\"pause\":{\"enabled\":" << (current.pauseImageEnabled ? "true" : "false")
             << ",\"image\":\"" << escapeJson(current.pauseImagePath)
             << "\",\"folder\":\"" << escapeJson(current.pauseImageFolder)
             << "\",\"loopIfVideo\":" << (current.pauseLoopIfVideo ? "true" : "false")
-            << "\",\"showStatusText\":" << (current.pauseImageShowStatusText ? "true" : "false")
+            << ",\"showStatusText\":" << (current.pauseImageShowStatusText ? "true" : "false")
             << ",\"textColor\":\"" << rgbaColorToHex(current.pauseImageTextColor)
             << "\",\"textPosition\":\"" << positionToString(current.pauseImageTextPosition)
             << "\",\"textSize\":" << current.pauseImageTextSize
@@ -500,29 +506,29 @@ std::string IPCServer::handleLine(const std::string& line)
     }
 
     if ((cmd == "get" || cmd == "set") && request["key"].type != JsonValue::Type::String) {
-        return errorResponse("unknown key");
+        return loggedErrorResponse("unknown key");
     }
     const std::string key = request["key"].text;
     if (cmd == "get") {
         if (!knownKey(key)) {
-            return errorResponse("unknown key");
+            return loggedErrorResponse("unknown key");
         }
         if (key == "benchmark" && !current.benchmark) {
-            return errorResponse("benchmark is not enabled");
+            return loggedErrorResponse("benchmark is not enabled");
         }
         return "{\"ok\":true,\"key\":\"" + key + "\",\"value\":" + valueJson(current, key, benchmark) + "}\n";
     }
     if (cmd != "set") {
-        return errorResponse("unknown command");
+        return loggedErrorResponse("unknown command");
     }
     if (key == "benchmark") {
-        return errorResponse("benchmark is read-only");
+        return loggedErrorResponse("benchmark is read-only");
     }
     if (key == "background.folder" || key == "pause.folder") {
-        return errorResponse(key + " is read-only");
+        return loggedErrorResponse(key + " is read-only");
     }
     if (!knownKey(key)) {
-        return errorResponse("unknown key");
+        return loggedErrorResponse("unknown key");
     }
 
     ProcessorConfig updated = current;
@@ -530,59 +536,59 @@ std::string IPCServer::handleLine(const std::string& line)
     if (key == "mask_threshold" || key == "segmentation.threshold"
         || key == "mask_smoothing" || key == "segmentation.smoothing"
         || key == "background_overlay_alpha" || key == "background.overlayAlpha") {
-        if (value.type != JsonValue::Type::Number) return errorResponse("invalid value type");
-        if (value.number < 0.0 || value.number > 1.0) return errorResponse("invalid value");
+        if (value.type != JsonValue::Type::Number) return loggedErrorResponse("invalid value type");
+        if (value.number < 0.0 || value.number > 1.0) return loggedErrorResponse("invalid value");
         if (key == "mask_threshold" || key == "segmentation.threshold") updated.maskThreshold = value.number;
         else if (key == "mask_smoothing" || key == "segmentation.smoothing") updated.maskSmoothing = value.number;
         else updated.backgroundOverlayAlpha = value.number;
     } else if (key == "blur_strength" || key == "background.blurStrength") {
-        if (value.type != JsonValue::Type::Number) return errorResponse("invalid value type");
+        if (value.type != JsonValue::Type::Number) return loggedErrorResponse("invalid value type");
         const int blur = static_cast<int>(value.number);
-        if (value.number != static_cast<double>(blur) || blur < 1 || blur > 100) return errorResponse("invalid value");
+        if (value.number != static_cast<double>(blur) || blur < 1 || blur > 100) return loggedErrorResponse("invalid value");
         updated.blurStrength = blur;
     } else if (key == "mask_morphology" || key == "segmentation.morphology" || key == "background_effect" || key == "background.effect") {
-        if (value.type != JsonValue::Type::String) return errorResponse("invalid value type");
-        if (!setStringEnum(value.text, updated, key)) return errorResponse("invalid value");
+        if (value.type != JsonValue::Type::String) return loggedErrorResponse("invalid value type");
+        if (!setStringEnum(value.text, updated, key)) return loggedErrorResponse("invalid value");
     } else if (key == "background_image" || key == "background.image") {
-        if (value.type != JsonValue::Type::String) return errorResponse("invalid value type");
-        if (!isSafeRelativePath(value.text)) return errorResponse("invalid relative image path");
+        if (value.type != JsonValue::Type::String) return loggedErrorResponse("invalid value type");
+        if (!isSafeRelativePath(value.text)) return loggedErrorResponse("invalid relative image path");
         updated.backgroundImagePath = value.text;
         const std::string path = joinPath(updated.backgroundImageFolder, updated.backgroundImagePath);
-        if (!fileExists(path)) return errorResponse("background_image cannot be read");
+        if (!fileExists(path)) return loggedErrorResponse("background_image cannot be read");
 #if !defined(JON_ENABLE_WPE_HTML_RENDERER)
-        if (looksLikeHtmlFile(path)) return errorResponse("background HTML media is not supported in this build");
+        if (looksLikeHtmlFile(path)) return loggedErrorResponse("background HTML media is not supported in this build");
 #endif
 
     } else if (key == "pause.image") {
-        if (value.type != JsonValue::Type::String) return errorResponse("invalid value type");
-        if (!isSafeRelativePath(value.text)) return errorResponse("invalid relative image path");
+        if (value.type != JsonValue::Type::String) return loggedErrorResponse("invalid value type");
+        if (!isSafeRelativePath(value.text)) return loggedErrorResponse("invalid relative image path");
         updated.pauseImagePath = value.text;
         const std::string path = joinPath(updated.pauseImageFolder, updated.pauseImagePath);
-        if (!fileExists(path)) return errorResponse("pause.image cannot be read");
+        if (!fileExists(path)) return loggedErrorResponse("pause.image cannot be read");
 #if !defined(JON_ENABLE_WPE_HTML_RENDERER)
-        if (looksLikeHtmlFile(path)) return errorResponse("pause HTML media is not supported in this build");
+        if (looksLikeHtmlFile(path)) return loggedErrorResponse("pause HTML media is not supported in this build");
 #endif
     } else if (key == "pause.textColor") {
-        if (value.type != JsonValue::Type::String) return errorResponse("invalid value type");
-        if (!parseRgbaHexColor(value.text, updated.pauseImageTextColor)) return errorResponse("invalid value");
+        if (value.type != JsonValue::Type::String) return loggedErrorResponse("invalid value type");
+        if (!parseRgbaHexColor(value.text, updated.pauseImageTextColor)) return loggedErrorResponse("invalid value");
     } else if (key == "pause.textPosition") {
-        if (value.type != JsonValue::Type::String) return errorResponse("invalid value type");
-        if (!parsePosition(value.text, updated.pauseImageTextPosition)) return errorResponse("invalid value");
+        if (value.type != JsonValue::Type::String) return loggedErrorResponse("invalid value type");
+        if (!parsePosition(value.text, updated.pauseImageTextPosition)) return loggedErrorResponse("invalid value");
     } else if (key == "pause.textSize") {
-        if (value.type != JsonValue::Type::Number) return errorResponse("invalid value type");
-        if (value.number < 0.1 || value.number > 10.0) return errorResponse("invalid value");
+        if (value.type != JsonValue::Type::Number) return loggedErrorResponse("invalid value type");
+        if (value.number < 0.1 || value.number > 10.0) return loggedErrorResponse("invalid value");
         updated.pauseImageTextSize = value.number;
     } else if (key == "pause.font") {
-        if (value.type != JsonValue::Type::String) return errorResponse("invalid value type");
-        if (!parsePauseFont(value.text)) return errorResponse("invalid value");
+        if (value.type != JsonValue::Type::String) return loggedErrorResponse("invalid value type");
+        if (!parsePauseFont(value.text)) return loggedErrorResponse("invalid value");
         updated.pauseImageFont = value.text;
     } else if (key == "background_overlay_color" || key == "background.overlayColor") {
-        if (value.type != JsonValue::Type::String) return errorResponse("invalid value type");
-        if (!parseColor(value.text, updated.backgroundOverlayColor)) return errorResponse("invalid value");
+        if (value.type != JsonValue::Type::String) return loggedErrorResponse("invalid value type");
+        if (!parseColor(value.text, updated.backgroundOverlayColor)) return loggedErrorResponse("invalid value");
     } else if (key == "no_mask" || key == "runtime.noMask" || key == "no_overlay" || key == "runtime.noOverlay"
         || key == "pause.enabled" || key == "pause.showStatusText"
         || key == "background.loopIfVideo" || key == "pause.loopIfVideo") {
-        if (value.type != JsonValue::Type::Boolean) return errorResponse("invalid value type");
+        if (value.type != JsonValue::Type::Boolean) return loggedErrorResponse("invalid value type");
         if (key == "no_mask" || key == "runtime.noMask") updated.noMask = value.boolean;
         else if (key == "no_overlay" || key == "runtime.noOverlay") updated.noOverlay = value.boolean;
         else if (key == "pause.enabled") updated.pauseImageEnabled = value.boolean;
@@ -590,13 +596,14 @@ std::string IPCServer::handleLine(const std::string& line)
         else if (key == "background.loopIfVideo") updated.backgroundLoopIfVideo = value.boolean;
         else updated.pauseLoopIfVideo = value.boolean;
     } else if (key == "camera.enabled") {
-        if (value.type != JsonValue::Type::Boolean) return errorResponse("invalid value type");
+        if (value.type != JsonValue::Type::Boolean) return loggedErrorResponse("invalid value type");
         updated.cameraEnabled = value.boolean;
     }
     const std::string configError = validateRuntimeConfig(updated);
     if (!configError.empty()) {
-        return errorResponse(configError);
+        return loggedErrorResponse(configError);
     }
     runtimeState_.updateConfig(updated);
+    LOG_INFO("IPC set " << key << " = " << valueJson(updated, key, benchmark));
     return "{\"ok\":true}\n";
 }

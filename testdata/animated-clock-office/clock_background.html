@@ -1,0 +1,158 @@
+
+
+
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Büro mit Uhr</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    html, body {
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+    }
+
+    body {
+      background-image: url('background_office_with_clock.jpg');
+      background-size: cover;
+      background-position: center center;
+      background-repeat: no-repeat;
+    }
+
+    canvas {
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      pointer-events: none;
+    }
+  </style>
+</head>
+<body>
+  <canvas id="clockCanvas"></canvas>
+
+  <script>
+    const canvas = document.getElementById('clockCanvas');
+    const ctx = canvas.getContext('2d');
+
+    // Original image dimensions (reference for clock position)
+    const IMG_W = 1456;
+    const IMG_H = 816;
+
+    // Clock center in original image coordinates
+    const CLOCK_X_REF = 1162;
+    const CLOCK_Y_REF = 225;
+
+    // Hand lengths in original image pixels
+    const MINUTE_LEN = 75;
+    const HOUR_LEN = 50;
+    const SECOND_LEN = 77;
+
+    function resize() {
+      canvas.width = window.innerWidth;
+      canvas.height = window.innerHeight;
+    }
+
+    function getScale() {
+      const scaleX = canvas.width / IMG_W;
+      const scaleY = canvas.height / IMG_H;
+
+      // background-size: cover means we use the larger scale
+      const scale = Math.max(scaleX, scaleY);
+
+      // Offset so image is centered
+      const offsetX = (canvas.width - IMG_W * scale) / 2;
+      const offsetY = (canvas.height - IMG_H * scale) / 2;
+
+      return {
+        scale,
+        cx: CLOCK_X_REF * scale + offsetX,
+        cy: CLOCK_Y_REF * scale + offsetY,
+        minuteLen: MINUTE_LEN * scale,
+        hourLen: HOUR_LEN * scale,
+        secondLen: SECOND_LEN * scale,
+      };
+    }
+
+    function drawHand(ctx, angle, length, width, color, lineCap = 'round') {
+      ctx.save();
+      ctx.rotate(angle);
+      ctx.beginPath();
+      ctx.moveTo(0, 0);
+      ctx.lineTo(0, -length);
+      ctx.strokeStyle = color;
+      ctx.lineWidth = width;
+      ctx.lineCap = lineCap;
+      ctx.shadowColor = 'rgba(0,0,0,0.35)';
+      ctx.shadowBlur = 4;
+      ctx.shadowOffsetX = 1;
+      ctx.shadowOffsetY = 1;
+      ctx.stroke();
+      ctx.restore();
+    }
+
+    function drawClock() {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+      const { scale, cx, cy, minuteLen, hourLen, secondLen } = getScale();
+
+      const now = new Date();
+      const hours = now.getHours() % 12;
+      const minutes = now.getMinutes();
+      const seconds = now.getSeconds();
+      const millis = now.getMilliseconds();
+
+      // Sekunde ruckartig (kein millis), Minuten und Stunden laufen weich
+      const secAngle   = seconds / 60 * Math.PI * 2;
+      const minAngle   = (minutes + seconds / 60) / 60 * Math.PI * 2;
+      const hourAngle  = (hours + minutes / 60) / 12 * Math.PI * 2;
+
+      const handWidth = Math.max(1.5, 3 * scale);
+      const secWidth  = Math.max(1, 1.5 * scale);
+
+      ctx.save();
+      ctx.translate(cx, cy);
+
+      // Hour hand
+      drawHand(ctx, hourAngle, hourLen, handWidth * 1.4, 'rgba(255,255,255,0.95)');
+
+      // Minute hand
+      drawHand(ctx, minAngle, minuteLen, handWidth, 'rgba(255,255,255,0.95)');
+
+      // Second hand (slightly thinner, slight red tint to stay readable)
+      drawHand(ctx, secAngle, secondLen, secWidth, 'rgba(255,255,255,0.9)');
+
+      // Center dot
+      ctx.beginPath();
+      ctx.arc(0, 0, Math.max(2, 3 * scale), 0, Math.PI * 2);
+      ctx.fillStyle = 'white';
+      ctx.shadowColor = 'rgba(0,0,0,0.4)';
+      ctx.shadowBlur = 3;
+      ctx.fill();
+
+      ctx.restore();
+    }
+
+    function tick() {
+      drawClock();
+      requestAnimationFrame(tick);
+    }
+
+    window.addEventListener('resize', () => {
+      resize();
+    });
+
+    resize();
+    tick();
+  </script>
+</body>
+</html>

@@ -96,6 +96,9 @@ struct MediaFile {
     std::string path;
     std::time_t mtime = 0;
     cv::Size htmlSize;
+    std::chrono::steady_clock::time_point videoStartedAt;
+    double videoFps = 0.0;
+    double videoFrameCount = 0.0;
     bool loop = false;
     bool isVideo = false;
     bool isHtml = false;
@@ -110,6 +113,9 @@ struct MediaFile {
         path.clear();
         mtime = 0;
         htmlSize = {};
+        videoStartedAt = {};
+        videoFps = 0.0;
+        videoFrameCount = 0.0;
         isVideo = false;
         isHtml = false;
         warnedFrameFailure = false;
@@ -136,10 +142,11 @@ struct MediaFile {
             html = std::make_unique<HtmlMediaRenderer>();
             std::string error;
             if (!html->load(nextPath, renderSize, error)) {
-                LOG_WARNING("Cannot load " << label << " HTML media: " << error);
+                LOG_ERROR("Cannot load " << label << " HTML media: " << error);
                 html.reset();
                 return false;
             }
+            LOG_INFO("Loaded " << label << " HTML media: " << nextPath);
             isHtml = true;
             htmlSize = renderSize;
             return true;
@@ -147,14 +154,20 @@ struct MediaFile {
 
         image = cv::imread(nextPath, cv::IMREAD_COLOR);
         if (!image.empty()) {
+            LOG_INFO("Loaded " << label << " image media: " << nextPath);
             return true;
         }
 
         video.open(nextPath);
         if (!video.isOpened()) {
-            LOG_WARNING("Cannot read " << label << " media: " << nextPath);
+            LOG_ERROR("Cannot load " << label << " media: " << nextPath);
             return false;
         }
+        videoFps = video.get(cv::CAP_PROP_FPS);
+        videoFrameCount = video.get(cv::CAP_PROP_FRAME_COUNT);
+        videoStartedAt = std::chrono::steady_clock::now();
+        LOG_INFO("Loaded " << label << " video media: " << nextPath
+            << " fps=" << videoFps << " frames=" << videoFrameCount);
         isVideo = true;
         return true;
     }
@@ -176,9 +189,24 @@ struct MediaFile {
             }
             return false;
         }
+        if (videoFps > 0.0 && videoFrameCount > 0.0) {
+            const auto elapsed = std::chrono::steady_clock::now() - videoStartedAt;
+            double targetFrame = std::chrono::duration<double>(elapsed).count() * videoFps;
+            if (loop) {
+                targetFrame = std::fmod(targetFrame, videoFrameCount);
+            } else if (targetFrame >= videoFrameCount) {
+                if (!lastVideoFrame.empty()) {
+                    frame = lastVideoFrame;
+                    return true;
+                }
+                targetFrame = videoFrameCount - 1.0;
+            }
+            video.set(cv::CAP_PROP_POS_FRAMES, std::max(0.0, targetFrame));
+        }
         if (!video.read(lastVideoFrame) || lastVideoFrame.empty()) {
             if (loop) {
                 video.set(cv::CAP_PROP_POS_FRAMES, 0.0);
+                videoStartedAt = std::chrono::steady_clock::now();
                 if (video.read(lastVideoFrame) && !lastVideoFrame.empty()) {
                     frame = lastVideoFrame;
                     return true;
@@ -239,7 +267,10 @@ cv::Mat makeStatusFrame(
                     LOG_WARNING("Cannot read pause media frame: " << resolvedPath);
                 }
                 buffers->pauseMedia.warnedFrameFailure = true;
-                buffers->scaledPauseImage.release();
+                if (!buffers->scaledPauseImage.empty()) {
+                    cv::Mat frame = buffers->scaledPauseImage.clone();
+                    return frame;
+                }
             } else {
                 buffers->pauseMedia.warnedFrameFailure = false;
                 cv::Mat frame;

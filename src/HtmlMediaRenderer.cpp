@@ -219,7 +219,6 @@ struct HtmlMediaRenderer::Impl {
             cv::Mat rgba(height, width, CV_8UC4);
             glViewport(0, 0, width, height);
             glReadPixels(0, 0, width, height, GL_RGBA, GL_UNSIGNED_BYTE, rgba.data);
-            cv::flip(rgba, rgba, 0);
             cv::Mat bgr;
             cv::cvtColor(rgba, bgr, cv::COLOR_RGBA2BGR);
             std::lock_guard<std::mutex> lock(frameMutex);
