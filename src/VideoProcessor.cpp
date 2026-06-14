@@ -287,7 +287,7 @@ cv::Mat makeStatusFrame(
         }
     };
 
-    if (config != nullptr && buffers != nullptr && !config->pauseImagePath.empty()) {
+    if (config != nullptr && buffers != nullptr && config->pauseImageEnabled && !config->pauseImagePath.empty()) {
         const std::string resolvedPath = mediaPath(config->pauseImageFolder, config->pauseImagePath);
         if (!buffers->pauseMedia.ensureLoaded(resolvedPath, config->pauseLoopIfVideo, size, "pause")) {
             buffers->scaledPauseImage.release();
@@ -330,6 +330,8 @@ cv::Mat makeStatusFrame(
                 return frame;
             }
         }
+    } else if (config != nullptr && !config->pauseImageEnabled) {
+        logGeneratedStatusReason("pause.enabled=false");
     } else if (config != nullptr && config->pauseImagePath.empty()) {
         logGeneratedStatusReason("pause.image is empty");
     } else {
@@ -978,15 +980,6 @@ int VideoProcessor::run()
             cameraEnableStartedAt = {};
             cameraWasDisabledByRuntime = true;
             frame = makeStatusFrame(outputSize, "Camera OFF", &runtimeConfig, &statusFrameBuffers);
-            syntheticFrame = true;
-            std::this_thread::sleep_for(std::chrono::milliseconds(33));
-            readOk = true;
-        } else if (runtimeConfig.pauseImageEnabled) {
-            if (captureActive) {
-                lowLatencyCapture.stop();
-                captureActive = false;
-            }
-            frame = makeStatusFrame(outputSize, "Paused", &runtimeConfig, &statusFrameBuffers);
             syntheticFrame = true;
             std::this_thread::sleep_for(std::chrono::milliseconds(33));
             readOk = true;

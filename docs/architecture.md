@@ -104,7 +104,7 @@ flowchart TD
     N --> I
 ```
 
-For camera input, failed startup open or USB disconnect does not terminate the process. The pipeline renders a `Camera DISCONNECTED` test image and periodically attempts to reopen the configured V4L2 device after the device node has been visible for a short settle period. Reconnect is accepted after the reopened V4L2 device delivers a valid frame. If runtime IPC sets `camera.enabled=false`, camera capture is stopped and a `Camera OFF` test image is rendered. When it is enabled again, `Camera connecting...` is rendered during the reconnect grace period before falling back to `Camera DISCONNECTED`.
+For camera input, failed startup open or USB disconnect does not terminate the process. The pipeline renders a `Camera DISCONNECTED` status screen and periodically attempts to reopen the configured V4L2 device after the device node has been visible for a short settle period. Reconnect is accepted after the reopened V4L2 device delivers a valid frame. If runtime IPC sets `camera.enabled=false`, camera capture is stopped and a `Camera OFF` status screen is rendered. When it is enabled again, `Camera connecting...` is rendered during the reconnect grace period before falling back to `Camera DISCONNECTED`. These status screens use the generated test pattern by default; when `pause.enabled=true`, they use the configured pause media instead.
 
 For DRM/KMS output, a missing display connector at service startup does not terminate the process. The display backend is retried periodically, and camera capture is delayed until display initialization succeeds.
 
