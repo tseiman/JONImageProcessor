@@ -25,6 +25,7 @@ enum class MaskMorphologyMode {
 };
 
 enum class BackgroundEffect {
+    None,
     Color,
     Blur,
     Image

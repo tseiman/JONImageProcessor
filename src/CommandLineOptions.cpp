@@ -90,7 +90,7 @@ const std::vector<OptionDefinition>& optionDefinitions()
         {OptionMaskMorphology, 0, "mask-morphology", required_argument, "mode", "Mask morphology: off, light, or strong", "light"},
         {OptionCameraFormat, 0, "camera-format", required_argument, "format", "Camera pixel format: MJPG or YUYV", "MJPG"},
         {OptionCameraConnectTimeout, 0, "camera-connect-timeout", required_argument, "seconds", "Seconds to show Camera connecting before disconnected status", "10"},
-        {OptionBackgroundEffect, 0, "background-effect", required_argument, "effect", "Background effect: color, blur, or image", "color"},
+        {OptionBackgroundEffect, 0, "background-effect", required_argument, "effect", "Background effect: none, color, blur, or image", "color"},
         {OptionBackgroundImage, 0, "background-image", required_argument, "path", "Image/video/html file for --background-effect image", ""},
         {OptionBackgroundImageFolder, 0, "background-image-folder", required_argument, "path", "Base folder for background images set through IPC", "."},
         {OptionBackgroundLoopIfVideo, 0, "background-loop-if-video", required_argument, "true|false", "Loop background file when it is a video", "false"},
@@ -103,8 +103,8 @@ const std::vector<OptionDefinition>& optionDefinitions()
         {OptionPauseImageTextPosition, 0, "pause-image-text-position", required_argument, "XxY", "Status text position on pause image", "auto"},
         {OptionPauseImageTextSize, 0, "pause-image-text-size", required_argument, "value", "Status text size on pause image", "1.6"},
         {OptionPauseImageFont, 0, "pause-image-font", required_argument, "font", "Pause image font: plain, simplex, duplex, complex, triplex, complex-small, script-simplex, script-complex", "simplex"},
-        {OptionBackgroundOverlayColor, 0, "background-overlay-color", required_argument, "R,G,B", "Background color for --background-effect color; ignored for blur/image", "0,255,0"},
-        {OptionBackgroundOverlayAlpha, 0, "background-overlay-alpha", required_argument, "0.0..1.0", "Background alpha for --background-effect color; ignored for blur/image", "0.35"},
+        {OptionBackgroundOverlayColor, 0, "background-overlay-color", required_argument, "R,G,B", "Background color for --background-effect color; ignored for none/blur/image", "0,255,0"},
+        {OptionBackgroundOverlayAlpha, 0, "background-overlay-alpha", required_argument, "0.0..1.0", "Background alpha for --background-effect color; ignored for none/blur/image", "0.35"},
         {OptionBlurStrength, 0, "blur-strength", required_argument, "value", "Blur strength for --background-effect blur", "15"},
         {OptionDisplayBackend, 0, "display-backend", required_argument, "backend", "Display backend: highgui or drm", "highgui"},
         {OptionIpcSocket, 0, "ipc-socket", required_argument, "path", "Unix domain socket path, or 'none' to disable IPC", "/tmp/jonimageprocessor.sock"},
@@ -422,6 +422,10 @@ bool parseCameraFormat(const char* value, CameraFormat& format, std::string& err
 bool parseBackgroundEffect(const char* value, BackgroundEffect& effect, std::string& error)
 {
     const std::string parsed(value);
+    if (parsed == "none") {
+        effect = BackgroundEffect::None;
+        return true;
+    }
     if (parsed == "color") {
         effect = BackgroundEffect::Color;
         return true;
@@ -434,7 +438,7 @@ bool parseBackgroundEffect(const char* value, BackgroundEffect& effect, std::str
         effect = BackgroundEffect::Image;
         return true;
     }
-    error = "Invalid background effect: " + parsed + " (allowed: color, blur, image)";
+    error = "Invalid background effect: " + parsed + " (allowed: none, color, blur, image)";
     return false;
 }
 
@@ -903,6 +907,8 @@ std::string maskMorphologyModeToString(MaskMorphologyMode mode)
 std::string backgroundEffectToString(BackgroundEffect effect)
 {
     switch (effect) {
+    case BackgroundEffect::None:
+        return "none";
     case BackgroundEffect::Color:
         return "color";
     case BackgroundEffect::Blur:

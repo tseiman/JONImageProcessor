@@ -405,7 +405,8 @@ bool applyConfig(const Json& root, ProcessorConfig& config, ConfigLoadResult& re
         std::string effect;
         if (!readString(*background, "effect", effect, error)) return false;
         if (!effect.empty()) {
-            if (effect == "color") config.backgroundEffect = BackgroundEffect::Color;
+            if (effect == "none") config.backgroundEffect = BackgroundEffect::None;
+            else if (effect == "color") config.backgroundEffect = BackgroundEffect::Color;
             else if (effect == "blur") config.backgroundEffect = BackgroundEffect::Blur;
             else if (effect == "image") config.backgroundEffect = BackgroundEffect::Image;
             else { error = "Invalid background.effect"; return false; }

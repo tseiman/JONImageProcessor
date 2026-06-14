@@ -1128,13 +1128,15 @@ int VideoProcessor::run()
                 if (!hasBackgroundFrame) {
                     outputFrame = resized;
                 }
-            } else {
+            } else if (runtimeConfig.backgroundEffect == BackgroundEffect::Color) {
                 BenchmarkScope timer(benchmark, BenchmarkStage::Overlay);
                 outputFrame = applyBackgroundOverlay(
                     resized,
                     outputMask,
                     runtimeConfig.backgroundOverlayColor,
                     runtimeConfig.backgroundOverlayAlpha);
+            } else {
+                outputFrame = resized;
             }
         } else {
             outputFrame = resized;

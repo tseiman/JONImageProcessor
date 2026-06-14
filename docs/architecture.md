@@ -99,7 +99,7 @@ flowchart TD
     I --> J[Resize to processing size]
     J --> K[TensorRT mask inference]
     K --> L[Mask smoothing and morphology]
-    L --> M[Apply background blur, color, or image]
+    L --> M[Apply background effect: none, blur, color, or image]
     M --> N[Render frame through DRM/KMS]
     N --> I
 ```
@@ -110,7 +110,7 @@ For DRM/KMS output, a missing display connector at service startup does not term
 
 For `--input <path>`, `OpenCvFileCaptureBackend` is used instead of V4L2 and frames are processed sequentially. For `--display-backend highgui`, `OpenCvDisplayBackend` replaces the DRM/KMS backend.
 
-For `--background-effect image`, the image is loaded once at startup and resized to the processed output frame size before compositing.
+For `--background-effect none`, the processed camera frame is passed through without background replacement. For `--background-effect image`, the media file is loaded and resized to the processed output frame size before compositing.
 
 ## Ownership Boundaries
 

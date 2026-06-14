@@ -37,7 +37,7 @@ Kept runtime features:
 - TensorRT mask backend.
 - DRM/KMS display backend.
 - OpenCV HighGUI display backend.
-- Background effects: `blur`, `color`, and `image`.
+- Background effects: `none`, `blur`, `color`, and `image`.
 - Benchmark and verbose diagnostics.
 
 Removed runtime features:
@@ -303,7 +303,7 @@ journalctl -u JONImageProcessor.service -f
 - `--mask-threshold <0.0..1.0>`: foreground threshold. Default: `0.5`.
 - `--mask-smoothing <0.0..1.0>`: temporal mask smoothing. Default: `0.65`.
 - `--mask-morphology <off|light|strong>`: mask cleanup mode. Default: `light`.
-- `--background-effect <color|blur|image>`: background effect. Default: `color`.
+- `--background-effect <none|color|blur|image>`: background effect. `none` passes the camera frame through without background replacement. Default: `color`.
 - `--background-image <path>`: image, video, or HTML file used by `--background-effect image`. JPEG/PNG are loaded as static images; video files are decoded with OpenCV; HTML/CSS/JavaScript is rendered through WPE WebKit when the binary was built with WPE support.
 - `--background-image-folder <path>`: base folder for background images selected through IPC. Default: `.`.
 - `--background-loop-if-video <true|false>`: loop the background media when it is a video. Default: `false`.
@@ -316,8 +316,8 @@ journalctl -u JONImageProcessor.service -f
 - `--pause-image-text-position <XxY>`: status text position on the pause image. Use `auto` for the default centered position. Default: `auto`.
 - `--pause-image-text-size <value>`: status text size on the pause image. Default: `1.6`.
 - `--pause-image-font <font>`: status text font on the pause image. Supported: `plain`, `simplex`, `duplex`, `complex`, `triplex`, `complex-small`, `script-simplex`, `script-complex`. Default: `simplex`.
-- `--background-overlay-color <R,G,B>`: color used by `--background-effect color`. Ignored for blur/image. Default: `0,255,0`.
-- `--background-overlay-alpha <0.0..1.0>`: alpha used by `--background-effect color`. Ignored for blur/image. Default: `0.35`.
+- `--background-overlay-color <R,G,B>`: color used by `--background-effect color`. Ignored for none/blur/image. Default: `0,255,0`.
+- `--background-overlay-alpha <0.0..1.0>`: alpha used by `--background-effect color`. Ignored for none/blur/image. Default: `0.35`.
 - `--blur-strength <1..100>`: blur strength used by `--background-effect blur`. Default: `15`.
 - `--display-backend <highgui|drm>`: display backend. Default: `highgui`.
 - `--fullscreen`: request fullscreen display output.
@@ -460,7 +460,7 @@ Writable keys:
 - `segmentation.threshold`: float `0.0..1.0`
 - `segmentation.smoothing`: float `0.0..1.0`
 - `segmentation.morphology`: `off`, `light`, `strong`
-- `background.effect`: `color`, `blur`, `image`
+- `background.effect`: `none`, `color`, `blur`, `image`
 - `background.image`: relative image name under `background.folder` when set through IPC.
 - `background.folder`: read-only base folder used when `background.image` is set through IPC.
 - `background.loopIfVideo`: boolean. Loop `background.image` when OpenCV detects it as video.

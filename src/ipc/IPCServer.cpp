@@ -289,7 +289,8 @@ bool setStringEnum(const std::string& value, ProcessorConfig& config, const std:
         return true;
     }
     if (key == "background_effect" || key == "background.effect") {
-        if (value == "color") config.backgroundEffect = BackgroundEffect::Color;
+        if (value == "none") config.backgroundEffect = BackgroundEffect::None;
+        else if (value == "color") config.backgroundEffect = BackgroundEffect::Color;
         else if (value == "blur") config.backgroundEffect = BackgroundEffect::Blur;
         else if (value == "image") config.backgroundEffect = BackgroundEffect::Image;
         else return false;
