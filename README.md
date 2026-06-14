@@ -67,7 +67,7 @@ Pull the NVIDIA JetPack cross-compile container:
 docker pull nvcr.io/nvidia/jetpack-linux-aarch64-crosscompile-x86:6.1
 ```
 
-Create a Jetson sysroot on the build host. The sysroot must contain the Jetson target libraries and headers, including OpenCV, CUDA, TensorRT, DRM/KMS, GBM, EGL, and GLES:
+Create a Jetson sysroot on the build host. The sysroot must contain the Jetson target libraries and headers, including OpenCV, CUDA, TensorRT, DRM/KMS, GBM, EGL, GLES, and optionally WPE WebKit for HTML media:
 
 ```bash
 mkdir -p "$HOME/sysroots/orin-nano" && rsync -aHAX --numeric-ids tseiman@jon:/usr "$HOME/sysroots/orin-nano/" && rsync -aHAX --numeric-ids tseiman@jon:/lib "$HOME/sysroots/orin-nano/" && rsync -aHAX --numeric-ids tseiman@jon:/opt "$HOME/sysroots/orin-nano/"
@@ -79,6 +79,12 @@ Some protected system files may fail with rsync permission errors. That is accep
 test -d "$HOME/sysroots/orin-nano/usr/include" && test -d "$HOME/sysroots/orin-nano/usr/lib/aarch64-linux-gnu" && find "$HOME/sysroots/orin-nano/usr" -name OpenCVConfig.cmake -o -name opencv4.pc && find "$HOME/sysroots/orin-nano/usr" -name NvInfer.h
 ```
 
+For HTML background or pause media, install WPE runtime and development files on the Jetson first and sync the sysroot again. The runtime libraries are needed to run; the development files are needed because the sysroot is used for cross-compilation:
+
+```bash
+sudo apt-get install libwpewebkit-1.1-0 libwpewebkit-1.1-dev libwpebackend-fdo-1.0-1 libwpebackend-fdo-1.0-dev
+```
+
 ### Jetson Target
 
 Install or verify on the Jetson:
@@ -88,6 +94,7 @@ Install or verify on the Jetson:
 - CUDA/TensorRT runtime libraries.
 - V4L2 camera access.
 - DRM/KMS access through `/dev/dri/card*`.
+- WPE WebKit runtime libraries if HTML media files are used.
 - The TensorRT mask model under `~/JONImageProcessor/models/`.
 
 For direct DRM/KMS fullscreen output, stop the graphical display manager before running the DRM backend:
@@ -122,7 +129,7 @@ Build the AArch64 Jetson binary from the build host:
 ENABLE_TENSORRT_MASK=ON ENABLE_DRM_DISPLAY=ON JETSON_SYSROOT="$HOME/sysroots/orin-nano" ./scripts/build-jetson-cross.sh
 ```
 
-The output binary is:
+The cross-build script installs WPE development packages inside the container when available. HTML support is only enabled when the Jetson sysroot also contains the matching AArch64 WPE WebKit and WPEBackend-fdo headers, libraries, and pkg-config files. The output binary is:
 
 ```bash
 build-jetson-cross/JONImageProcessor
@@ -297,10 +304,10 @@ journalctl -u JONImageProcessor.service -f
 - `--mask-smoothing <0.0..1.0>`: temporal mask smoothing. Default: `0.65`.
 - `--mask-morphology <off|light|strong>`: mask cleanup mode. Default: `light`.
 - `--background-effect <color|blur|image>`: background effect. Default: `color`.
-- `--background-image <path>`: image or video file used by `--background-effect image`. JPEG/PNG are loaded as static images; video files are decoded with OpenCV. HTML files are currently rejected unless a future HTML renderer is built in.
+- `--background-image <path>`: image, video, or HTML file used by `--background-effect image`. JPEG/PNG are loaded as static images; video files are decoded with OpenCV; HTML/CSS/JavaScript is rendered through WPE WebKit when the binary was built with WPE support.
 - `--background-image-folder <path>`: base folder for background images selected through IPC. Default: `.`.
 - `--background-loop-if-video <true|false>`: loop the background media when it is a video. Default: `false`.
-- `--pause-image <path>`: image or video file used for camera status screens. JPEG/PNG are loaded as static images; video files are decoded with OpenCV. HTML files are currently rejected unless a future HTML renderer is built in.
+- `--pause-image <path>`: image, video, or HTML file used for camera status screens. JPEG/PNG are loaded as static images; video files are decoded with OpenCV; HTML/CSS/JavaScript is rendered through WPE WebKit when the binary was built with WPE support.
 - `--pause-image-folder <path>`: base folder for pause images selected through IPC. Default: `.`.
 - `--pause-loop-if-video <true|false>`: loop the pause media when it is a video. Default: `false`.
 - `--pause-image-enabled <true|false>`: use pause image instead of generated camera status screens. Default: `false`.
@@ -406,7 +413,7 @@ Supported JSON groups:
 }
 ```
 
-All fields are optional. Unknown JSON fields log warnings and are ignored. Invalid JSON, invalid types, and invalid values stop startup with an error. JSON syntax errors include line and column information where possible. `--test-config` warns about missing referenced files. Normal startup fails if an active segmentation model, background media, pause media, background image folder, or pause image folder does not exist. Runtime IPC updates for image paths validate that the file can be read and return a JSON error if not. IPC only accepts relative image names under `background.folder` or `pause.folder`; absolute paths and `..` traversal are rejected. `background.loopIfVideo` and `pause.loopIfVideo` loop media files when OpenCV detects them as video. HTML media files are detected from file content and rejected in the current build because no WPE offscreen renderer is implemented yet. `camera.connectTimeoutSeconds` controls how long `Camera connecting...` is shown after runtime camera re-enable before falling back to `Camera DISCONNECTED`. `pause.enabled` switches camera status screens from the generated pattern to `pause.image`; `pause.showStatusText` controls whether the status label is rendered over that image. `pause.textColor` uses `RRGGBBAA` hex, for example `ffffff0a`. `pause.textPosition` uses `XxY` or `auto`; `pause.textSize` controls the rendered text scale. `pause.font` uses a fixed OpenCV Hershey font name, not a dynamic operating-system font list. `diagnostics.benchmark` enables benchmark collection for IPC without passing `--benchmark`.
+All fields are optional. Unknown JSON fields log warnings and are ignored. Invalid JSON, invalid types, and invalid values stop startup with an error. JSON syntax errors include line and column information where possible. `--test-config` warns about missing referenced files. Normal startup fails if an active segmentation model, background media, pause media, background image folder, or pause image folder does not exist. Runtime IPC updates for image paths validate that the file can be read and return a JSON error if not. IPC only accepts relative image names under `background.folder` or `pause.folder`; absolute paths and `..` traversal are rejected. `background.loopIfVideo` and `pause.loopIfVideo` loop media files when OpenCV detects them as video. HTML media files are detected from file content. They require a binary built with WPE WebKit and WPEBackend-fdo support; otherwise startup, `--test-config`, and IPC updates reject them clearly. `camera.connectTimeoutSeconds` controls how long `Camera connecting...` is shown after runtime camera re-enable before falling back to `Camera DISCONNECTED`. `pause.enabled` switches camera status screens from the generated pattern to `pause.image`; `pause.showStatusText` controls whether the status label is rendered over that image. `pause.textColor` uses `RRGGBBAA` hex, for example `ffffff0a`. `pause.textPosition` uses `XxY` or `auto`; `pause.textSize` controls the rendered text scale. `pause.font` uses a fixed OpenCV Hershey font name, not a dynamic operating-system font list. `diagnostics.benchmark` enables benchmark collection for IPC without passing `--benchmark`.
 
 ## Runtime Behavior
 

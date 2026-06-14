@@ -30,6 +30,20 @@ find "$HOME/sysroots/orin-nano/usr" "$HOME/sysroots/orin-nano/lib" -name NvInfer
 find "$HOME/sysroots/orin-nano/usr" "$HOME/sysroots/orin-nano/lib" -name xf86drmMode.h -o -name gbm.h -o -name 'libdrm.so*' -o -name 'libgbm.so*'
 ```
 
+For HTML background or pause media, install WPE runtime and development packages on the Jetson and sync the sysroot again:
+
+```bash
+sudo apt-get install libwpewebkit-1.1-0 libwpewebkit-1.1-dev libwpebackend-fdo-1.0-1 libwpebackend-fdo-1.0-dev
+```
+
+If the Jetson distribution only provides `libwpewebkit-1.0-*`, use the matching `1.0` package names instead.
+
+Then verify the sysroot contains WPE target files:
+
+```bash
+find "$HOME/sysroots/orin-nano/usr" "$HOME/sysroots/orin-nano/lib" -name 'wpe-webkit-*.pc' -o -name 'wpebackend-fdo-1.0.pc' -o -name 'libWPEWebKit*.so*' -o -name 'libWPEBackend-fdo-1.0.so*'
+```
+
 ## Build
 
 From the repository root on the build host:
@@ -37,6 +51,8 @@ From the repository root on the build host:
 ```bash
 ENABLE_TENSORRT_MASK=ON ENABLE_DRM_DISPLAY=ON JETSON_SYSROOT="$HOME/sysroots/orin-nano" ./scripts/build-jetson-cross.sh
 ```
+
+The script installs WPE development packages inside the container by default. CMake still uses only the AArch64 files from `JETSON_SYSROOT` for linking, so HTML support is enabled only when the synced Jetson sysroot contains WPE WebKit and WPEBackend-fdo target files.
 
 The result is:
 

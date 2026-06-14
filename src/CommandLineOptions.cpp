@@ -303,9 +303,11 @@ void warnMissingConfiguredFiles(const ProcessorConfig& config)
     if (config.backgroundEffect == BackgroundEffect::Image && !backgroundPath.empty() && !fileExists(backgroundPath)) {
         LOG_WARNING("Configured background media does not exist: " << backgroundPath);
     }
+#if !defined(JON_ENABLE_WPE_HTML_RENDERER)
     if (config.backgroundEffect == BackgroundEffect::Image && !backgroundPath.empty() && looksLikeHtmlFile(backgroundPath)) {
         LOG_WARNING("Configured background HTML media is not supported in this build: " << backgroundPath);
     }
+#endif
     if (!directoryExists(config.backgroundImageFolder)) {
         LOG_WARNING("Configured background image folder does not exist: " << config.backgroundImageFolder);
     }
@@ -313,9 +315,11 @@ void warnMissingConfiguredFiles(const ProcessorConfig& config)
     if (config.pauseImageEnabled && !pausePath.empty() && !fileExists(pausePath)) {
         LOG_WARNING("Configured pause media does not exist: " << pausePath);
     }
+#if !defined(JON_ENABLE_WPE_HTML_RENDERER)
     if (config.pauseImageEnabled && !pausePath.empty() && looksLikeHtmlFile(pausePath)) {
         LOG_WARNING("Configured pause HTML media is not supported in this build: " << pausePath);
     }
+#endif
     if (!directoryExists(config.pauseImageFolder)) {
         LOG_WARNING("Configured pause image folder does not exist: " << config.pauseImageFolder);
     }
@@ -332,10 +336,12 @@ bool validateStartupFiles(const ProcessorConfig& config, std::string& error)
         error = "Background media does not exist: " + backgroundPath;
         return false;
     }
+#if !defined(JON_ENABLE_WPE_HTML_RENDERER)
     if (config.backgroundEffect == BackgroundEffect::Image && !backgroundPath.empty() && looksLikeHtmlFile(backgroundPath)) {
         error = "Background HTML media is not supported in this build: " + backgroundPath;
         return false;
     }
+#endif
     if (!directoryExists(config.backgroundImageFolder)) {
         error = "Background image folder does not exist: " + config.backgroundImageFolder;
         return false;
@@ -354,10 +360,12 @@ bool validateStartupFiles(const ProcessorConfig& config, std::string& error)
             error = "Pause media does not exist: " + pausePath;
             return false;
         }
+#if !defined(JON_ENABLE_WPE_HTML_RENDERER)
         if (looksLikeHtmlFile(pausePath)) {
             error = "Pause HTML media is not supported in this build: " + pausePath;
             return false;
         }
+#endif
     }
     return true;
 }
@@ -365,15 +373,19 @@ bool validateStartupFiles(const ProcessorConfig& config, std::string& error)
 bool validateConfiguredMediaTypes(const ProcessorConfig& config, std::string& error)
 {
     const std::string backgroundPath = resolveMediaPath(config.backgroundImageFolder, config.backgroundImagePath);
+#if !defined(JON_ENABLE_WPE_HTML_RENDERER)
     if (config.backgroundEffect == BackgroundEffect::Image && !backgroundPath.empty() && looksLikeHtmlFile(backgroundPath)) {
         error = "Background HTML media is not supported in this build: " + backgroundPath;
         return false;
     }
+#endif
     const std::string pausePath = resolveMediaPath(config.pauseImageFolder, config.pauseImagePath);
+#if !defined(JON_ENABLE_WPE_HTML_RENDERER)
     if (config.pauseImageEnabled && !pausePath.empty() && looksLikeHtmlFile(pausePath)) {
         error = "Pause HTML media is not supported in this build: " + pausePath;
         return false;
     }
+#endif
     return true;
 }
 

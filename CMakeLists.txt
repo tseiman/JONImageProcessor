@@ -13,10 +13,31 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 find_package(OpenCV REQUIRED COMPONENTS core imgproc imgcodecs highgui videoio)
 find_package(PkgConfig QUIET)
 if (PkgConfig_FOUND)
-    pkg_check_modules(WPE_WEBKIT QUIET wpe-webkit-1.1 wpe-webkit-1.0)
+    pkg_check_modules(WPE_HTML_RENDERER QUIET
+        wpe-webkit-1.1
+        wpe-1.0
+        wpebackend-fdo-1.0
+        egl
+        glesv2
+        glib-2.0
+        gobject-2.0
+        gio-2.0
+    )
+    if (NOT WPE_HTML_RENDERER_FOUND)
+        pkg_check_modules(WPE_HTML_RENDERER QUIET
+            wpe-webkit-1.0
+            wpe-1.0
+            wpebackend-fdo-1.0
+            egl
+            glesv2
+            glib-2.0
+            gobject-2.0
+            gio-2.0
+        )
+    endif()
 endif()
-if (WPE_WEBKIT_FOUND)
-    message(STATUS "WPE WebKit development files found, but HTML media rendering is disabled until an offscreen renderer is implemented")
+if (WPE_HTML_RENDERER_FOUND)
+    message(STATUS "WPE WebKit HTML media renderer enabled")
 else()
     message(STATUS "WPE WebKit development files not found; HTML media files will be rejected")
 endif()
@@ -76,6 +97,7 @@ add_executable(JONImageProcessor
     src/DrmKmsDisplayBackend.cpp
     src/Logger.cpp
     src/LowLatencyFrameCapture.cpp
+    src/HtmlMediaRenderer.cpp
     src/ipc/IPCServer.cpp
     src/ShutdownSignal.cpp
     src/TensorRtMaskBackend.cpp
@@ -91,6 +113,13 @@ target_include_directories(JONImageProcessor PRIVATE
 )
 
 target_link_libraries(JONImageProcessor PRIVATE ${OpenCV_LIBS})
+
+if (WPE_HTML_RENDERER_FOUND)
+    target_compile_definitions(JONImageProcessor PRIVATE JON_ENABLE_WPE_HTML_RENDERER=1)
+    target_include_directories(JONImageProcessor PRIVATE ${WPE_HTML_RENDERER_INCLUDE_DIRS})
+    target_link_directories(JONImageProcessor PRIVATE ${WPE_HTML_RENDERER_LIBRARY_DIRS})
+    target_link_libraries(JONImageProcessor PRIVATE ${WPE_HTML_RENDERER_LIBRARIES})
+endif()
 
 if (JON_ENABLE_TENSORRT_MASK)
     find_package(CUDAToolkit REQUIRED)

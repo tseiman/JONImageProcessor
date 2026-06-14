@@ -4,6 +4,7 @@
 #include "CaptureBackendFactory.h"
 #include "DisplayBackendFactory.h"
 #include "DisplayEnvironment.h"
+#include "HtmlMediaRenderer.h"
 #include "ICaptureBackend.h"
 #include "Logger.h"
 #include "LowLatencyFrameCapture.h"
@@ -91,27 +92,35 @@ struct MediaFile {
     cv::Mat image;
     cv::Mat lastVideoFrame;
     cv::VideoCapture video;
+    std::unique_ptr<HtmlMediaRenderer> html;
     std::string path;
     std::time_t mtime = 0;
+    cv::Size htmlSize;
     bool loop = false;
     bool isVideo = false;
+    bool isHtml = false;
+    bool warnedFrameFailure = false;
 
     void release()
     {
         video.release();
+        if (html) html->reset();
         image.release();
         lastVideoFrame.release();
         path.clear();
         mtime = 0;
+        htmlSize = {};
         isVideo = false;
+        isHtml = false;
+        warnedFrameFailure = false;
         loop = false;
     }
 
-    bool ensureLoaded(const std::string& nextPath, bool nextLoop, const std::string& label)
+    bool ensureLoaded(const std::string& nextPath, bool nextLoop, const cv::Size& renderSize, const std::string& label)
     {
         const std::time_t nextMtime = fileMtime(nextPath);
-        if (path == nextPath && mtime == nextMtime && loop == nextLoop) {
-            return !image.empty() || video.isOpened() || !lastVideoFrame.empty();
+        if (path == nextPath && mtime == nextMtime && loop == nextLoop && (!isHtml || htmlSize == renderSize)) {
+            return !image.empty() || video.isOpened() || !lastVideoFrame.empty() || isHtml;
         }
 
         release();
@@ -120,8 +129,20 @@ struct MediaFile {
         loop = nextLoop;
 
         if (looksLikeHtmlFile(nextPath)) {
-            LOG_ERROR("HTML media is not supported in this build: " << nextPath);
-            return false;
+            if (!HtmlMediaRenderer::supported()) {
+                LOG_ERROR("HTML media is not supported in this build: " << nextPath);
+                return false;
+            }
+            html = std::make_unique<HtmlMediaRenderer>();
+            std::string error;
+            if (!html->load(nextPath, renderSize, error)) {
+                LOG_WARNING("Cannot load " << label << " HTML media: " << error);
+                html.reset();
+                return false;
+            }
+            isHtml = true;
+            htmlSize = renderSize;
+            return true;
         }
 
         image = cv::imread(nextPath, cv::IMREAD_COLOR);
@@ -140,6 +161,10 @@ struct MediaFile {
 
     bool read(cv::Mat& frame)
     {
+        if (isHtml && html) {
+            std::string error;
+            return html->render(frame, error);
+        }
         if (!image.empty()) {
             frame = image;
             return true;
@@ -204,16 +229,21 @@ cv::Mat makeStatusFrame(
 {
     if (config != nullptr && buffers != nullptr && config->pauseImageEnabled && !config->pauseImagePath.empty()) {
         const std::string resolvedPath = mediaPath(config->pauseImageFolder, config->pauseImagePath);
-        if (!buffers->pauseMedia.ensureLoaded(resolvedPath, config->pauseLoopIfVideo, "pause")) {
+        if (!buffers->pauseMedia.ensureLoaded(resolvedPath, config->pauseLoopIfVideo, size, "pause")) {
             buffers->scaledPauseImage.release();
         } else {
             cv::Mat pauseImage;
             if (!buffers->pauseMedia.read(pauseImage) || pauseImage.empty()) {
-                LOG_WARNING("Cannot read pause media frame: " << resolvedPath);
+                const bool shouldWarn = !buffers->pauseMedia.isHtml || !buffers->pauseMedia.warnedFrameFailure;
+                if (shouldWarn) {
+                    LOG_WARNING("Cannot read pause media frame: " << resolvedPath);
+                }
+                buffers->pauseMedia.warnedFrameFailure = true;
                 buffers->scaledPauseImage.release();
             } else {
+                buffers->pauseMedia.warnedFrameFailure = false;
                 cv::Mat frame;
-                if (buffers->pauseMedia.isVideo || buffers->scaledPauseImage.size() != size || buffers->scaledPauseImage.type() != CV_8UC3) {
+                if (buffers->pauseMedia.isVideo || buffers->pauseMedia.isHtml || buffers->scaledPauseImage.size() != size || buffers->scaledPauseImage.type() != CV_8UC3) {
                     cv::resize(pauseImage, buffers->scaledPauseImage, size, 0.0, 0.0, cv::INTER_LINEAR);
                 }
                 frame = buffers->scaledPauseImage.clone();
@@ -825,7 +855,7 @@ int VideoProcessor::run()
     MediaFile backgroundMedia;
     if (config_.backgroundEffect == BackgroundEffect::Image && overlayEnabled) {
         const std::string resolvedBackgroundPath = mediaPath(config_.backgroundImageFolder, config_.backgroundImagePath);
-        if (!backgroundMedia.ensureLoaded(resolvedBackgroundPath, config_.backgroundLoopIfVideo, "background")) {
+        if (!backgroundMedia.ensureLoaded(resolvedBackgroundPath, config_.backgroundLoopIfVideo, outputSize, "background")) {
             LOG_ERROR("Cannot read background media: " << resolvedBackgroundPath);
             return ExitRuntimeError;
         }
@@ -1049,13 +1079,13 @@ int VideoProcessor::run()
                     backgroundEffectBuffers);
             } else if (runtimeConfig.backgroundEffect == BackgroundEffect::Image) {
                 const std::string resolvedBackgroundPath = mediaPath(runtimeConfig.backgroundImageFolder, runtimeConfig.backgroundImagePath);
-                if (!backgroundMedia.ensureLoaded(resolvedBackgroundPath, runtimeConfig.backgroundLoopIfVideo, "background")) {
+                if (!backgroundMedia.ensureLoaded(resolvedBackgroundPath, runtimeConfig.backgroundLoopIfVideo, resized.size(), "background")) {
                     LOG_WARNING("Cannot read background media: " << resolvedBackgroundPath);
                     backgroundEffectBuffers.scaledBackgroundImage.release();
                 }
                 cv::Mat backgroundFrame;
                 const bool hasBackgroundFrame = backgroundMedia.read(backgroundFrame) && !backgroundFrame.empty();
-                if (backgroundMedia.isVideo) {
+                if (backgroundMedia.isVideo || backgroundMedia.isHtml) {
                     backgroundEffectBuffers.scaledBackgroundImage.release();
                 }
                 BenchmarkScope timer(benchmark, BenchmarkStage::Overlay);

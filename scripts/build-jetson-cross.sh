@@ -9,6 +9,7 @@ CONTAINER_IMAGE="${CONTAINER_IMAGE:-nvcr.io/nvidia/jetpack-linux-aarch64-crossco
 BUILD_DIR_NAME="${BUILD_DIR_NAME:-build-jetson-cross}"
 ENABLE_TENSORRT_MASK="${ENABLE_TENSORRT_MASK:-ON}"
 ENABLE_DRM_DISPLAY="${ENABLE_DRM_DISPLAY:-ON}"
+INSTALL_WPE_DEV="${INSTALL_WPE_DEV:-ON}"
 HOST_SYSROOT="${JETSON_SYSROOT:-}"
 CONTAINER_SYSROOT=""
 HOST_UID="$(id -u)"
@@ -39,6 +40,16 @@ set -euo pipefail
 
 echo "[INFO] Container: $(cat /etc/os-release | grep '^PRETTY_NAME=' | cut -d= -f2- | tr -d '"')"
 
+if [[ "${INSTALL_WPE_DEV}" == "ON" ]]; then
+    export DEBIAN_FRONTEND=noninteractive
+    apt-get update
+    if apt-cache show libwpewebkit-1.1-dev >/dev/null 2>&1; then
+        apt-get install -y --no-install-recommends libwpewebkit-1.1-dev libwpebackend-fdo-1.0-dev
+    else
+        apt-get install -y --no-install-recommends libwpewebkit-1.0-dev libwpebackend-fdo-1.0-dev
+    fi
+fi
+
 if [[ -z "${JETSON_SYSROOT_IN_CONTAINER}" && -d /l4t && ! -d /l4t/rootfs && -f /l4t/targetfs.tbz2.00 ]]; then
     echo "[INFO] Extracting /l4t targetfs fragments into the container. This can take several minutes."
     cd /l4t
@@ -57,6 +68,9 @@ if [[ -z "${JETSON_SYSROOT:-}" || ! -d "${JETSON_SYSROOT}" ]]; then
     echo "[ERROR] Provide one with JETSON_SYSROOT=/path/to/jetson-sysroot or use a container that provides /l4t/rootfs." >&2
     exit 3
 fi
+
+export PKG_CONFIG_SYSROOT_DIR="${JETSON_SYSROOT}"
+export PKG_CONFIG_LIBDIR="${JETSON_SYSROOT}/usr/lib/aarch64-linux-gnu/pkgconfig:${JETSON_SYSROOT}/usr/lib/pkgconfig:${JETSON_SYSROOT}/usr/share/pkgconfig:${JETSON_SYSROOT}/lib/aarch64-linux-gnu/pkgconfig:${JETSON_SYSROOT}/lib/pkgconfig"
 
 if [[ -d /l4t/toolchain/aarch64--glibc--stable-2022.08-1/bin ]]; then
     export JETSON_TOOLCHAIN_PREFIX="/l4t/toolchain/aarch64--glibc--stable-2022.08-1/bin/aarch64-buildroot-linux-gnu-"
@@ -143,6 +157,7 @@ echo "[INFO] Using container image: ${CONTAINER_IMAGE}"
 echo "[INFO] Build directory: ${BUILD_DIR_NAME}"
 echo "[INFO] TensorRT mask backend: ${ENABLE_TENSORRT_MASK}"
 echo "[INFO] DRM/KMS display backend: ${ENABLE_DRM_DISPLAY}"
+echo "[INFO] Install WPE dev packages in container: ${INSTALL_WPE_DEV}"
 echo "[INFO] Build host name: ${BUILD_HOST_NAME}"
 if [[ -n "${HOST_SYSROOT}" ]]; then
     echo "[INFO] Host sysroot: ${HOST_SYSROOT}"
@@ -150,4 +165,4 @@ else
     echo "[INFO] Host sysroot: auto from container /l4t/rootfs"
 fi
 docker "${DOCKER_ARGS[@]}" /bin/bash -lc \
-    "export BUILD_DIR_NAME='${BUILD_DIR_NAME}'; export ENABLE_TENSORRT_MASK='${ENABLE_TENSORRT_MASK}'; export ENABLE_DRM_DISPLAY='${ENABLE_DRM_DISPLAY}'; export BUILD_HOST_NAME='${BUILD_HOST_NAME}'; export JETSON_SYSROOT_IN_CONTAINER='${CONTAINER_SYSROOT}'; export HOST_UID='${HOST_UID}'; export HOST_GID='${HOST_GID}'; ${CONTAINER_COMMAND}"
+    "export BUILD_DIR_NAME='${BUILD_DIR_NAME}'; export ENABLE_TENSORRT_MASK='${ENABLE_TENSORRT_MASK}'; export ENABLE_DRM_DISPLAY='${ENABLE_DRM_DISPLAY}'; export INSTALL_WPE_DEV='${INSTALL_WPE_DEV}'; export BUILD_HOST_NAME='${BUILD_HOST_NAME}'; export JETSON_SYSROOT_IN_CONTAINER='${CONTAINER_SYSROOT}'; export HOST_UID='${HOST_UID}'; export HOST_GID='${HOST_GID}'; ${CONTAINER_COMMAND}"

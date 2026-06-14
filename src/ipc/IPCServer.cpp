@@ -357,9 +357,11 @@ std::string validateRuntimeConfig(const ProcessorConfig& config)
         if (!fileExists(path)) {
             return "background_image cannot be read: " + config.backgroundImagePath;
         }
+#if !defined(JON_ENABLE_WPE_HTML_RENDERER)
         if (looksLikeHtmlFile(path)) {
             return "background HTML media is not supported in this build";
         }
+#endif
     }
     if (config.pauseImageEnabled && config.pauseImagePath.empty()) {
         return "pause.image is required when pause.enabled is true";
@@ -368,9 +370,11 @@ std::string validateRuntimeConfig(const ProcessorConfig& config)
     if (config.pauseImageEnabled && !fileExists(pausePath)) {
         return "pause.image cannot be read: " + config.pauseImagePath;
     }
+#if !defined(JON_ENABLE_WPE_HTML_RENDERER)
     if (config.pauseImageEnabled && looksLikeHtmlFile(pausePath)) {
         return "pause HTML media is not supported in this build";
     }
+#endif
     return {};
 }
 
@@ -545,7 +549,9 @@ std::string IPCServer::handleLine(const std::string& line)
         updated.backgroundImagePath = value.text;
         const std::string path = joinPath(updated.backgroundImageFolder, updated.backgroundImagePath);
         if (!fileExists(path)) return errorResponse("background_image cannot be read");
+#if !defined(JON_ENABLE_WPE_HTML_RENDERER)
         if (looksLikeHtmlFile(path)) return errorResponse("background HTML media is not supported in this build");
+#endif
 
     } else if (key == "pause.image") {
         if (value.type != JsonValue::Type::String) return errorResponse("invalid value type");
@@ -553,7 +559,9 @@ std::string IPCServer::handleLine(const std::string& line)
         updated.pauseImagePath = value.text;
         const std::string path = joinPath(updated.pauseImageFolder, updated.pauseImagePath);
         if (!fileExists(path)) return errorResponse("pause.image cannot be read");
+#if !defined(JON_ENABLE_WPE_HTML_RENDERER)
         if (looksLikeHtmlFile(path)) return errorResponse("pause HTML media is not supported in this build");
+#endif
     } else if (key == "pause.textColor") {
         if (value.type != JsonValue::Type::String) return errorResponse("invalid value type");
         if (!parseRgbaHexColor(value.text, updated.pauseImageTextColor)) return errorResponse("invalid value");
