@@ -17,12 +17,14 @@
 #include <opencv2/core/utils/logger.hpp>
 #include <opencv2/imgcodecs.hpp>
 #include <opencv2/imgproc.hpp>
+#include <opencv2/videoio.hpp>
 
 #include <sys/stat.h>
 
 #include <algorithm>
 #include <array>
 #include <chrono>
+#include <cctype>
 #include <cmath>
 #include <ctime>
 #include <fstream>
@@ -42,6 +44,8 @@ constexpr auto CameraReconnectInterval = std::chrono::seconds(5);
 constexpr auto CameraReconnectSettleTime = std::chrono::seconds(3);
 constexpr auto DisplayReconnectInterval = std::chrono::seconds(3);
 
+std::time_t fileMtime(const std::string& path);
+
 struct BackgroundEffectBuffers {
     cv::Mat downscaledFrame;
     cv::Mat downscaledBlurredFrame;
@@ -50,20 +54,126 @@ struct BackgroundEffectBuffers {
     cv::Mat result;
 };
 
-struct StatusFrameBuffers {
-    cv::Mat pauseImage;
-    cv::Mat scaledPauseImage;
-    std::string loadedPauseImagePath;
-    std::time_t loadedPauseImageMtime = 0;
-};
-
-std::string joinPath(const std::string& folder, const std::string& relativePath)
+bool isAbsolutePath(const std::string& path)
 {
-    if (folder.empty() || folder == ".") return relativePath;
-    if (folder.back() == '/') return folder + relativePath;
-    return folder + "/" + relativePath;
+    return !path.empty() && path.front() == '/';
 }
 
+std::string mediaPath(const std::string& folder, const std::string& path)
+{
+    if (path.empty() || isAbsolutePath(path) || folder.empty() || folder == ".") {
+        return path;
+    }
+    if (folder.back() == '/') return folder + path;
+    return folder + "/" + path;
+}
+
+bool looksLikeHtmlFile(const std::string& path)
+{
+    std::ifstream file(path);
+    if (!file) return false;
+    std::string prefix(512, '\0');
+    file.read(prefix.data(), static_cast<std::streamsize>(prefix.size()));
+    prefix.resize(static_cast<std::size_t>(file.gcount()));
+    std::transform(prefix.begin(), prefix.end(), prefix.begin(), [](unsigned char c) {
+        return static_cast<char>(std::tolower(c));
+    });
+    const auto first = prefix.find_first_not_of(" \t\r\n");
+    if (first == std::string::npos) return false;
+    prefix.erase(0, first);
+    return prefix.rfind("<!doctype html", 0) == 0
+        || prefix.rfind("<html", 0) == 0
+        || prefix.find("<head") != std::string::npos
+        || prefix.find("<body") != std::string::npos;
+}
+
+struct MediaFile {
+    cv::Mat image;
+    cv::Mat lastVideoFrame;
+    cv::VideoCapture video;
+    std::string path;
+    std::time_t mtime = 0;
+    bool loop = false;
+    bool isVideo = false;
+
+    void release()
+    {
+        video.release();
+        image.release();
+        lastVideoFrame.release();
+        path.clear();
+        mtime = 0;
+        isVideo = false;
+        loop = false;
+    }
+
+    bool ensureLoaded(const std::string& nextPath, bool nextLoop, const std::string& label)
+    {
+        const std::time_t nextMtime = fileMtime(nextPath);
+        if (path == nextPath && mtime == nextMtime && loop == nextLoop) {
+            return !image.empty() || video.isOpened() || !lastVideoFrame.empty();
+        }
+
+        release();
+        path = nextPath;
+        mtime = nextMtime;
+        loop = nextLoop;
+
+        if (looksLikeHtmlFile(nextPath)) {
+            LOG_ERROR("HTML media is not supported in this build: " << nextPath);
+            return false;
+        }
+
+        image = cv::imread(nextPath, cv::IMREAD_COLOR);
+        if (!image.empty()) {
+            return true;
+        }
+
+        video.open(nextPath);
+        if (!video.isOpened()) {
+            LOG_WARNING("Cannot read " << label << " media: " << nextPath);
+            return false;
+        }
+        isVideo = true;
+        return true;
+    }
+
+    bool read(cv::Mat& frame)
+    {
+        if (!image.empty()) {
+            frame = image;
+            return true;
+        }
+        if (!video.isOpened()) {
+            if (!lastVideoFrame.empty()) {
+                frame = lastVideoFrame;
+                return true;
+            }
+            return false;
+        }
+        if (!video.read(lastVideoFrame) || lastVideoFrame.empty()) {
+            if (loop) {
+                video.set(cv::CAP_PROP_POS_FRAMES, 0.0);
+                if (video.read(lastVideoFrame) && !lastVideoFrame.empty()) {
+                    frame = lastVideoFrame;
+                    return true;
+                }
+            }
+            if (!lastVideoFrame.empty()) {
+                frame = lastVideoFrame;
+                return true;
+            }
+            return false;
+        }
+        frame = lastVideoFrame;
+        return true;
+    }
+};
+
+struct StatusFrameBuffers {
+    MediaFile pauseMedia;
+    cv::Mat scaledPauseImage;
+};
 
 std::time_t fileMtime(const std::string& path)
 {
@@ -93,47 +203,39 @@ cv::Mat makeStatusFrame(
     StatusFrameBuffers* buffers = nullptr)
 {
     if (config != nullptr && buffers != nullptr && config->pauseImageEnabled && !config->pauseImagePath.empty()) {
-        const std::time_t pauseImageMtime = fileMtime(config->pauseImagePath);
-        if (buffers->loadedPauseImagePath != config->pauseImagePath || buffers->loadedPauseImageMtime != pauseImageMtime) {
-//            buffers->pauseImage = cv::imread(config->pauseImagePath, cv::IMREAD_COLOR);
-            buffers->pauseImage = cv::imread(joinPath(config->pauseImageFolder, config->pauseImagePath), cv::IMREAD_COLOR);
+        const std::string resolvedPath = mediaPath(config->pauseImageFolder, config->pauseImagePath);
+        if (!buffers->pauseMedia.ensureLoaded(resolvedPath, config->pauseLoopIfVideo, "pause")) {
             buffers->scaledPauseImage.release();
-            buffers->loadedPauseImagePath = config->pauseImagePath;
-            buffers->loadedPauseImageMtime = pauseImageMtime;
-            if (buffers->pauseImage.empty()) {
-                LOG_WARNING("Cannot read pause image: " << config->pauseImagePath);
+        } else {
+            cv::Mat pauseImage;
+            if (!buffers->pauseMedia.read(pauseImage) || pauseImage.empty()) {
+                LOG_WARNING("Cannot read pause media frame: " << resolvedPath);
+                buffers->scaledPauseImage.release();
+            } else {
+                cv::Mat frame;
+                if (buffers->pauseMedia.isVideo || buffers->scaledPauseImage.size() != size || buffers->scaledPauseImage.type() != CV_8UC3) {
+                    cv::resize(pauseImage, buffers->scaledPauseImage, size, 0.0, 0.0, cv::INTER_LINEAR);
+                }
+                frame = buffers->scaledPauseImage.clone();
+                if (config->pauseImageShowStatusText) {
+                    const int marginX = size.width / 8;
+                    const cv::Point textPosition(
+                        config->pauseImageTextPosition.x >= 0 ? config->pauseImageTextPosition.x : marginX + 32,
+                        config->pauseImageTextPosition.y >= 0 ? config->pauseImageTextPosition.y : size.height / 2 - 10);
+                    const double textSize = std::clamp(config->pauseImageTextSize, 0.1, 10.0);
+                    cv::Mat textOverlay = frame.clone();
+                    const cv::Scalar textColor(
+                        std::clamp(config->pauseImageTextColor.b, 0, 255),
+                        std::clamp(config->pauseImageTextColor.g, 0, 255),
+                        std::clamp(config->pauseImageTextColor.r, 0, 255));
+                    const int fontFace = pauseImageFontFace(config->pauseImageFont);
+                    cv::putText(textOverlay, status, textPosition, fontFace, textSize, textColor, std::max(1, static_cast<int>(std::round(4.0 * textSize / 1.6))), cv::LINE_AA);
+                    cv::putText(textOverlay, "JONImageProcessor", cv::Point(textPosition.x + 2, textPosition.y + static_cast<int>(std::round(52.0 * textSize / 1.6))), fontFace, textSize * 0.5, textColor, std::max(1, static_cast<int>(std::round(2.0 * textSize / 1.6))), cv::LINE_AA);
+                    const double alpha = std::clamp(config->pauseImageTextColor.a, 0, 255) / 255.0;
+                    cv::addWeighted(textOverlay, alpha, frame, 1.0 - alpha, 0.0, frame);
+                }
+                return frame;
             }
-        }
-        if (!buffers->pauseImage.empty()) {
-            cv::Mat frame;
-            if (buffers->scaledPauseImage.size() != size || buffers->scaledPauseImage.type() != CV_8UC3) {
-                cv::resize(buffers->pauseImage, buffers->scaledPauseImage, size, 0.0, 0.0, cv::INTER_LINEAR);
-            }
-            frame = buffers->scaledPauseImage.clone();
-            if (config->pauseImageShowStatusText) {
-                const int marginX = size.width / 8;
-                const cv::Point textPosition(
-                    config->pauseImageTextPosition.x >= 0 ? config->pauseImageTextPosition.x : marginX + 32,
-                    config->pauseImageTextPosition.y >= 0 ? config->pauseImageTextPosition.y : size.height / 2 - 10);
-                const double textSize = std::clamp(config->pauseImageTextSize, 0.1, 10.0);
-              //  const int boxHeight = static_cast<int>(std::round(140.0 * textSize / 1.6));
-              //  const int boxTop = std::max(0, textPosition.y - static_cast<int>(std::round(60.0 * textSize / 1.6)));
-             //   const int boxLeft = std::max(0, textPosition.x - 32);
-           //     const int boxWidth = std::min(size.width - boxLeft, size.width - 2 * marginX);
-//                cv::rectangle(frame, cv::Rect(boxLeft, boxTop, boxWidth, std::min(boxHeight, size.height - boxTop)), cv::Scalar(245, 245, 245), cv::FILLED);
-
-                cv::Mat textOverlay = frame.clone();
-                const cv::Scalar textColor(
-                    std::clamp(config->pauseImageTextColor.b, 0, 255),
-                    std::clamp(config->pauseImageTextColor.g, 0, 255),
-                    std::clamp(config->pauseImageTextColor.r, 0, 255));
-                const int fontFace = pauseImageFontFace(config->pauseImageFont);
-                cv::putText(textOverlay, status, textPosition, fontFace, textSize, textColor, std::max(1, static_cast<int>(std::round(4.0 * textSize / 1.6))), cv::LINE_AA);
-                cv::putText(textOverlay, "JONImageProcessor", cv::Point(textPosition.x + 2, textPosition.y + static_cast<int>(std::round(52.0 * textSize / 1.6))), fontFace, textSize * 0.5, textColor, std::max(1, static_cast<int>(std::round(2.0 * textSize / 1.6))), cv::LINE_AA);
-                const double alpha = std::clamp(config->pauseImageTextColor.a, 0, 255) / 255.0;
-                cv::addWeighted(textOverlay, alpha, frame, 1.0 - alpha, 0.0, frame);
-            }
-            return frame;
         }
     }
 
@@ -550,9 +652,11 @@ void logStartupInfo(const ProcessorConfig& config, const ScreenInfo& screenInfo)
     LOG_VERBOSE("Background effect: " << backgroundEffectToString(config.backgroundEffect));
     LOG_VERBOSE("Background image: " << (config.backgroundImagePath.empty() ? "none" : config.backgroundImagePath));
     LOG_VERBOSE("Background image folder: " << config.backgroundImageFolder);
+    LOG_VERBOSE("Background loop if video: " << (config.backgroundLoopIfVideo ? "true" : "false"));
     LOG_VERBOSE("Pause image enabled: " << (config.pauseImageEnabled ? "true" : "false"));
     LOG_VERBOSE("Pause image: " << (config.pauseImagePath.empty() ? "none" : config.pauseImagePath));
     LOG_VERBOSE("Pause image folder: " << config.pauseImageFolder);
+    LOG_VERBOSE("Pause loop if video: " << (config.pauseLoopIfVideo ? "true" : "false"));
     LOG_VERBOSE("Pause image status text: " << (config.pauseImageShowStatusText ? "true" : "false"));
     LOG_VERBOSE("Pause image text color: "
         << config.pauseImageTextColor.r << ","
@@ -718,17 +822,14 @@ int VideoProcessor::run()
     cv::Mat previousOutputMask;
     BackgroundEffectBuffers backgroundEffectBuffers;
     StatusFrameBuffers statusFrameBuffers;
-    cv::Mat backgroundImage;
-    std::string loadedBackgroundImagePath;
+    MediaFile backgroundMedia;
     if (config_.backgroundEffect == BackgroundEffect::Image && overlayEnabled) {
-//        backgroundImage = cv::imread(config_.backgroundImagePath, cv::IMREAD_COLOR);
-        backgroundImage = cv::imread(joinPath(config_.backgroundImageFolder, config_.backgroundImagePath), cv::IMREAD_COLOR);
-        if (backgroundImage.empty()) {
-            LOG_ERROR("Cannot read background image: " << config_.backgroundImagePath);
+        const std::string resolvedBackgroundPath = mediaPath(config_.backgroundImageFolder, config_.backgroundImagePath);
+        if (!backgroundMedia.ensureLoaded(resolvedBackgroundPath, config_.backgroundLoopIfVideo, "background")) {
+            LOG_ERROR("Cannot read background media: " << resolvedBackgroundPath);
             return ExitRuntimeError;
         }
-        loadedBackgroundImagePath = config_.backgroundImagePath;
-        LOG_INFO("Background image loaded: " << config_.backgroundImagePath);
+        LOG_INFO("Background media loaded: " << resolvedBackgroundPath);
     }
 
     bool stoppedBySignal = false;
@@ -947,23 +1048,23 @@ int VideoProcessor::run()
                     runtimeConfig.blurStrength,
                     backgroundEffectBuffers);
             } else if (runtimeConfig.backgroundEffect == BackgroundEffect::Image) {
-                if (loadedBackgroundImagePath != runtimeConfig.backgroundImagePath) {
-                    // backgroundImage = cv::imread(runtimeConfig.backgroundImagePath, cv::IMREAD_COLOR);
-                    backgroundImage = cv::imread(joinPath(runtimeConfig.backgroundImageFolder, runtimeConfig.backgroundImagePath), cv::IMREAD_COLOR);
-                    loadedBackgroundImagePath = runtimeConfig.backgroundImagePath;
-                    if (backgroundImage.empty()) {
-                        LOG_WARNING("Cannot read background image: " << runtimeConfig.backgroundImagePath);
-                    } else {
-                        backgroundEffectBuffers.scaledBackgroundImage.release();
-                    }
+                const std::string resolvedBackgroundPath = mediaPath(runtimeConfig.backgroundImageFolder, runtimeConfig.backgroundImagePath);
+                if (!backgroundMedia.ensureLoaded(resolvedBackgroundPath, runtimeConfig.backgroundLoopIfVideo, "background")) {
+                    LOG_WARNING("Cannot read background media: " << resolvedBackgroundPath);
+                    backgroundEffectBuffers.scaledBackgroundImage.release();
+                }
+                cv::Mat backgroundFrame;
+                const bool hasBackgroundFrame = backgroundMedia.read(backgroundFrame) && !backgroundFrame.empty();
+                if (backgroundMedia.isVideo) {
+                    backgroundEffectBuffers.scaledBackgroundImage.release();
                 }
                 BenchmarkScope timer(benchmark, BenchmarkStage::Overlay);
                 outputFrame = applyBackgroundImage(
                     resized,
                     outputMask,
-                    backgroundImage,
+                    backgroundFrame,
                     backgroundEffectBuffers);
-                if (backgroundImage.empty()) {
+                if (!hasBackgroundFrame) {
                     outputFrame = resized;
                 }
             } else {

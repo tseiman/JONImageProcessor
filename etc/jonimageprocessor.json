@@ -17,13 +17,15 @@
   "background": {
     "effect": "color",
     "folder": "testdata",
+    "loopIfVideo": false,
     "overlayColor": "0,255,0",
     "overlayAlpha": 1.0
   },
   "pause": {
     "enabled": false,
-    "image": "testdata/sample_pause.jpg",
+    "image": "sample_pause.jpg",
     "folder": "testdata",
+    "loopIfVideo": false,
     "showStatusText": true,
     "textColor": "ffffffff",
     "textPosition": "auto",

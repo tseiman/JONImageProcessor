@@ -8,10 +8,12 @@
 
 #include <cstdlib>
 #include <cstring>
+#include <cctype>
 #include <fstream>
 #include <iomanip>
 #include <sstream>
 #include <string_view>
+#include <algorithm>
 #include <vector>
 
 namespace {
@@ -36,8 +38,10 @@ enum OptionId {
     OptionBackgroundEffect,
     OptionBackgroundImage,
     OptionBackgroundImageFolder,
+    OptionBackgroundLoopIfVideo,
     OptionPauseImage,
     OptionPauseImageFolder,
+    OptionPauseLoopIfVideo,
     OptionPauseImageEnabled,
     OptionPauseImageStatusText,
     OptionPauseImageTextColor,
@@ -87,10 +91,12 @@ const std::vector<OptionDefinition>& optionDefinitions()
         {OptionCameraFormat, 0, "camera-format", required_argument, "format", "Camera pixel format: MJPG or YUYV", "MJPG"},
         {OptionCameraConnectTimeout, 0, "camera-connect-timeout", required_argument, "seconds", "Seconds to show Camera connecting before disconnected status", "10"},
         {OptionBackgroundEffect, 0, "background-effect", required_argument, "effect", "Background effect: color, blur, or image", "color"},
-        {OptionBackgroundImage, 0, "background-image", required_argument, "path", "JPEG/PNG image for --background-effect image", ""},
+        {OptionBackgroundImage, 0, "background-image", required_argument, "path", "Image/video/html file for --background-effect image", ""},
         {OptionBackgroundImageFolder, 0, "background-image-folder", required_argument, "path", "Base folder for background images set through IPC", "."},
-        {OptionPauseImage, 0, "pause-image", required_argument, "path", "JPEG/PNG image for camera status screens", ""},
+        {OptionBackgroundLoopIfVideo, 0, "background-loop-if-video", required_argument, "true|false", "Loop background file when it is a video", "false"},
+        {OptionPauseImage, 0, "pause-image", required_argument, "path", "Image/video/html file for camera status screens", ""},
         {OptionPauseImageFolder, 0, "pause-image-folder", required_argument, "path", "Base folder for pause images set through IPC", "."},
+        {OptionPauseLoopIfVideo, 0, "pause-loop-if-video", required_argument, "true|false", "Loop pause file when it is a video", "false"},
         {OptionPauseImageEnabled, 0, "pause-image-enabled", required_argument, "true|false", "Use pause image instead of generated camera status screens", "false"},
         {OptionPauseImageStatusText, 0, "pause-image-status-text", required_argument, "true|false", "Render camera status text over pause image", "true"},
         {OptionPauseImageTextColor, 0, "pause-image-text-color", required_argument, "RRGGBBAA", "Status text color for pause image overlay", "ffffffff"},
@@ -247,6 +253,41 @@ bool fileExists(const std::string& path)
     return static_cast<bool>(file);
 }
 
+bool isAbsolutePath(const std::string& path)
+{
+    return !path.empty() && path.front() == '/';
+}
+
+std::string resolveMediaPath(const std::string& folder, const std::string& path)
+{
+    if (path.empty() || isAbsolutePath(path) || folder.empty() || folder == ".") {
+        return path;
+    }
+    if (folder.back() == '/') {
+        return folder + path;
+    }
+    return folder + "/" + path;
+}
+
+bool looksLikeHtmlFile(const std::string& path)
+{
+    std::ifstream file(path);
+    if (!file) return false;
+    std::string prefix(512, '\0');
+    file.read(prefix.data(), static_cast<std::streamsize>(prefix.size()));
+    prefix.resize(static_cast<std::size_t>(file.gcount()));
+    std::transform(prefix.begin(), prefix.end(), prefix.begin(), [](unsigned char c) {
+        return static_cast<char>(std::tolower(c));
+    });
+    const auto first = prefix.find_first_not_of(" \t\r\n");
+    if (first == std::string::npos) return false;
+    prefix.erase(0, first);
+    return prefix.rfind("<!doctype html", 0) == 0
+        || prefix.rfind("<html", 0) == 0
+        || prefix.find("<head") != std::string::npos
+        || prefix.find("<body") != std::string::npos;
+}
+
 bool directoryExists(const std::string& path)
 {
     struct stat statBuffer {};
@@ -258,14 +299,22 @@ void warnMissingConfiguredFiles(const ProcessorConfig& config)
     if (!config.noMask && !config.maskModelPath.empty() && !fileExists(config.maskModelPath)) {
         LOG_WARNING("Configured segmentation model does not exist: " << config.maskModelPath);
     }
-    if (config.backgroundEffect == BackgroundEffect::Image && !config.backgroundImagePath.empty() && !fileExists(config.backgroundImagePath)) {
-        LOG_WARNING("Configured background image does not exist: " << config.backgroundImagePath);
+    const std::string backgroundPath = resolveMediaPath(config.backgroundImageFolder, config.backgroundImagePath);
+    if (config.backgroundEffect == BackgroundEffect::Image && !backgroundPath.empty() && !fileExists(backgroundPath)) {
+        LOG_WARNING("Configured background media does not exist: " << backgroundPath);
+    }
+    if (config.backgroundEffect == BackgroundEffect::Image && !backgroundPath.empty() && looksLikeHtmlFile(backgroundPath)) {
+        LOG_WARNING("Configured background HTML media is not supported in this build: " << backgroundPath);
     }
     if (!directoryExists(config.backgroundImageFolder)) {
         LOG_WARNING("Configured background image folder does not exist: " << config.backgroundImageFolder);
     }
-    if (config.pauseImageEnabled && !config.pauseImagePath.empty() && !fileExists(config.pauseImagePath)) {
-        LOG_WARNING("Configured pause image does not exist: " << config.pauseImagePath);
+    const std::string pausePath = resolveMediaPath(config.pauseImageFolder, config.pauseImagePath);
+    if (config.pauseImageEnabled && !pausePath.empty() && !fileExists(pausePath)) {
+        LOG_WARNING("Configured pause media does not exist: " << pausePath);
+    }
+    if (config.pauseImageEnabled && !pausePath.empty() && looksLikeHtmlFile(pausePath)) {
+        LOG_WARNING("Configured pause HTML media is not supported in this build: " << pausePath);
     }
     if (!directoryExists(config.pauseImageFolder)) {
         LOG_WARNING("Configured pause image folder does not exist: " << config.pauseImageFolder);
@@ -278,8 +327,13 @@ bool validateStartupFiles(const ProcessorConfig& config, std::string& error)
         error = "Segmentation model does not exist: " + config.maskModelPath;
         return false;
     }
-    if (config.backgroundEffect == BackgroundEffect::Image && !config.backgroundImagePath.empty() && !fileExists(config.backgroundImagePath)) {
-        error = "Background image does not exist: " + config.backgroundImagePath;
+    const std::string backgroundPath = resolveMediaPath(config.backgroundImageFolder, config.backgroundImagePath);
+    if (config.backgroundEffect == BackgroundEffect::Image && !backgroundPath.empty() && !fileExists(backgroundPath)) {
+        error = "Background media does not exist: " + backgroundPath;
+        return false;
+    }
+    if (config.backgroundEffect == BackgroundEffect::Image && !backgroundPath.empty() && looksLikeHtmlFile(backgroundPath)) {
+        error = "Background HTML media is not supported in this build: " + backgroundPath;
         return false;
     }
     if (!directoryExists(config.backgroundImageFolder)) {
@@ -295,10 +349,30 @@ bool validateStartupFiles(const ProcessorConfig& config, std::string& error)
             error = "Pause image is required when pause image is enabled.";
             return false;
         }
-        if (!fileExists(config.pauseImagePath)) {
-            error = "Pause image does not exist: " + config.pauseImagePath;
+        const std::string pausePath = resolveMediaPath(config.pauseImageFolder, config.pauseImagePath);
+        if (!fileExists(pausePath)) {
+            error = "Pause media does not exist: " + pausePath;
             return false;
         }
+        if (looksLikeHtmlFile(pausePath)) {
+            error = "Pause HTML media is not supported in this build: " + pausePath;
+            return false;
+        }
+    }
+    return true;
+}
+
+bool validateConfiguredMediaTypes(const ProcessorConfig& config, std::string& error)
+{
+    const std::string backgroundPath = resolveMediaPath(config.backgroundImageFolder, config.backgroundImagePath);
+    if (config.backgroundEffect == BackgroundEffect::Image && !backgroundPath.empty() && looksLikeHtmlFile(backgroundPath)) {
+        error = "Background HTML media is not supported in this build: " + backgroundPath;
+        return false;
+    }
+    const std::string pausePath = resolveMediaPath(config.pauseImageFolder, config.pauseImagePath);
+    if (config.pauseImageEnabled && !pausePath.empty() && looksLikeHtmlFile(pausePath)) {
+        error = "Pause HTML media is not supported in this build: " + pausePath;
+        return false;
     }
     return true;
 }
@@ -620,6 +694,9 @@ bool parseCommandLine(int argc, char** argv, CommandLineResult& result, std::str
                 return false;
             }
             break;
+        case OptionBackgroundLoopIfVideo:
+            if (!parseBooleanText(optarg, "--background-loop-if-video", result.config.backgroundLoopIfVideo, error)) return false;
+            break;
         case OptionPauseImage:
             result.config.pauseImagePath = optarg;
             if (result.config.pauseImagePath.empty()) {
@@ -633,6 +710,9 @@ bool parseCommandLine(int argc, char** argv, CommandLineResult& result, std::str
                 error = "--pause-image-folder must not be empty.";
                 return false;
             }
+            break;
+        case OptionPauseLoopIfVideo:
+            if (!parseBooleanText(optarg, "--pause-loop-if-video", result.config.pauseLoopIfVideo, error)) return false;
             break;
         case OptionPauseImageEnabled:
             if (!parseBooleanText(optarg, "--pause-image-enabled", result.config.pauseImageEnabled, error)) return false;
@@ -715,6 +795,10 @@ bool parseCommandLine(int argc, char** argv, CommandLineResult& result, std::str
         return true;
     }
     if (result.testConfig) {
+        if (!validateConfiguredMediaTypes(result.config, error)) {
+            result.showHelpOnError = false;
+            return false;
+        }
         warnMissingConfiguredFiles(result.config);
         return true;
     }

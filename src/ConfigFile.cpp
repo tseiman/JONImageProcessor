@@ -401,7 +401,7 @@ bool applyConfig(const Json& root, ProcessorConfig& config, ConfigLoadResult& re
 
     if (const Json* background = objectChild(root, "background")) {
         if (background->type != Json::Type::Object) { error = "background must be an object"; return false; }
-        warnUnknownFields(*background, "background.", {"effect", "image", "folder", "overlayColor", "overlayAlpha", "blurStrength"});
+        warnUnknownFields(*background, "background.", {"effect", "image", "folder", "loopIfVideo", "overlayColor", "overlayAlpha", "blurStrength"});
         std::string effect;
         if (!readString(*background, "effect", effect, error)) return false;
         if (!effect.empty()) {
@@ -413,6 +413,7 @@ bool applyConfig(const Json& root, ProcessorConfig& config, ConfigLoadResult& re
         if (!readString(*background, "image", config.backgroundImagePath, error)) return false;
         if (!readString(*background, "folder", config.backgroundImageFolder, error)) return false;
         if (config.backgroundImageFolder.empty()) { error = "Invalid background.folder"; return false; }
+        if (!readBoolean(*background, "loopIfVideo", config.backgroundLoopIfVideo, error)) return false;
         std::string color;
         if (!readString(*background, "overlayColor", color, error)) return false;
         if (!color.empty() && !parseColor(color, config.backgroundOverlayColor)) { error = "Invalid background.overlayColor"; return false; }
@@ -425,11 +426,12 @@ bool applyConfig(const Json& root, ProcessorConfig& config, ConfigLoadResult& re
 
     if (const Json* pause = objectChild(root, "pause")) {
         if (pause->type != Json::Type::Object) { error = "pause must be an object"; return false; }
-        warnUnknownFields(*pause, "pause.", {"enabled", "image", "folder", "showStatusText", "textColor", "textPosition", "textSize", "font"});
+        warnUnknownFields(*pause, "pause.", {"enabled", "image", "folder", "loopIfVideo", "showStatusText", "textColor", "textPosition", "textSize", "font"});
         if (!readBoolean(*pause, "enabled", config.pauseImageEnabled, error)) return false;
         if (!readString(*pause, "image", config.pauseImagePath, error)) return false;
         if (!readString(*pause, "folder", config.pauseImageFolder, error)) return false;
         if (config.pauseImageFolder.empty()) { error = "Invalid pause.folder"; return false; }
+        if (!readBoolean(*pause, "loopIfVideo", config.pauseLoopIfVideo, error)) return false;
         if (!readBoolean(*pause, "showStatusText", config.pauseImageShowStatusText, error)) return false;
         std::string textColor;
         if (!readString(*pause, "textColor", textColor, error)) return false;

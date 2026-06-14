@@ -297,10 +297,12 @@ journalctl -u JONImageProcessor.service -f
 - `--mask-smoothing <0.0..1.0>`: temporal mask smoothing. Default: `0.65`.
 - `--mask-morphology <off|light|strong>`: mask cleanup mode. Default: `light`.
 - `--background-effect <color|blur|image>`: background effect. Default: `color`.
-- `--background-image <path>`: JPEG or PNG image used by `--background-effect image`.
+- `--background-image <path>`: image or video file used by `--background-effect image`. JPEG/PNG are loaded as static images; video files are decoded with OpenCV. HTML files are currently rejected unless a future HTML renderer is built in.
 - `--background-image-folder <path>`: base folder for background images selected through IPC. Default: `.`.
-- `--pause-image <path>`: JPEG or PNG image used for camera status screens.
+- `--background-loop-if-video <true|false>`: loop the background media when it is a video. Default: `false`.
+- `--pause-image <path>`: image or video file used for camera status screens. JPEG/PNG are loaded as static images; video files are decoded with OpenCV. HTML files are currently rejected unless a future HTML renderer is built in.
 - `--pause-image-folder <path>`: base folder for pause images selected through IPC. Default: `.`.
+- `--pause-loop-if-video <true|false>`: loop the pause media when it is a video. Default: `false`.
 - `--pause-image-enabled <true|false>`: use pause image instead of generated camera status screens. Default: `false`.
 - `--pause-image-status-text <true|false>`: render camera status text over the pause image. Default: `true`.
 - `--pause-image-text-color <RRGGBBAA>`: status text color for the pause image overlay. Default: `ffffffff`.
@@ -372,14 +374,16 @@ Supported JSON groups:
     "effect": "color",
     "image": "/opt/JONImageProcessor/backgrounds/background.png",
     "folder": "/opt/JONImageProcessor/backgrounds",
+    "loopIfVideo": false,
     "overlayColor": "0,255,0",
     "overlayAlpha": 0.35,
     "blurStrength": 15
   },
   "pause": {
     "enabled": false,
-    "image": "testdata/sample_pause.jpg",
+    "image": "sample_pause.jpg",
     "folder": "testdata",
+    "loopIfVideo": false,
     "showStatusText": true,
     "textColor": "ffffffff",
     "textPosition": "auto",
@@ -402,7 +406,7 @@ Supported JSON groups:
 }
 ```
 
-All fields are optional. Unknown JSON fields log warnings and are ignored. Invalid JSON, invalid types, and invalid values stop startup with an error. JSON syntax errors include line and column information where possible. `--test-config` warns about missing referenced files. Normal startup fails if an active segmentation model, background image, pause image path, background image folder, or pause image folder does not exist. Runtime IPC updates for image paths validate that the file can be read and return a JSON error if not. IPC only accepts relative image names under `background.folder` or `pause.folder`; absolute paths and `..` traversal are rejected. `camera.connectTimeoutSeconds` controls how long `Camera connecting...` is shown after runtime camera re-enable before falling back to `Camera DISCONNECTED`. `pause.enabled` switches camera status screens from the generated pattern to `pause.image`; `pause.showStatusText` controls whether the status label is rendered over that image. `pause.textColor` uses `RRGGBBAA` hex, for example `ffffff0a`. `pause.textPosition` uses `XxY` or `auto`; `pause.textSize` controls the rendered text scale. `pause.font` uses a fixed OpenCV Hershey font name, not a dynamic operating-system font list. `diagnostics.benchmark` enables benchmark collection for IPC without passing `--benchmark`.
+All fields are optional. Unknown JSON fields log warnings and are ignored. Invalid JSON, invalid types, and invalid values stop startup with an error. JSON syntax errors include line and column information where possible. `--test-config` warns about missing referenced files. Normal startup fails if an active segmentation model, background media, pause media, background image folder, or pause image folder does not exist. Runtime IPC updates for image paths validate that the file can be read and return a JSON error if not. IPC only accepts relative image names under `background.folder` or `pause.folder`; absolute paths and `..` traversal are rejected. `background.loopIfVideo` and `pause.loopIfVideo` loop media files when OpenCV detects them as video. HTML media files are detected from file content and rejected in the current build because no WPE offscreen renderer is implemented yet. `camera.connectTimeoutSeconds` controls how long `Camera connecting...` is shown after runtime camera re-enable before falling back to `Camera DISCONNECTED`. `pause.enabled` switches camera status screens from the generated pattern to `pause.image`; `pause.showStatusText` controls whether the status label is rendered over that image. `pause.textColor` uses `RRGGBBAA` hex, for example `ffffff0a`. `pause.textPosition` uses `XxY` or `auto`; `pause.textSize` controls the rendered text scale. `pause.font` uses a fixed OpenCV Hershey font name, not a dynamic operating-system font list. `diagnostics.benchmark` enables benchmark collection for IPC without passing `--benchmark`.
 
 ## Runtime Behavior
 
@@ -440,6 +444,7 @@ Writable keys:
 - `pause.enabled`: boolean. When true, camera status screens use `pause.image`.
 - `pause.image`: relative image name under `pause.folder` when set through IPC.
 - `pause.folder`: read-only base folder used when `pause.image` is set through IPC.
+- `pause.loopIfVideo`: boolean. Loop `pause.image` when OpenCV detects it as video.
 - `pause.showStatusText`: boolean. When false, no status text is rendered over the pause image.
 - `pause.textColor`: `RRGGBBAA` hex color for the pause image status text.
 - `pause.textPosition`: `XxY` or `auto`.
@@ -451,6 +456,7 @@ Writable keys:
 - `background.effect`: `color`, `blur`, `image`
 - `background.image`: relative image name under `background.folder` when set through IPC.
 - `background.folder`: read-only base folder used when `background.image` is set through IPC.
+- `background.loopIfVideo`: boolean. Loop `background.image` when OpenCV detects it as video.
 - `background.overlayColor`: `R,G,B`
 - `background.overlayAlpha`: float `0.0..1.0`
 - `background.blurStrength`: integer `1..100`

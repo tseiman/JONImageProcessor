@@ -10,11 +10,13 @@
 
 #include <cerrno>
 #include <algorithm>
+#include <cctype>
 #include <cstdlib>
 #include <cstring>
 #include <map>
 #include <sstream>
 #include <string>
+#include <fstream>
 
 namespace {
 
@@ -200,6 +202,31 @@ std::string joinPath(const std::string& folder, const std::string& relativePath)
     return folder + "/" + relativePath;
 }
 
+bool fileExists(const std::string& path)
+{
+    std::ifstream file(path);
+    return static_cast<bool>(file);
+}
+
+bool looksLikeHtmlFile(const std::string& path)
+{
+    std::ifstream file(path);
+    if (!file) return false;
+    std::string prefix(512, '\0');
+    file.read(prefix.data(), static_cast<std::streamsize>(prefix.size()));
+    prefix.resize(static_cast<std::size_t>(file.gcount()));
+    std::transform(prefix.begin(), prefix.end(), prefix.begin(), [](unsigned char c) {
+        return static_cast<char>(std::tolower(c));
+    });
+    const auto first = prefix.find_first_not_of(" \t\r\n");
+    if (first == std::string::npos) return false;
+    prefix.erase(0, first);
+    return prefix.rfind("<!doctype html", 0) == 0
+        || prefix.rfind("<html", 0) == 0
+        || prefix.find("<head") != std::string::npos
+        || prefix.find("<body") != std::string::npos;
+}
+
 int hexValue(char c)
 {
     if (c >= '0' && c <= '9') return c - '0';
@@ -285,12 +312,14 @@ std::string valueJson(const ProcessorConfig& c, const std::string& key, const Be
     if (key == "background_effect" || key == "background.effect") return "\"" + backgroundEffectToString(c.backgroundEffect) + "\"";
     if (key == "background_image" || key == "background.image") return "\"" + escapeJson(c.backgroundImagePath) + "\"";
     if (key == "background.folder") return "\"" + escapeJson(c.backgroundImageFolder) + "\"";
+    if (key == "background.loopIfVideo") return c.backgroundLoopIfVideo ? "true" : "false";
     if (key == "background_overlay_color" || key == "background.overlayColor") return "\"" + colorToString(c.backgroundOverlayColor) + "\"";
     if (key == "background_overlay_alpha" || key == "background.overlayAlpha") return std::to_string(c.backgroundOverlayAlpha);
     if (key == "blur_strength" || key == "background.blurStrength") return std::to_string(c.blurStrength);
     if (key == "pause.enabled") return c.pauseImageEnabled ? "true" : "false";
     if (key == "pause.image") return "\"" + escapeJson(c.pauseImagePath) + "\"";
     if (key == "pause.folder") return "\"" + escapeJson(c.pauseImageFolder) + "\"";
+    if (key == "pause.loopIfVideo") return c.pauseLoopIfVideo ? "true" : "false";
     if (key == "pause.showStatusText") return c.pauseImageShowStatusText ? "true" : "false";
     if (key == "pause.textColor") return "\"" + rgbaColorToHex(c.pauseImageTextColor) + "\"";
     if (key == "pause.textPosition") return "\"" + positionToString(c.pauseImageTextPosition) + "\"";
@@ -310,9 +339,9 @@ bool knownKey(const std::string& key)
         || key == "background_overlay_alpha" || key == "blur_strength" || key == "no_mask"
         || key == "no_overlay" || key == "benchmark"
         || key == "segmentation.threshold" || key == "segmentation.smoothing" || key == "segmentation.morphology"
-        || key == "background.effect" || key == "background.image" || key == "background.overlayColor"
+        || key == "background.effect" || key == "background.image" || key == "background.loopIfVideo" || key == "background.overlayColor"
         || key == "background.overlayAlpha" || key == "background.blurStrength" || key == "background.folder"
-        || key == "pause.enabled" || key == "pause.image" || key == "pause.folder" || key == "pause.showStatusText" || key == "pause.textColor"
+        || key == "pause.enabled" || key == "pause.image" || key == "pause.loopIfVideo" || key == "pause.folder" || key == "pause.showStatusText" || key == "pause.textColor"
         || key == "pause.textPosition" || key == "pause.textSize" || key == "pause.font"
         || key == "runtime.noMask" || key == "runtime.noOverlay" || key == "camera.enabled";
 }
@@ -324,15 +353,23 @@ std::string validateRuntimeConfig(const ProcessorConfig& config)
             return "background_image is required for background_effect image";
         }
 
-        if (cv::imread(joinPath(config.backgroundImageFolder, config.backgroundImagePath), cv::IMREAD_COLOR).empty()) {
+        const std::string path = joinPath(config.backgroundImageFolder, config.backgroundImagePath);
+        if (!fileExists(path)) {
             return "background_image cannot be read: " + config.backgroundImagePath;
+        }
+        if (looksLikeHtmlFile(path)) {
+            return "background HTML media is not supported in this build";
         }
     }
     if (config.pauseImageEnabled && config.pauseImagePath.empty()) {
         return "pause.image is required when pause.enabled is true";
     }
-    if (config.pauseImageEnabled && cv::imread(joinPath(config.pauseImageFolder, config.pauseImagePath), cv::IMREAD_COLOR).empty()) {
+    const std::string pausePath = joinPath(config.pauseImageFolder, config.pauseImagePath);
+    if (config.pauseImageEnabled && !fileExists(pausePath)) {
         return "pause.image cannot be read: " + config.pauseImagePath;
+    }
+    if (config.pauseImageEnabled && looksLikeHtmlFile(pausePath)) {
+        return "pause HTML media is not supported in this build";
     }
     return {};
 }
@@ -436,12 +473,14 @@ std::string IPCServer::handleLine(const std::string& line)
             << ",\"background\":{\"effect\":\"" << backgroundEffectToString(current.backgroundEffect)
             << "\",\"image\":\"" << escapeJson(current.backgroundImagePath)
             << "\",\"folder\":\"" << escapeJson(current.backgroundImageFolder)
+            << "\",\"loopIfVideo\":" << (current.backgroundLoopIfVideo ? "true" : "false")
             << "\",\"overlayColor\":\"" << colorToString(current.backgroundOverlayColor)
             << "\",\"overlayAlpha\":" << current.backgroundOverlayAlpha
             << ",\"blurStrength\":" << current.blurStrength << "}"
             << ",\"pause\":{\"enabled\":" << (current.pauseImageEnabled ? "true" : "false")
             << ",\"image\":\"" << escapeJson(current.pauseImagePath)
             << "\",\"folder\":\"" << escapeJson(current.pauseImageFolder)
+            << "\",\"loopIfVideo\":" << (current.pauseLoopIfVideo ? "true" : "false")
             << "\",\"showStatusText\":" << (current.pauseImageShowStatusText ? "true" : "false")
             << ",\"textColor\":\"" << rgbaColorToHex(current.pauseImageTextColor)
             << "\",\"textPosition\":\"" << positionToString(current.pauseImageTextPosition)
@@ -503,18 +542,18 @@ std::string IPCServer::handleLine(const std::string& line)
     } else if (key == "background_image" || key == "background.image") {
         if (value.type != JsonValue::Type::String) return errorResponse("invalid value type");
         if (!isSafeRelativePath(value.text)) return errorResponse("invalid relative image path");
-        // updated.backgroundImagePath = joinPath(updated.backgroundImageFolder, value.text);
-        updated.backgroundImagePath = value.text; // joinPath(value.text);
-//        if (cv::imread(updated.backgroundImagePath, cv::IMREAD_COLOR).empty()) return errorResponse("background_image cannot be read");
-        if (cv::imread(joinPath(updated.backgroundImageFolder, updated.backgroundImagePath), cv::IMREAD_COLOR).empty()) return errorResponse("background_image cannot be read");
+        updated.backgroundImagePath = value.text;
+        const std::string path = joinPath(updated.backgroundImageFolder, updated.backgroundImagePath);
+        if (!fileExists(path)) return errorResponse("background_image cannot be read");
+        if (looksLikeHtmlFile(path)) return errorResponse("background HTML media is not supported in this build");
 
     } else if (key == "pause.image") {
         if (value.type != JsonValue::Type::String) return errorResponse("invalid value type");
         if (!isSafeRelativePath(value.text)) return errorResponse("invalid relative image path");
-       // updated.pauseImagePath = joinPath(updated.pauseImageFolder, value.text);
-         updated.pauseImagePath = value.text;
-        //if (cv::imread(updated.pauseImagePath, cv::IMREAD_COLOR).empty()) return errorResponse("pause.image cannot be read");
-        if (cv::imread(joinPath(updated.pauseImageFolder,updated.pauseImagePath), cv::IMREAD_COLOR).empty()) return errorResponse("pause.image cannot be read");
+        updated.pauseImagePath = value.text;
+        const std::string path = joinPath(updated.pauseImageFolder, updated.pauseImagePath);
+        if (!fileExists(path)) return errorResponse("pause.image cannot be read");
+        if (looksLikeHtmlFile(path)) return errorResponse("pause HTML media is not supported in this build");
     } else if (key == "pause.textColor") {
         if (value.type != JsonValue::Type::String) return errorResponse("invalid value type");
         if (!parseRgbaHexColor(value.text, updated.pauseImageTextColor)) return errorResponse("invalid value");
@@ -533,12 +572,15 @@ std::string IPCServer::handleLine(const std::string& line)
         if (value.type != JsonValue::Type::String) return errorResponse("invalid value type");
         if (!parseColor(value.text, updated.backgroundOverlayColor)) return errorResponse("invalid value");
     } else if (key == "no_mask" || key == "runtime.noMask" || key == "no_overlay" || key == "runtime.noOverlay"
-        || key == "pause.enabled" || key == "pause.showStatusText") {
+        || key == "pause.enabled" || key == "pause.showStatusText"
+        || key == "background.loopIfVideo" || key == "pause.loopIfVideo") {
         if (value.type != JsonValue::Type::Boolean) return errorResponse("invalid value type");
         if (key == "no_mask" || key == "runtime.noMask") updated.noMask = value.boolean;
         else if (key == "no_overlay" || key == "runtime.noOverlay") updated.noOverlay = value.boolean;
         else if (key == "pause.enabled") updated.pauseImageEnabled = value.boolean;
-        else updated.pauseImageShowStatusText = value.boolean;
+        else if (key == "pause.showStatusText") updated.pauseImageShowStatusText = value.boolean;
+        else if (key == "background.loopIfVideo") updated.backgroundLoopIfVideo = value.boolean;
+        else updated.pauseLoopIfVideo = value.boolean;
     } else if (key == "camera.enabled") {
         if (value.type != JsonValue::Type::Boolean) return errorResponse("invalid value type");
         updated.cameraEnabled = value.boolean;

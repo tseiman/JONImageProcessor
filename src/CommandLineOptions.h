@@ -88,6 +88,8 @@ struct ProcessorConfig {
     bool cameraEnabled = true;
     bool pauseImageEnabled = false;
     bool pauseImageShowStatusText = true;
+    bool backgroundLoopIfVideo = false;
+    bool pauseLoopIfVideo = false;
 };
 
 struct CommandLineResult {
