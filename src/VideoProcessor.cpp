@@ -732,8 +732,12 @@ void logStartupInfo(const ProcessorConfig& config, const ScreenInfo& screenInfo)
         : config.devicePath;
 
     LOG_INFO("JONImageProcessor starting");
-    LOG_VERBOSE("Program version: " << jonImageProcessorReleaseVersionOrUnreleased());
-    LOG_INFO("Git version: " << JON_IMAGE_PROCESSOR_GIT_VERSION);
+    if (jonImageProcessorHasReleaseVersion()) {
+        LOG_INFO("Release version: " << JON_IMAGE_PROCESSOR_RELEASE_VERSION);
+    } else {
+        LOG_VERBOSE("Program version: " << jonImageProcessorReleaseVersionOrUnreleased());
+        LOG_INFO("Git version: " << JON_IMAGE_PROCESSOR_GIT_VERSION);
+    }
     LOG_INFO("Build date: " << __DATE__ << " " << __TIME__ << " on " << JON_IMAGE_PROCESSOR_BUILD_HOST);
     LOG_INFO("Operating system: " << operatingSystemString());
     LOG_INFO("OpenCV version: " << CV_VERSION);

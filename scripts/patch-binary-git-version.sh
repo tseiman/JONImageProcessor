@@ -16,6 +16,11 @@ if [[ ! -f "${BINARY}" ]]; then
 fi
 
 if [[ -z "${NEW_HASH}" ]]; then
+    RELEASE_TAG="$(git describe --tags --exact-match HEAD 2>/dev/null || true)"
+    if [[ "${RELEASE_TAG}" =~ ^v?[0-9]+\.[0-9]+\.[0-9]+([-+][A-Za-z0-9._-]+)?$ ]]; then
+        echo "[INFO] Release tag ${RELEASE_TAG#v} detected; not patching a dev git hash into ${BINARY}"
+        exit 0
+    fi
     NEW_HASH="$(git rev-parse --short=7 HEAD)"
 fi
 

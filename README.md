@@ -288,7 +288,7 @@ journalctl -u JONImageProcessor.service -f
 - `-h`, `--help`: show help.
 - `-c`, `--config <path>`: read configuration from JSON file.
 - `-t`, `--test-config`: parse and validate configuration, then exit.
-- `--version`: show release/git version.
+- `--version`: show the release version for exact release-tag builds; otherwise show the 7-character dev git version.
 - `--daemon`: detach into legacy self-daemon mode.
 - `-n`, `--no-daemon`: run as foreground process; accepted for compatibility because this is now the default.
 - `-v`, `--verbose`: enable detailed logs.

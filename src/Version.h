@@ -25,7 +25,7 @@ inline std::string jonImageProcessorVersionText()
     std::string text = "JONImageProcessor ";
     if (jonImageProcessorHasReleaseVersion()) {
         text += JON_IMAGE_PROCESSOR_RELEASE_VERSION;
-        text += ' ';
+        return text;
     }
     text += "git=";
     text += JON_IMAGE_PROCESSOR_GIT_VERSION;
