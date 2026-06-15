@@ -919,6 +919,7 @@ int VideoProcessor::run()
     std::chrono::steady_clock::time_point cameraDevicePresentSince {};
     std::chrono::steady_clock::time_point cameraEnableStartedAt {};
     bool cameraWasDisabledByRuntime = !config_.cameraEnabled;
+    bool cameraRuntimePaused = !config_.cameraEnabled;
     const auto startedAt = std::chrono::steady_clock::now();
     auto intervalStartedAt = startedAt;
     std::size_t intervalFrames = 0;
@@ -970,15 +971,14 @@ int VideoProcessor::run()
         bool readOk = false;
         bool syntheticFrame = false;
         if (lowLatencyMode && usingCamera && !runtimeConfig.cameraEnabled) {
-            if (captureActive) {
-                lowLatencyCapture.stop();
-                captureActive = false;
-                LOG_INFO("Camera input disabled by runtime config");
+            if (captureOpened && !captureActive) {
+                lowLatencyCapture.start(*captureBackend);
+                captureActive = true;
             }
-            if (captureOpened) {
-                captureBackend->close();
-                captureOpened = false;
+            if (!cameraRuntimePaused) {
+                LOG_INFO("Camera input paused by runtime config; keeping V4L2 device open");
             }
+            cameraRuntimePaused = true;
             cameraDevicePresentSince = {};
             nextReconnectAttempt = std::chrono::steady_clock::now();
             cameraEnableStartedAt = {};
@@ -988,6 +988,10 @@ int VideoProcessor::run()
             std::this_thread::sleep_for(std::chrono::milliseconds(33));
             readOk = true;
         } else if (lowLatencyMode) {
+            if (cameraRuntimePaused) {
+                LOG_INFO("Camera input resumed by runtime config");
+                cameraRuntimePaused = false;
+            }
             if (cameraWasDisabledByRuntime && cameraEnableStartedAt == std::chrono::steady_clock::time_point {}) {
                 cameraEnableStartedAt = std::chrono::steady_clock::now();
             }

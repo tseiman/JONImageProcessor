@@ -417,7 +417,7 @@ All fields are optional. Unknown JSON fields log warnings and are ignored. Inval
 
 ## Runtime Behavior
 
-Camera input always uses V4L2 and low-latency capture. The capture thread keeps only the newest frame, so old frames are overwritten instead of queued. If the USB camera disappears, JONImageProcessor closes the broken capture path, renders `Camera DISCONNECTED`, and periodically retries the configured device after the device node has been visible for a short settle period. Reconnect is accepted after the reopened V4L2 device delivers a valid frame. If `camera.enabled` was set to false through IPC, the application renders `Camera OFF`. When camera input is enabled again, `Camera connecting...` is shown while the camera is being reopened; only if `/dev/video0` is still unavailable after `camera.connectTimeoutSeconds` does the status change to `Camera DISCONNECTED`. These camera status screens use the generated test pattern when `pause.enabled=false`; they use `pause.image` when `pause.enabled=true` and a pause image is configured. If the Jetson kernel does not recreate `/dev/video0` after a USB reconnect, JONImageProcessor continues showing `Camera DISCONNECTED`; a USB/controller reset or service restart may still be required.
+Camera input always uses V4L2 and low-latency capture. The capture thread keeps only the newest frame, so old frames are overwritten instead of queued. If the USB camera disappears, JONImageProcessor closes the broken capture path, renders `Camera DISCONNECTED`, and periodically retries the configured device after the device node has been visible for a short settle period. Reconnect is accepted after the reopened V4L2 device delivers a valid frame. If `camera.enabled` is set to false through IPC while the camera is open, JONImageProcessor keeps the V4L2 device and capture thread alive, drains camera frames, and renders `Camera OFF` instead of processing the live frame. This avoids a USB/V4L2 close/reopen cycle for normal runtime pauses. When camera input is enabled again, the already-open stream is used immediately when possible; if the device was unavailable, `Camera connecting...` is shown while the camera is being reopened, and only if `/dev/video0` is still unavailable after `camera.connectTimeoutSeconds` does the status change to `Camera DISCONNECTED`. These camera status screens use the generated test pattern when `pause.enabled=false`; they use `pause.image` when `pause.enabled=true` and a pause image is configured. If the Jetson kernel does not recreate `/dev/video0` after a USB reconnect, JONImageProcessor continues showing `Camera DISCONNECTED`; a USB/controller reset or service restart may still be required.
 
 Video file input uses OpenCV file capture and processes frames sequentially.
 
@@ -447,7 +447,7 @@ Commands:
 
 Writable keys:
 
-- `camera.enabled`: boolean. When false, camera capture stops and a `Camera OFF` status screen is rendered.
+- `camera.enabled`: boolean. When false, live camera processing is paused and a `Camera OFF` status screen is rendered. If the camera is already open, the V4L2 device remains open to avoid a close/reopen cycle.
 - `pause.enabled`: boolean. When true, camera status screens use `pause.image`; when false, they use the generated test pattern.
 - `pause.image`: relative image name under `pause.folder` when set through IPC.
 - `pause.folder`: read-only base folder used when `pause.image` is set through IPC.
