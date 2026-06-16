@@ -1,6 +1,7 @@
 #include "ipc/IPCServer.h"
 
 #include "Logger.h"
+#include "Version.h"
 
 #include <opencv2/imgcodecs.hpp>
 
@@ -368,6 +369,7 @@ std::string valueJson(const ProcessorConfig& c, const std::string& key, const Be
     if (key == "no_overlay" || key == "runtime.noOverlay") return c.noOverlay ? "true" : "false";
     if (key == "camera.enabled") return c.cameraEnabled ? "true" : "false";
     if (key == "benchmark") return benchmarkJson(b);
+    if (key == "version" || key == "system.version") return "\"" + escapeJson(jonImageProcessorVersionText()) + "\"";
     return {};
 }
 
@@ -383,7 +385,8 @@ bool knownKey(const std::string& key)
         || key == "pause.enabled" || key == "pause.image" || key == "pause.loopIfVideo" || key == "pause.folder" || key == "pause.showStatusText" || key == "pause.textColor"
         || key == "pause.textPosition" || key == "pause.textSize" || key == "pause.font"
         || key == "pause.fontDirectory" || key == "pause.fontAlign"
-        || key == "runtime.noMask" || key == "runtime.noOverlay" || key == "camera.enabled";
+        || key == "runtime.noMask" || key == "runtime.noOverlay" || key == "camera.enabled"
+        || key == "version" || key == "system.version";
 }
 
 std::string validateRuntimeConfig(const ProcessorConfig& config)
@@ -540,7 +543,8 @@ std::string IPCServer::handleLine(const std::string& line)
             << "\",\"fontDirectory\":\"" << escapeJson(current.pauseImageFontDirectory)
             << "\",\"fontAlign\":\"" << pauseFontAlignToString(current.pauseImageFontAlign) << "\"}"
             << ",\"runtime\":{\"noMask\":" << (current.noMask ? "true" : "false")
-            << ",\"noOverlay\":" << (current.noOverlay ? "true" : "false") << "}";
+            << ",\"noOverlay\":" << (current.noOverlay ? "true" : "false") << "}"
+            << ",\"system\":{\"version\":\"" << escapeJson(jonImageProcessorVersionText()) << "\"}";
         if (current.benchmark) {
             out << ",\"benchmark\":" << benchmarkJson(benchmark);
         }
@@ -566,6 +570,9 @@ std::string IPCServer::handleLine(const std::string& line)
     }
     if (key == "benchmark") {
         return loggedErrorResponse("benchmark is read-only");
+    }
+    if (key == "version" || key == "system.version") {
+        return loggedErrorResponse("version is read-only");
     }
     if (key == "background.folder" || key == "pause.folder" || key == "pause.fontDirectory") {
         return loggedErrorResponse(key + " is read-only");
