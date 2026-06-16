@@ -116,16 +116,28 @@ struct MediaFile {
     ~MediaFile()
     {
         release();
+        if (html) {
+            // WPEBackend-fdo has shown crashes on Jetson when its Wayland/EGL
+            // proxies are torn down during runtime switches. Let the OS reclaim
+            // the renderer at process exit instead of destructing it here.
+            (void)html.release();
+        }
     }
 
-    void release()
+    void stopVideoDecoder()
     {
         stopVideoThread = true;
         if (videoThread.joinable()) {
             videoThread.join();
         }
         video.release();
-        if (html) html.reset();
+        stopVideoThread = false;
+    }
+
+    void release()
+    {
+        stopVideoDecoder();
+        if (html) html->reset();
         image.release();
         {
             std::lock_guard<std::mutex> lock(videoMutex);
@@ -136,11 +148,29 @@ struct MediaFile {
         htmlSize = {};
         videoFps = 0.0;
         videoFrameCount = 0.0;
-        stopVideoThread = false;
         isVideo = false;
         isHtml = false;
         warnedFrameFailure = false;
         loop = false;
+    }
+
+    void replaceWithLoadedHtml(const std::string& nextPath, std::time_t nextMtime, bool nextLoop, const cv::Size& renderSize)
+    {
+        stopVideoDecoder();
+        image.release();
+        {
+            std::lock_guard<std::mutex> lock(videoMutex);
+            lastVideoFrame.release();
+        }
+        path = nextPath;
+        mtime = nextMtime;
+        loop = nextLoop;
+        htmlSize = renderSize;
+        videoFps = 0.0;
+        videoFrameCount = 0.0;
+        isVideo = false;
+        isHtml = true;
+        warnedFrameFailure = false;
     }
 
     void startVideoDecoder()
@@ -187,20 +217,16 @@ struct MediaFile {
                 LOG_ERROR("HTML media is not supported in this build: " << nextPath);
                 return hadMedia;
             }
-            auto nextHtml = std::make_unique<HtmlMediaRenderer>();
+            if (!html) {
+                html = std::make_unique<HtmlMediaRenderer>();
+            }
             std::string error;
-            if (!nextHtml->load(nextPath, renderSize, error)) {
+            if (!html->load(nextPath, renderSize, error)) {
                 LOG_ERROR("Cannot load " << label << " HTML media: " << error);
                 return hadMedia;
             }
-            release();
-            path = nextPath;
-            mtime = nextMtime;
-            loop = nextLoop;
-            html = std::move(nextHtml);
+            replaceWithLoadedHtml(nextPath, nextMtime, nextLoop, renderSize);
             LOG_INFO("Loaded " << label << " HTML media: " << nextPath);
-            isHtml = true;
-            htmlSize = renderSize;
             return true;
         }
 

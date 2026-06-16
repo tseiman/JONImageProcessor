@@ -69,6 +69,7 @@ struct HtmlMediaRenderer::Impl {
     std::mutex frameMutex;
     std::atomic<bool> loaded {false};
     std::atomic<bool> haveFrame {false};
+    bool initialized = false;
     GlEGLImageTargetTexture2DOES glEGLImageTargetTexture2DOES = nullptr;
 
     ~Impl()
@@ -79,8 +80,7 @@ struct HtmlMediaRenderer::Impl {
     {
         // WPEBackend-fdo can crash on Jetson when its Wayland/EGL proxies are
         // destroyed during runtime media switches. Keep those objects alive and
-        // only reset the exported frame state; the process is long-lived and
-        // switches media rarely compared to frame rendering.
+        // only reset the exported frame state.
         latestFrame.release();
         loaded = false;
         haveFrame = false;
@@ -88,6 +88,7 @@ struct HtmlMediaRenderer::Impl {
 
     bool initializeEgl(std::string& error)
     {
+        LOG_INFO("Initializing WPE EGL display");
         eglDisplay = eglGetDisplay(EGL_DEFAULT_DISPLAY);
         if (eglDisplay == EGL_NO_DISPLAY || !eglInitialize(eglDisplay, nullptr, nullptr)) {
             using EglGetPlatformDisplayExt = EGLDisplay (*)(EGLenum, void*, const EGLint*);
@@ -101,6 +102,7 @@ struct HtmlMediaRenderer::Impl {
             return false;
         }
 
+        LOG_INFO("Choosing WPE EGL config");
         const EGLint configAttributes[] = {
             EGL_SURFACE_TYPE, EGL_PBUFFER_BIT,
             EGL_RENDERABLE_TYPE, EGL_OPENGL_ES2_BIT,
@@ -121,6 +123,7 @@ struct HtmlMediaRenderer::Impl {
             EGL_HEIGHT, std::max(1, size.height),
             EGL_NONE
         };
+        LOG_INFO("Creating WPE EGL pbuffer " << size.width << "x" << size.height);
         eglSurface = eglCreatePbufferSurface(eglDisplay, eglConfig, surfaceAttributes);
         if (eglSurface == EGL_NO_SURFACE) {
             error = "failed to create EGL pbuffer for WPE HTML renderer";
@@ -128,6 +131,7 @@ struct HtmlMediaRenderer::Impl {
         }
 
         const EGLint contextAttributes[] = { EGL_CONTEXT_CLIENT_VERSION, 2, EGL_NONE };
+        LOG_INFO("Creating WPE EGL context");
         eglContext = eglCreateContext(eglDisplay, eglConfig, EGL_NO_CONTEXT, contextAttributes);
         if (eglContext == EGL_NO_CONTEXT || !eglMakeCurrent(eglDisplay, eglSurface, eglSurface, eglContext)) {
             error = "failed to create EGL context for WPE HTML renderer";
@@ -140,6 +144,7 @@ struct HtmlMediaRenderer::Impl {
             return false;
         }
 
+        LOG_INFO("Initializing WPEBackend-fdo for EGL display");
         if (!wpe_fdo_initialize_for_egl_display(eglDisplay)) {
             error = "failed to initialize WPEBackend-fdo for EGL display";
             return false;
@@ -209,19 +214,19 @@ struct HtmlMediaRenderer::Impl {
         glDeleteTextures(1, &texture);
     }
 
-    bool load(const std::string& path, const cv::Size& nextSize, std::string& error)
+    bool initializeRenderer(const cv::Size& nextSize, std::string& error)
     {
-        reset();
         size = nextSize;
         if (size.width <= 0 || size.height <= 0) {
             error = "invalid WPE HTML render size";
             return false;
         }
-        if (!initializeEgl(error)) {
-            return false;
-        }
+        LOG_INFO("Loading WPEBackend-fdo runtime library");
         if (!wpe_loader_init("libWPEBackend-fdo-1.0.so")) {
             error = "failed to load WPEBackend-fdo runtime library";
+            return false;
+        }
+        if (!initializeEgl(error)) {
             return false;
         }
 
@@ -232,12 +237,14 @@ struct HtmlMediaRenderer::Impl {
             nullptr,
             nullptr
         };
+        LOG_INFO("Creating WPE exportable EGL view");
         exportable = wpe_view_backend_exportable_fdo_egl_create(&client, this, static_cast<uint32_t>(size.width), static_cast<uint32_t>(size.height));
         if (!exportable) {
             error = "failed to create WPEBackend-fdo exportable EGL view";
             return false;
         }
 
+        LOG_INFO("Creating WPE WebView");
         webViewBackend = webkit_web_view_backend_new(wpe_view_backend_exportable_fdo_get_view_backend(exportable), nullptr, nullptr);
         webView = webkit_web_view_new(webViewBackend);
         if (!webView) {
@@ -247,12 +254,29 @@ struct HtmlMediaRenderer::Impl {
 
         WebKitColor transparent {0, 0, 0, 0};
         webkit_web_view_set_background_color(webView, &transparent);
+        initialized = true;
+        return true;
+    }
+
+    bool load(const std::string& path, const cv::Size& nextSize, std::string& error)
+    {
+        reset();
+        if (!initialized) {
+            if (!initializeRenderer(nextSize, error)) {
+                return false;
+            }
+        } else if (nextSize != size) {
+            LOG_WARNING("Ignoring WPE HTML resize after initialization; renderer remains "
+                << size.width << "x" << size.height << ", requested "
+                << nextSize.width << "x" << nextSize.height);
+        }
 
         const std::string uri = fileUri(path);
         if (uri.empty()) {
             error = "failed to create file URI for HTML media";
             return false;
         }
+        LOG_INFO("Loading WPE HTML URI: " << uri);
         webkit_web_view_load_uri(webView, uri.c_str());
 
         const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(3);
@@ -260,6 +284,11 @@ struct HtmlMediaRenderer::Impl {
             iterateMainContext();
             std::this_thread::sleep_for(std::chrono::milliseconds(10));
         }
+        if (!haveFrame) {
+            error = "timed out waiting for first WPE HTML frame";
+            return false;
+        }
+        LOG_INFO("First WPE HTML frame received");
         loaded = true;
         return true;
     }
