@@ -489,9 +489,7 @@ cv::Mat makeStatusFrame(
             } else {
                 buffers->pauseMedia.warnedFrameFailure = false;
                 cv::Mat frame;
-                if (buffers->pauseMedia.isVideo || buffers->pauseMedia.isHtml || buffers->scaledPauseImage.size() != size || buffers->scaledPauseImage.type() != CV_8UC3) {
-                    cv::resize(pauseImage, buffers->scaledPauseImage, size, 0.0, 0.0, cv::INTER_LINEAR);
-                }
+                cv::resize(pauseImage, buffers->scaledPauseImage, size, 0.0, 0.0, cv::INTER_LINEAR);
                 frame = buffers->scaledPauseImage.clone();
                 if (config->pauseImageShowStatusText) {
                     const int marginX = size.width / 8;
