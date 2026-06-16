@@ -171,7 +171,8 @@ struct MediaFile {
     bool ensureLoaded(const std::string& nextPath, bool nextLoop, const cv::Size& renderSize, const std::string& label)
     {
         const std::time_t nextMtime = fileMtime(nextPath);
-        if (path == nextPath && mtime == nextMtime && loop == nextLoop && (!isHtml || htmlSize == renderSize)) {
+        if (path == nextPath && mtime == nextMtime && (!isHtml || htmlSize == renderSize)) {
+            loop = nextLoop;
             return !image.empty() || video.isOpened() || !lastVideoFrame.empty() || isHtml;
         }
         const bool hadMedia = !path.empty();
