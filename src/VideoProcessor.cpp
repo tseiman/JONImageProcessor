@@ -761,10 +761,7 @@ cv::Mat applyBackgroundImage(
         return frame;
     }
 
-    if (buffers.scaledBackgroundImage.size() != frame.size()
-        || buffers.scaledBackgroundImage.type() != frame.type()) {
-        cv::resize(backgroundImage, buffers.scaledBackgroundImage, frame.size(), 0.0, 0.0, cv::INTER_LINEAR);
-    }
+    cv::resize(backgroundImage, buffers.scaledBackgroundImage, frame.size(), 0.0, 0.0, cv::INTER_LINEAR);
 
     buffers.result.create(frame.size(), frame.type());
 
