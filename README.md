@@ -427,7 +427,7 @@ Display mode is fixed to fill. The image fills the output canvas while preservin
 
 Use `--benchmark` to collect timing statistics for capture, resize, TensorRT preprocessing, TensorRT inference, postprocessing, mask upscale, background effect, display, and total frame time. The values can be read through IPC. Add `--verbose` when benchmark progress and shutdown summaries should be written to the log.
 
-TensorRT segmentation preprocessing preserves the source aspect ratio with letterboxing instead of stretching the camera frame into the model input. The padding is removed from the model output before the mask is composited back onto the processed frame. This keeps body proportions closer to the camera image at `384x384` model sizes.
+TensorRT segmentation preprocessing preserves the source aspect ratio with letterboxing instead of stretching the camera frame into the model input. The RGB input is normalized to `[-1..1]`, matching MODNet-style matting models. The padding is removed from the model output before the mask is composited back onto the processed frame. This keeps body proportions closer to the camera image at `384x384` model sizes.
 
 For pipeline timing without display or effects:
 

@@ -606,7 +606,7 @@ bool TensorRtMaskBackend::generate(
     cv::Mat rgb;
     cv::cvtColor(resized, rgb, cv::COLOR_BGR2RGB);
     cv::Mat rgbFloat;
-    rgb.convertTo(rgbFloat, CV_32FC3, 1.0 / 255.0);
+    rgb.convertTo(rgbFloat, CV_32FC3, 1.0 / 127.5, -1.0);
 
     std::vector<cv::Mat> channels;
     cv::split(rgbFloat, channels);

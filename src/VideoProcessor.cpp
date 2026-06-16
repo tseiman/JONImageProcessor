@@ -654,9 +654,9 @@ cv::Mat applyMaskPostprocessing(
     processed.copyTo(alpha, foreground);
 
     if (config.maskMorphology != MaskMorphologyMode::Off) {
-        const int closeSize = config.maskMorphology == MaskMorphologyMode::Strong ? 9 : 5;
-        const int dilateSize = config.maskMorphology == MaskMorphologyMode::Strong ? 7 : 5;
-        const int blurSize = config.maskMorphology == MaskMorphologyMode::Strong ? 11 : 7;
+        const int closeSize = config.maskMorphology == MaskMorphologyMode::Strong ? 15 : 7;
+        const int dilateSize = config.maskMorphology == MaskMorphologyMode::Strong ? 21 : 9;
+        const int blurSize = config.maskMorphology == MaskMorphologyMode::Strong ? 21 : 9;
 
         const cv::Mat closeKernel = cv::getStructuringElement(
             cv::MORPH_ELLIPSE,
