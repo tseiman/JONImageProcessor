@@ -244,7 +244,7 @@ bool fileExists(const std::string& path)
     return static_cast<bool>(file);
 }
 
-bool looksLikeHtmlFile(const std::string& path)
+[[maybe_unused]] bool looksLikeHtmlFile(const std::string& path)
 {
     std::ifstream file(path);
     if (!file) return false;

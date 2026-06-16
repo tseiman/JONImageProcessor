@@ -308,7 +308,7 @@ std::string resolveMediaPath(const std::string& folder, const std::string& path)
     return folder + "/" + path;
 }
 
-bool looksLikeHtmlFile(const std::string& path)
+[[maybe_unused]] bool looksLikeHtmlFile(const std::string& path)
 {
     std::ifstream file(path);
     if (!file) return false;
@@ -435,6 +435,9 @@ bool validateStartupFiles(const ProcessorConfig& config, std::string& error)
 
 bool validateConfiguredMediaTypes(const ProcessorConfig& config, std::string& error)
 {
+#if defined(JON_ENABLE_WPE_HTML_RENDERER)
+    (void)error;
+#endif
     const std::string backgroundPath = resolveMediaPath(config.backgroundImageFolder, config.backgroundImagePath);
 #if !defined(JON_ENABLE_WPE_HTML_RENDERER)
     if (config.backgroundEffect == BackgroundEffect::Image && !backgroundPath.empty() && looksLikeHtmlFile(backgroundPath)) {
