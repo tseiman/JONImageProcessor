@@ -31,6 +31,12 @@ enum class BackgroundEffect {
     Image
 };
 
+enum class PauseFontAlign {
+    Left,
+    Center,
+    Right
+};
+
 struct RgbColor {
     int r = 0;
     int g = 255;
@@ -72,10 +78,12 @@ struct ProcessorConfig {
     std::string pauseImagePath;
     std::string pauseImageFolder = ".";
     std::string pauseImageFont = "simplex";
+    std::string pauseImageFontDirectory = ".";
     std::string ipcSocketPath = "/tmp/jonimageprocessor.sock";
     RgbColor backgroundOverlayColor;
     RgbaColor pauseImageTextColor;
     Point2i pauseImageTextPosition;
+    PauseFontAlign pauseImageFontAlign = PauseFontAlign::Left;
     double backgroundOverlayAlpha = 0.35;
     double pauseImageTextSize = 1.6;
     int blurStrength = 15;
@@ -110,3 +118,4 @@ std::string displayBackendToString(DisplayBackendType backend);
 std::string cameraFormatToString(CameraFormat format);
 std::string maskMorphologyModeToString(MaskMorphologyMode mode);
 std::string backgroundEffectToString(BackgroundEffect effect);
+std::string pauseFontAlignToString(PauseFontAlign align);

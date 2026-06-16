@@ -51,6 +51,37 @@ else()
     message(STATUS "WPE WebKit development files not found; HTML media files will be rejected")
 endif()
 
+find_path(FREETYPE_INCLUDE_DIR
+    NAMES ft2build.h
+    PATHS /usr/include/freetype2 /usr/include /usr/local/include /usr/local/include/freetype2
+    PATH_SUFFIXES freetype2
+    NO_CMAKE_FIND_ROOT_PATH
+)
+if (NOT FREETYPE_INCLUDE_DIR AND EXISTS "/usr/include/freetype2/ft2build.h")
+    set(FREETYPE_INCLUDE_DIR "/usr/include/freetype2")
+endif()
+find_library(FREETYPE_LIBRARY
+    NAMES freetype libfreetype.so.6
+    PATHS /usr /usr/local
+    PATH_SUFFIXES lib lib64 lib/aarch64-linux-gnu
+)
+if (NOT FREETYPE_LIBRARY AND CMAKE_SYSROOT)
+    find_file(FREETYPE_LIBRARY
+        NAMES libfreetype.so libfreetype.so.6
+        PATHS
+            "${CMAKE_SYSROOT}/usr/lib/aarch64-linux-gnu"
+            "${CMAKE_SYSROOT}/lib/aarch64-linux-gnu"
+            "${CMAKE_SYSROOT}/usr/lib"
+            "${CMAKE_SYSROOT}/lib"
+        NO_DEFAULT_PATH
+    )
+endif()
+if (FREETYPE_INCLUDE_DIR AND FREETYPE_LIBRARY)
+    message(STATUS "FreeType pause text rendering enabled")
+else()
+    message(STATUS "FreeType development files not found; pause text is limited to built-in Hershey fonts")
+endif()
+
 option(JON_ENABLE_TENSORRT_MASK "Enable generic TensorRT/ONNX mask backend" OFF)
 option(JON_ENABLE_DRM_DISPLAY "Enable Linux DRM/KMS display backend" OFF)
 set(JON_IMAGE_PROCESSOR_BUILD_HOST_OVERRIDE "" CACHE STRING "Optional build host name override, useful for containerized cross builds")
@@ -129,6 +160,12 @@ if (WPE_HTML_RENDERER_FOUND)
     target_include_directories(JONImageProcessor PRIVATE ${WPE_HTML_RENDERER_INCLUDE_DIRS})
     target_link_directories(JONImageProcessor PRIVATE ${WPE_HTML_RENDERER_LIBRARY_DIRS})
     target_link_libraries(JONImageProcessor PRIVATE ${WPE_HTML_RENDERER_LIBRARIES})
+endif()
+
+if (FREETYPE_INCLUDE_DIR AND FREETYPE_LIBRARY)
+    target_compile_definitions(JONImageProcessor PRIVATE JON_ENABLE_FREETYPE_TEXT=1)
+    target_include_directories(JONImageProcessor PRIVATE ${FREETYPE_INCLUDE_DIR})
+    target_link_libraries(JONImageProcessor PRIVATE ${FREETYPE_LIBRARY})
 endif()
 
 if (JON_ENABLE_TENSORRT_MASK)

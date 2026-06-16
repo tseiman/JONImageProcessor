@@ -48,6 +48,8 @@ enum OptionId {
     OptionPauseImageTextPosition,
     OptionPauseImageTextSize,
     OptionPauseImageFont,
+    OptionPauseImageFontDirectory,
+    OptionPauseImageFontAlign,
     OptionBackgroundOverlayColor,
     OptionBackgroundOverlayAlpha,
     OptionBlurStrength,
@@ -102,7 +104,9 @@ const std::vector<OptionDefinition>& optionDefinitions()
         {OptionPauseImageTextColor, 0, "pause-image-text-color", required_argument, "RRGGBBAA", "Status text color for pause image overlay", "ffffffff"},
         {OptionPauseImageTextPosition, 0, "pause-image-text-position", required_argument, "XxY", "Status text position on pause image", "auto"},
         {OptionPauseImageTextSize, 0, "pause-image-text-size", required_argument, "value", "Status text size on pause image", "1.6"},
-        {OptionPauseImageFont, 0, "pause-image-font", required_argument, "font", "Pause image font: plain, simplex, duplex, complex, triplex, complex-small, script-simplex, script-complex", "simplex"},
+        {OptionPauseImageFont, 0, "pause-image-font", required_argument, "font", "Pause image font: built-in Hershey name or safe TTF base name", "simplex"},
+        {OptionPauseImageFontDirectory, 0, "pause-image-font-directory", required_argument, "path", "Directory for TTF pause image fonts", "."},
+        {OptionPauseImageFontAlign, 0, "pause-image-font-align", required_argument, "left|center|right", "Pause image status text alignment", "left"},
         {OptionBackgroundOverlayColor, 0, "background-overlay-color", required_argument, "R,G,B", "Background color for --background-effect color; ignored for none/blur/image", "0,255,0"},
         {OptionBackgroundOverlayAlpha, 0, "background-overlay-alpha", required_argument, "0.0..1.0", "Background alpha for --background-effect color; ignored for none/blur/image", "0.35"},
         {OptionBlurStrength, 0, "blur-strength", required_argument, "value", "Blur strength for --background-effect blur", "15"},
@@ -243,7 +247,42 @@ bool parsePauseFont(const char* value, std::string& target, std::string& error)
         target = parsed;
         return true;
     }
+
+    if (!parsed.empty()
+        && parsed.find('/') == std::string::npos
+        && parsed.find('\\') == std::string::npos
+        && parsed.find("..") == std::string::npos) {
+        target = parsed;
+        return true;
+    }
+
     error = "Invalid pause image font: " + parsed;
+    return false;
+}
+
+bool isBuiltInPauseFont(const std::string& font)
+{
+    return font == "plain" || font == "simplex" || font == "duplex"
+        || font == "complex" || font == "triplex" || font == "complex-small"
+        || font == "script-simplex" || font == "script-complex";
+}
+
+bool parsePauseFontAlign(const char* value, PauseFontAlign& target, std::string& error)
+{
+    const std::string parsed(value);
+    if (parsed == "left") {
+        target = PauseFontAlign::Left;
+        return true;
+    }
+    if (parsed == "center") {
+        target = PauseFontAlign::Center;
+        return true;
+    }
+    if (parsed == "right") {
+        target = PauseFontAlign::Right;
+        return true;
+    }
+    error = "Invalid pause image font align: " + parsed + " (allowed: left, center, right)";
     return false;
 }
 
@@ -323,6 +362,18 @@ void warnMissingConfiguredFiles(const ProcessorConfig& config)
     if (!directoryExists(config.pauseImageFolder)) {
         LOG_WARNING("Configured pause image folder does not exist: " << config.pauseImageFolder);
     }
+    if (!directoryExists(config.pauseImageFontDirectory)) {
+        LOG_WARNING("Configured pause image font directory does not exist: " << config.pauseImageFontDirectory);
+    }
+    if (!isBuiltInPauseFont(config.pauseImageFont)) {
+        const std::string fontPath = resolveMediaPath(config.pauseImageFontDirectory, config.pauseImageFont + ".ttf");
+        if (!fileExists(fontPath)) {
+            LOG_WARNING("Configured pause TTF font does not exist: " << fontPath);
+        }
+#if !defined(JON_ENABLE_FREETYPE_TEXT)
+        LOG_WARNING("Configured pause TTF font requires a build with FreeType support: " << config.pauseImageFont);
+#endif
+    }
 }
 
 bool validateStartupFiles(const ProcessorConfig& config, std::string& error)
@@ -349,6 +400,22 @@ bool validateStartupFiles(const ProcessorConfig& config, std::string& error)
     if (!directoryExists(config.pauseImageFolder)) {
         error = "Pause image folder does not exist: " + config.pauseImageFolder;
         return false;
+    }
+    if (!directoryExists(config.pauseImageFontDirectory)) {
+        error = "Pause image font directory does not exist: " + config.pauseImageFontDirectory;
+        return false;
+    }
+    if (!isBuiltInPauseFont(config.pauseImageFont)) {
+        const std::string fontPath = resolveMediaPath(config.pauseImageFontDirectory, config.pauseImageFont + ".ttf");
+#if !defined(JON_ENABLE_FREETYPE_TEXT)
+        error = "Pause TTF fonts are not supported in this build: " + config.pauseImageFont;
+        return false;
+#else
+        if (!fileExists(fontPath)) {
+            error = "Pause TTF font does not exist: " + fontPath;
+            return false;
+        }
+#endif
     }
     if (!config.pauseImagePath.empty()) {
         const std::string pausePath = resolveMediaPath(config.pauseImageFolder, config.pauseImagePath);
@@ -744,6 +811,16 @@ bool parseCommandLine(int argc, char** argv, CommandLineResult& result, std::str
         case OptionPauseImageFont:
             if (!parsePauseFont(optarg, result.config.pauseImageFont, error)) return false;
             break;
+        case OptionPauseImageFontDirectory:
+            result.config.pauseImageFontDirectory = optarg;
+            if (result.config.pauseImageFontDirectory.empty()) {
+                error = "--pause-image-font-directory must not be empty.";
+                return false;
+            }
+            break;
+        case OptionPauseImageFontAlign:
+            if (!parsePauseFontAlign(optarg, result.config.pauseImageFontAlign, error)) return false;
+            break;
         case OptionBackgroundOverlayColor:
             if (!parseOverlayColor(optarg, result.config.backgroundOverlayColor, error)) return false;
             break;
@@ -911,6 +988,19 @@ std::string backgroundEffectToString(BackgroundEffect effect)
         return "blur";
     case BackgroundEffect::Image:
         return "image";
+    }
+    return "unknown";
+}
+
+std::string pauseFontAlignToString(PauseFontAlign align)
+{
+    switch (align) {
+    case PauseFontAlign::Left:
+        return "left";
+    case PauseFontAlign::Center:
+        return "center";
+    case PauseFontAlign::Right:
+        return "right";
     }
     return "unknown";
 }

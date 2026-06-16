@@ -67,7 +67,7 @@ Pull the NVIDIA JetPack cross-compile container:
 docker pull nvcr.io/nvidia/jetpack-linux-aarch64-crosscompile-x86:6.1
 ```
 
-Create a Jetson sysroot on the build host. The sysroot must contain the Jetson target libraries and headers, including OpenCV, CUDA, TensorRT, DRM/KMS, GBM, EGL, GLES, and optionally WPE WebKit for HTML media:
+Create a Jetson sysroot on the build host. The sysroot must contain the Jetson target libraries and headers, including OpenCV, CUDA, TensorRT, DRM/KMS, GBM, EGL, GLES, FreeType for TTF pause text, and optionally WPE WebKit for HTML media:
 
 ```bash
 mkdir -p "$HOME/sysroots/orin-nano" && rsync -aHAX --numeric-ids tseiman@jon:/usr "$HOME/sysroots/orin-nano/" && rsync -aHAX --numeric-ids tseiman@jon:/lib "$HOME/sysroots/orin-nano/" && rsync -aHAX --numeric-ids tseiman@jon:/opt "$HOME/sysroots/orin-nano/"
@@ -83,6 +83,12 @@ For HTML background or pause media, install WPE runtime and development files on
 
 ```bash
 sudo apt-get install libwpewebkit-1.1-0 libwpewebkit-1.1-dev libwpebackend-fdo-1.0-1 libwpebackend-fdo-1.0-dev
+```
+
+For TTF pause text rendering, install FreeType development files on the Jetson and sync the sysroot again:
+
+```bash
+sudo apt-get install libfreetype-dev
 ```
 
 ### Jetson Target
@@ -315,7 +321,9 @@ journalctl -u JONImageProcessor.service -f
 - `--pause-image-text-color <RRGGBBAA>`: status text color for the pause image overlay. Default: `ffffffff`.
 - `--pause-image-text-position <XxY>`: status text position on the pause image. Use `auto` for the default centered position. Default: `auto`.
 - `--pause-image-text-size <value>`: status text size on the pause image. Default: `1.6`.
-- `--pause-image-font <font>`: status text font on the pause image. Supported: `plain`, `simplex`, `duplex`, `complex`, `triplex`, `complex-small`, `script-simplex`, `script-complex`. Default: `simplex`.
+- `--pause-image-font <font>`: status text font on the pause image. Supported built-ins: `plain`, `simplex`, `duplex`, `complex`, `triplex`, `complex-small`, `script-simplex`, `script-complex`. Other safe names load `<font>.ttf` from `--pause-image-font-directory` when the binary was built with FreeType support. Default: `simplex`.
+- `--pause-image-font-directory <path>`: directory for TTF pause image fonts. Default: `.`.
+- `--pause-image-font-align <left|center|right>`: status text alignment. The configured X position is interpreted as the left edge, center, or right edge. Default: `left`.
 - `--background-overlay-color <R,G,B>`: color used by `--background-effect color`. Ignored for none/blur/image. Default: `0,255,0`.
 - `--background-overlay-alpha <0.0..1.0>`: alpha used by `--background-effect color`. Ignored for none/blur/image. Default: `0.35`.
 - `--blur-strength <1..100>`: blur strength used by `--background-effect blur`. Default: `15`.
@@ -395,7 +403,9 @@ Supported JSON groups:
     "textColor": "ffffffff",
     "textPosition": "auto",
     "textSize": 1.6,
-    "font": "simplex"
+    "font": "simplex",
+    "fontDirectory": "/opt/JONImageProcessor/var/fonts",
+    "fontAlign": "left"
   },
   "output": {
     "size": "auto"
@@ -413,7 +423,7 @@ Supported JSON groups:
 }
 ```
 
-All fields are optional. Unknown JSON fields log warnings and are ignored. Invalid JSON, invalid types, and invalid values stop startup with an error. JSON syntax errors include line and column information where possible. `--test-config` warns about missing referenced files. Normal startup fails if an active segmentation model, background media, pause media, background image folder, or pause image folder does not exist. Runtime IPC updates for image paths validate that the file can be read and return a JSON error if not. IPC only accepts relative image names under `background.folder` or `pause.folder`; absolute paths and `..` traversal are rejected. `background.loopIfVideo` and `pause.loopIfVideo` loop media files when OpenCV detects them as video. HTML media files are detected from file content. They require a binary built with WPE WebKit and WPEBackend-fdo support; otherwise startup, `--test-config`, and IPC updates reject them clearly. `camera.connectTimeoutSeconds` controls how long `Camera connecting...` is shown after runtime camera re-enable before falling back to `Camera DISCONNECTED`. `pause.enabled` switches camera status screens from the generated pattern to `pause.image` while the camera is off, connecting, or disconnected; it does not replace a live camera frame. `pause.showStatusText` controls whether the status label is rendered over that image. `pause.textColor` uses `RRGGBBAA` hex, for example `ffffff0a`. `pause.textPosition` uses `XxY` or `auto`; `pause.textSize` controls the rendered text scale. `pause.font` uses a fixed OpenCV Hershey font name, not a dynamic operating-system font list. `diagnostics.benchmark` enables benchmark collection for IPC without passing `--benchmark`.
+All fields are optional. Unknown JSON fields log warnings and are ignored. Invalid JSON, invalid types, and invalid values stop startup with an error. JSON syntax errors include line and column information where possible. `--test-config` warns about missing referenced files. Normal startup fails if an active segmentation model, background media, pause media, background image folder, pause image folder, or configured TTF pause font does not exist. Runtime IPC updates for image paths validate that the file can be read and return a JSON error if not. IPC only accepts relative image names under `background.folder` or `pause.folder`; absolute paths and `..` traversal are rejected. `background.loopIfVideo` and `pause.loopIfVideo` loop media files when OpenCV detects them as video. HTML media files are detected from file content. They require a binary built with WPE WebKit and WPEBackend-fdo support; otherwise startup, `--test-config`, and IPC updates reject them clearly. `camera.connectTimeoutSeconds` controls how long `Camera connecting...` is shown after runtime camera re-enable before falling back to `Camera DISCONNECTED`. `pause.enabled` switches camera status screens from the generated pattern to `pause.image` while the camera is off, connecting, or disconnected; it does not replace a live camera frame. `pause.showStatusText` controls whether the status label is rendered over that image. `pause.textColor` uses `RRGGBBAA` hex, for example `ffffff0a`. `pause.textPosition` uses `XxY` or `auto`; `pause.textSize` controls the rendered text scale. `pause.font` accepts the built-in OpenCV Hershey font names or a safe TTF base name. TTF names must not contain `/`, `\`, or `..`; `<name>.ttf` is loaded from `pause.fontDirectory` when FreeType support was available at build time. `pause.fontAlign` controls multiline text alignment with values `left`, `center`, or `right`. `diagnostics.benchmark` enables benchmark collection for IPC without passing `--benchmark`.
 
 ## Runtime Behavior
 
@@ -458,7 +468,9 @@ Writable keys:
 - `pause.textColor`: `RRGGBBAA` hex color for the pause image status text.
 - `pause.textPosition`: `XxY` or `auto`.
 - `pause.textSize`: float `0.1..10.0`.
-- `pause.font`: one of `plain`, `simplex`, `duplex`, `complex`, `triplex`, `complex-small`, `script-simplex`, `script-complex`.
+- `pause.font`: built-in font name or safe TTF base name loaded as `<name>.ttf` from `pause.fontDirectory`.
+- `pause.fontDirectory`: read-only TTF font directory.
+- `pause.fontAlign`: `left`, `center`, `right`.
 - `segmentation.threshold`: float `0.0..1.0`
 - `segmentation.smoothing`: float `0.0..1.0`
 - `segmentation.morphology`: `off`, `light`, `strong`

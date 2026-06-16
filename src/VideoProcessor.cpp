@@ -20,6 +20,11 @@
 #include <opencv2/imgproc.hpp>
 #include <opencv2/videoio.hpp>
 
+#if defined(JON_ENABLE_FREETYPE_TEXT)
+#include <ft2build.h>
+#include FT_FREETYPE_H
+#endif
+
 #include <sys/stat.h>
 
 #include <algorithm>
@@ -251,6 +256,17 @@ struct MediaFile {
 struct StatusFrameBuffers {
     MediaFile pauseMedia;
     cv::Mat scaledPauseImage;
+#if defined(JON_ENABLE_FREETYPE_TEXT)
+    FT_Library ftLibrary = nullptr;
+    FT_Face ftFace = nullptr;
+    std::string ftFontPath;
+
+    ~StatusFrameBuffers()
+    {
+        if (ftFace) FT_Done_Face(ftFace);
+        if (ftLibrary) FT_Done_FreeType(ftLibrary);
+    }
+#endif
 };
 
 std::time_t fileMtime(const std::string& path)
@@ -272,6 +288,146 @@ int pauseImageFontFace(const std::string& font)
     if (font == "script-simplex") return cv::FONT_HERSHEY_SCRIPT_SIMPLEX;
     if (font == "script-complex") return cv::FONT_HERSHEY_SCRIPT_COMPLEX;
     return cv::FONT_HERSHEY_SIMPLEX;
+}
+
+bool isBuiltInPauseFont(const std::string& font)
+{
+    return font == "plain" || font == "simplex" || font == "duplex"
+        || font == "complex" || font == "triplex" || font == "complex-small"
+        || font == "script-simplex" || font == "script-complex";
+}
+
+int alignedTextX(int anchorX, int textWidth, PauseFontAlign align)
+{
+    if (align == PauseFontAlign::Center) return anchorX - textWidth / 2;
+    if (align == PauseFontAlign::Right) return anchorX - textWidth;
+    return anchorX;
+}
+
+void renderHersheyLine(
+    cv::Mat& overlay,
+    const std::string& text,
+    const cv::Point& anchor,
+    int fontFace,
+    double scale,
+    int thickness,
+    const cv::Scalar& color,
+    PauseFontAlign align)
+{
+    int baseline = 0;
+    const cv::Size textSize = cv::getTextSize(text, fontFace, scale, thickness, &baseline);
+    cv::putText(overlay, text, cv::Point(alignedTextX(anchor.x, textSize.width, align), anchor.y),
+        fontFace, scale, color, thickness, cv::LINE_AA);
+}
+
+#if defined(JON_ENABLE_FREETYPE_TEXT)
+bool ensureFreeTypeFace(StatusFrameBuffers& buffers, const std::string& fontPath)
+{
+    if (buffers.ftFace && buffers.ftFontPath == fontPath) return true;
+    if (buffers.ftFace) {
+        FT_Done_Face(buffers.ftFace);
+        buffers.ftFace = nullptr;
+    }
+    if (!buffers.ftLibrary && FT_Init_FreeType(&buffers.ftLibrary) != 0) {
+        LOG_WARNING("Cannot initialize FreeType text renderer");
+        return false;
+    }
+    if (FT_New_Face(buffers.ftLibrary, fontPath.c_str(), 0, &buffers.ftFace) != 0) {
+        LOG_WARNING("Cannot load pause TTF font: " << fontPath);
+        return false;
+    }
+    buffers.ftFontPath = fontPath;
+    LOG_INFO("Loaded pause TTF font: " << fontPath);
+    return true;
+}
+
+int measureFreeTypeLine(FT_Face face, const std::string& text, int pixelSize)
+{
+    if (!face || FT_Set_Pixel_Sizes(face, 0, static_cast<FT_UInt>(pixelSize)) != 0) return 0;
+    int width = 0;
+    for (unsigned char c : text) {
+        if (FT_Load_Char(face, c, FT_LOAD_DEFAULT) == 0) {
+            width += static_cast<int>(face->glyph->advance.x >> 6);
+        }
+    }
+    return width;
+}
+
+void blendGlyph(cv::Mat& frame, FT_Bitmap& bitmap, int left, int top, const RgbaColor& color)
+{
+    const double textAlpha = std::clamp(color.a, 0, 255) / 255.0;
+    for (int row = 0; row < static_cast<int>(bitmap.rows); ++row) {
+        const int y = top + row;
+        if (y < 0 || y >= frame.rows) continue;
+        const unsigned char* src = bitmap.buffer + row * bitmap.pitch;
+        for (int col = 0; col < static_cast<int>(bitmap.width); ++col) {
+            const int x = left + col;
+            if (x < 0 || x >= frame.cols) continue;
+            const double alpha = (static_cast<double>(src[col]) / 255.0) * textAlpha;
+            cv::Vec3b& dst = frame.at<cv::Vec3b>(y, x);
+            dst[0] = static_cast<unsigned char>(dst[0] * (1.0 - alpha) + std::clamp(color.b, 0, 255) * alpha);
+            dst[1] = static_cast<unsigned char>(dst[1] * (1.0 - alpha) + std::clamp(color.g, 0, 255) * alpha);
+            dst[2] = static_cast<unsigned char>(dst[2] * (1.0 - alpha) + std::clamp(color.r, 0, 255) * alpha);
+        }
+    }
+}
+
+void renderFreeTypeLine(
+    cv::Mat& frame,
+    FT_Face face,
+    const std::string& text,
+    const cv::Point& anchor,
+    int pixelSize,
+    const RgbaColor& color,
+    PauseFontAlign align)
+{
+    if (!face || FT_Set_Pixel_Sizes(face, 0, static_cast<FT_UInt>(pixelSize)) != 0) return;
+    int penX = alignedTextX(anchor.x, measureFreeTypeLine(face, text, pixelSize), align);
+    for (unsigned char c : text) {
+        if (FT_Load_Char(face, c, FT_LOAD_RENDER) != 0) continue;
+        FT_GlyphSlot glyph = face->glyph;
+        blendGlyph(frame, glyph->bitmap, penX + glyph->bitmap_left, anchor.y - glyph->bitmap_top, color);
+        penX += static_cast<int>(glyph->advance.x >> 6);
+    }
+}
+#endif
+
+void renderPauseStatusText(cv::Mat& frame, const std::string& status, const ProcessorConfig& config, StatusFrameBuffers& buffers, const cv::Point& textPosition)
+{
+    const double textSize = std::clamp(config.pauseImageTextSize, 0.1, 10.0);
+    const int lineOffset = static_cast<int>(std::round(52.0 * textSize / 1.6));
+
+    if (!isBuiltInPauseFont(config.pauseImageFont)) {
+#if defined(JON_ENABLE_FREETYPE_TEXT)
+        const std::string fontPath = mediaPath(config.pauseImageFontDirectory, config.pauseImageFont + ".ttf");
+        if (ensureFreeTypeFace(buffers, fontPath)) {
+            const int pixelSize = std::max(6, static_cast<int>(std::round(38.0 * textSize / 1.6)));
+            renderFreeTypeLine(frame, buffers.ftFace, status, textPosition, pixelSize, config.pauseImageTextColor, config.pauseImageFontAlign);
+            renderFreeTypeLine(frame, buffers.ftFace, "JONImageProcessor", cv::Point(textPosition.x, textPosition.y + lineOffset),
+                std::max(6, static_cast<int>(std::round(pixelSize * 0.5))), config.pauseImageTextColor, config.pauseImageFontAlign);
+            return;
+        }
+#else
+        static std::string lastWarnedFont;
+        if (lastWarnedFont != config.pauseImageFont) {
+            LOG_WARNING("Pause TTF font requested but this build has no FreeType support: " << config.pauseImageFont);
+            lastWarnedFont = config.pauseImageFont;
+        }
+#endif
+    }
+
+    cv::Mat textOverlay = frame.clone();
+    const cv::Scalar textColor(
+        std::clamp(config.pauseImageTextColor.b, 0, 255),
+        std::clamp(config.pauseImageTextColor.g, 0, 255),
+        std::clamp(config.pauseImageTextColor.r, 0, 255));
+    const int fontFace = pauseImageFontFace(config.pauseImageFont);
+    renderHersheyLine(textOverlay, status, textPosition, fontFace, textSize,
+        std::max(1, static_cast<int>(std::round(4.0 * textSize / 1.6))), textColor, config.pauseImageFontAlign);
+    renderHersheyLine(textOverlay, "JONImageProcessor", cv::Point(textPosition.x, textPosition.y + lineOffset), fontFace, textSize * 0.5,
+        std::max(1, static_cast<int>(std::round(2.0 * textSize / 1.6))), textColor, config.pauseImageFontAlign);
+    const double alpha = std::clamp(config.pauseImageTextColor.a, 0, 255) / 255.0;
+    cv::addWeighted(textOverlay, alpha, frame, 1.0 - alpha, 0.0, frame);
 }
 
 cv::Mat makeStatusFrame(
@@ -316,17 +472,7 @@ cv::Mat makeStatusFrame(
                     const cv::Point textPosition(
                         config->pauseImageTextPosition.x >= 0 ? config->pauseImageTextPosition.x : marginX + 32,
                         config->pauseImageTextPosition.y >= 0 ? config->pauseImageTextPosition.y : size.height / 2 - 10);
-                    const double textSize = std::clamp(config->pauseImageTextSize, 0.1, 10.0);
-                    cv::Mat textOverlay = frame.clone();
-                    const cv::Scalar textColor(
-                        std::clamp(config->pauseImageTextColor.b, 0, 255),
-                        std::clamp(config->pauseImageTextColor.g, 0, 255),
-                        std::clamp(config->pauseImageTextColor.r, 0, 255));
-                    const int fontFace = pauseImageFontFace(config->pauseImageFont);
-                    cv::putText(textOverlay, status, textPosition, fontFace, textSize, textColor, std::max(1, static_cast<int>(std::round(4.0 * textSize / 1.6))), cv::LINE_AA);
-                    cv::putText(textOverlay, "JONImageProcessor", cv::Point(textPosition.x + 2, textPosition.y + static_cast<int>(std::round(52.0 * textSize / 1.6))), fontFace, textSize * 0.5, textColor, std::max(1, static_cast<int>(std::round(2.0 * textSize / 1.6))), cv::LINE_AA);
-                    const double alpha = std::clamp(config->pauseImageTextColor.a, 0, 255) / 255.0;
-                    cv::addWeighted(textOverlay, alpha, frame, 1.0 - alpha, 0.0, frame);
+                    renderPauseStatusText(frame, status, *config, *buffers, textPosition);
                 }
                 return frame;
             }
@@ -791,6 +937,8 @@ void logStartupInfo(const ProcessorConfig& config, const ScreenInfo& screenInfo)
             : std::to_string(config.pauseImageTextPosition.x) + "x" + std::to_string(config.pauseImageTextPosition.y)));
     LOG_VERBOSE("Pause image text size: " << config.pauseImageTextSize);
     LOG_VERBOSE("Pause image font: " << config.pauseImageFont);
+    LOG_VERBOSE("Pause image font directory: " << config.pauseImageFontDirectory);
+    LOG_VERBOSE("Pause image font align: " << pauseFontAlignToString(config.pauseImageFontAlign));
     LOG_VERBOSE("Background overlay color: "
         << config.backgroundOverlayColor.r << ","
         << config.backgroundOverlayColor.g << ","

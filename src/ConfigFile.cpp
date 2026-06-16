@@ -325,9 +325,32 @@ bool parseRgbaHexColor(const std::string& value, RgbaColor& color)
 
 bool parsePauseFont(const std::string& value)
 {
-    return value == "plain" || value == "simplex" || value == "duplex"
+    if (value == "plain" || value == "simplex" || value == "duplex"
         || value == "complex" || value == "triplex" || value == "complex-small"
-        || value == "script-simplex" || value == "script-complex";
+        || value == "script-simplex" || value == "script-complex") {
+        return true;
+    }
+    return !value.empty()
+        && value.find('/') == std::string::npos
+        && value.find('\\') == std::string::npos
+        && value.find("..") == std::string::npos;
+}
+
+bool parsePauseFontAlign(const std::string& value, PauseFontAlign& align)
+{
+    if (value == "left") {
+        align = PauseFontAlign::Left;
+        return true;
+    }
+    if (value == "center") {
+        align = PauseFontAlign::Center;
+        return true;
+    }
+    if (value == "right") {
+        align = PauseFontAlign::Right;
+        return true;
+    }
+    return false;
 }
 
 void warnUnknownFields(const Json& object, const std::string& prefix, const std::initializer_list<const char*> allowed)
@@ -427,7 +450,7 @@ bool applyConfig(const Json& root, ProcessorConfig& config, ConfigLoadResult& re
 
     if (const Json* pause = objectChild(root, "pause")) {
         if (pause->type != Json::Type::Object) { error = "pause must be an object"; return false; }
-        warnUnknownFields(*pause, "pause.", {"enabled", "image", "folder", "loopIfVideo", "showStatusText", "textColor", "textPosition", "textSize", "font"});
+        warnUnknownFields(*pause, "pause.", {"enabled", "image", "folder", "loopIfVideo", "showStatusText", "textColor", "textPosition", "textSize", "font", "fontDirectory", "fontAlign"});
         if (!readBoolean(*pause, "enabled", config.pauseImageEnabled, error)) return false;
         if (!readString(*pause, "image", config.pauseImagePath, error)) return false;
         if (!readString(*pause, "folder", config.pauseImageFolder, error)) return false;
@@ -450,6 +473,11 @@ bool applyConfig(const Json& root, ProcessorConfig& config, ConfigLoadResult& re
             if (!parsePauseFont(font)) { error = "Invalid pause.font"; return false; }
             config.pauseImageFont = font;
         }
+        if (!readString(*pause, "fontDirectory", config.pauseImageFontDirectory, error)) return false;
+        if (config.pauseImageFontDirectory.empty()) { error = "Invalid pause.fontDirectory"; return false; }
+        std::string fontAlign;
+        if (!readString(*pause, "fontAlign", fontAlign, error)) return false;
+        if (!fontAlign.empty() && !parsePauseFontAlign(fontAlign, config.pauseImageFontAlign)) { error = "Invalid pause.fontAlign"; return false; }
     }
 
     if (const Json* output = objectChild(root, "output")) {

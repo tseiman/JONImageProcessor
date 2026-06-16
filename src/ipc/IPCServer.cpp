@@ -182,9 +182,39 @@ bool parsePosition(const std::string& value, Point2i& position)
 
 bool parsePauseFont(const std::string& value)
 {
-    return value == "plain" || value == "simplex" || value == "duplex"
+    if (value == "plain" || value == "simplex" || value == "duplex"
         || value == "complex" || value == "triplex" || value == "complex-small"
-        || value == "script-simplex" || value == "script-complex";
+        || value == "script-simplex" || value == "script-complex") {
+        return true;
+    }
+    return !value.empty()
+        && value.find('/') == std::string::npos
+        && value.find('\\') == std::string::npos
+        && value.find("..") == std::string::npos;
+}
+
+bool isBuiltInPauseFont(const std::string& font)
+{
+    return font == "plain" || font == "simplex" || font == "duplex"
+        || font == "complex" || font == "triplex" || font == "complex-small"
+        || font == "script-simplex" || font == "script-complex";
+}
+
+bool parsePauseFontAlign(const std::string& value, PauseFontAlign& align)
+{
+    if (value == "left") {
+        align = PauseFontAlign::Left;
+        return true;
+    }
+    if (value == "center") {
+        align = PauseFontAlign::Center;
+        return true;
+    }
+    if (value == "right") {
+        align = PauseFontAlign::Right;
+        return true;
+    }
+    return false;
 }
 
 bool isSafeRelativePath(const std::string& path)
@@ -332,6 +362,8 @@ std::string valueJson(const ProcessorConfig& c, const std::string& key, const Be
     if (key == "pause.textPosition") return "\"" + positionToString(c.pauseImageTextPosition) + "\"";
     if (key == "pause.textSize") return std::to_string(c.pauseImageTextSize);
     if (key == "pause.font") return "\"" + escapeJson(c.pauseImageFont) + "\"";
+    if (key == "pause.fontDirectory") return "\"" + escapeJson(c.pauseImageFontDirectory) + "\"";
+    if (key == "pause.fontAlign") return "\"" + pauseFontAlignToString(c.pauseImageFontAlign) + "\"";
     if (key == "no_mask" || key == "runtime.noMask") return c.noMask ? "true" : "false";
     if (key == "no_overlay" || key == "runtime.noOverlay") return c.noOverlay ? "true" : "false";
     if (key == "camera.enabled") return c.cameraEnabled ? "true" : "false";
@@ -350,6 +382,7 @@ bool knownKey(const std::string& key)
         || key == "background.overlayAlpha" || key == "background.blurStrength" || key == "background.folder"
         || key == "pause.enabled" || key == "pause.image" || key == "pause.loopIfVideo" || key == "pause.folder" || key == "pause.showStatusText" || key == "pause.textColor"
         || key == "pause.textPosition" || key == "pause.textSize" || key == "pause.font"
+        || key == "pause.fontDirectory" || key == "pause.fontAlign"
         || key == "runtime.noMask" || key == "runtime.noOverlay" || key == "camera.enabled";
 }
 
@@ -379,6 +412,16 @@ std::string validateRuntimeConfig(const ProcessorConfig& config)
         return "pause HTML media is not supported in this build";
     }
 #endif
+    if (!isBuiltInPauseFont(config.pauseImageFont)) {
+        const std::string fontPath = joinPath(config.pauseImageFontDirectory, config.pauseImageFont + ".ttf");
+#if !defined(JON_ENABLE_FREETYPE_TEXT)
+        return "pause TTF fonts are not supported in this build";
+#else
+        if (!fileExists(fontPath)) {
+            return "pause.font cannot be read: " + config.pauseImageFont;
+        }
+#endif
+    }
     return {};
 }
 
@@ -493,7 +536,9 @@ std::string IPCServer::handleLine(const std::string& line)
             << ",\"textColor\":\"" << rgbaColorToHex(current.pauseImageTextColor)
             << "\",\"textPosition\":\"" << positionToString(current.pauseImageTextPosition)
             << "\",\"textSize\":" << current.pauseImageTextSize
-            << ",\"font\":\"" << escapeJson(current.pauseImageFont) << "\"}"
+            << ",\"font\":\"" << escapeJson(current.pauseImageFont)
+            << "\",\"fontDirectory\":\"" << escapeJson(current.pauseImageFontDirectory)
+            << "\",\"fontAlign\":\"" << pauseFontAlignToString(current.pauseImageFontAlign) << "\"}"
             << ",\"runtime\":{\"noMask\":" << (current.noMask ? "true" : "false")
             << ",\"noOverlay\":" << (current.noOverlay ? "true" : "false") << "}";
         if (current.benchmark) {
@@ -522,7 +567,7 @@ std::string IPCServer::handleLine(const std::string& line)
     if (key == "benchmark") {
         return loggedErrorResponse("benchmark is read-only");
     }
-    if (key == "background.folder" || key == "pause.folder") {
+    if (key == "background.folder" || key == "pause.folder" || key == "pause.fontDirectory") {
         return loggedErrorResponse(key + " is read-only");
     }
     if (!knownKey(key)) {
@@ -580,6 +625,9 @@ std::string IPCServer::handleLine(const std::string& line)
         if (value.type != JsonValue::Type::String) return loggedErrorResponse("invalid value type");
         if (!parsePauseFont(value.text)) return loggedErrorResponse("invalid value");
         updated.pauseImageFont = value.text;
+    } else if (key == "pause.fontAlign") {
+        if (value.type != JsonValue::Type::String) return loggedErrorResponse("invalid value type");
+        if (!parsePauseFontAlign(value.text, updated.pauseImageFontAlign)) return loggedErrorResponse("invalid value");
     } else if (key == "background_overlay_color" || key == "background.overlayColor") {
         if (value.type != JsonValue::Type::String) return loggedErrorResponse("invalid value type");
         if (!parseColor(value.text, updated.backgroundOverlayColor)) return loggedErrorResponse("invalid value");

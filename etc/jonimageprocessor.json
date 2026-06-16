@@ -30,7 +30,9 @@
     "textColor": "ffffffff",
     "textPosition": "auto",
     "textSize": 1.6,
-    "font": "simplex"
+    "font": "simplex",
+    "fontDirectory": "/opt/JONImageProcessor/var/fonts",
+    "fontAlign": "left"
   },
   "output": {
     "size": "auto"

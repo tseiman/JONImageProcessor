@@ -38,6 +38,12 @@ sudo apt-get install libwpewebkit-1.1-0 libwpewebkit-1.1-dev libwpebackend-fdo-1
 
 If the Jetson distribution only provides `libwpewebkit-1.0-*`, use the matching `1.0` package names instead.
 
+For TTF pause text rendering, install FreeType development files on the Jetson and sync the sysroot again:
+
+```bash
+sudo apt-get install libfreetype-dev
+```
+
 Then verify the sysroot contains WPE target files:
 
 ```bash
@@ -53,6 +59,7 @@ ENABLE_TENSORRT_MASK=ON ENABLE_DRM_DISPLAY=ON JETSON_SYSROOT="$HOME/sysroots/ori
 ```
 
 The script installs WPE development packages inside the container by default. CMake still uses only the AArch64 files from `JETSON_SYSROOT` for linking, so HTML support is enabled only when the synced Jetson sysroot contains WPE WebKit and WPEBackend-fdo target files.
+The script also installs FreeType headers in the container. TTF pause text is enabled only when the synced Jetson sysroot contains the AArch64 FreeType library.
 
 The result is:
 

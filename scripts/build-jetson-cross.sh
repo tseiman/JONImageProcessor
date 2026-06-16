@@ -43,6 +43,7 @@ echo "[INFO] Container: $(cat /etc/os-release | grep '^PRETTY_NAME=' | cut -d= -
 if [[ "${INSTALL_WPE_DEV}" == "ON" ]]; then
     export DEBIAN_FRONTEND=noninteractive
     apt-get update
+    apt-get install -y --no-install-recommends libfreetype-dev
     if apt-cache show libwpewebkit-1.1-dev >/dev/null 2>&1; then
         apt-get install -y --no-install-recommends libwpewebkit-1.1-dev libwpebackend-fdo-1.0-dev
     else
