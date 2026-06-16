@@ -112,6 +112,8 @@ For `--input <path>`, `OpenCvFileCaptureBackend` is used instead of V4L2 and fra
 
 For `--background-effect none`, the processed camera frame is passed through without background replacement. For `--background-effect image`, the media file is loaded and resized to the processed output frame size before compositing.
 
+TensorRT mask preprocessing uses aspect-ratio-preserving letterboxing instead of stretching the camera frame to the model input size. The model output is cropped back to the non-padded content region before it is resized to the processing frame. The mask postprocess path keeps a weak foreground region when it was foreground in the previous frame, then applies the configured morphology mode to grow and feather the alpha mask.
+
 ## Ownership Boundaries
 
 - `CommandLineOptions` owns CLI parsing and validation only.

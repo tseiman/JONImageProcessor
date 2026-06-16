@@ -228,6 +228,7 @@ bool convertOutputToMask(
     double threshold,
     cv::Mat& personMask)
 {
+    (void)threshold;
     int channels = 1;
     int height = 0;
     int width = 0;
@@ -266,7 +267,8 @@ bool convertOutputToMask(
             if (looksLikeLogits) {
                 value = 1.0F / (1.0F + std::exp(-value));
             }
-            personMask.data[index] = value >= threshold ? 255 : 0;
+            value = std::clamp(value, 0.0F, 1.0F);
+            personMask.data[index] = static_cast<unsigned char>(std::round(value * 255.0F));
         }
         return true;
     }
@@ -286,6 +288,39 @@ bool convertOutputToMask(
     }
 
     return true;
+}
+
+struct LetterboxInfo {
+    cv::Rect contentRect;
+};
+
+cv::Mat letterboxFrame(const cv::Mat& frame, cv::Size targetSize, LetterboxInfo& info)
+{
+    const double scale = std::min(
+        static_cast<double>(targetSize.width) / static_cast<double>(frame.cols),
+        static_cast<double>(targetSize.height) / static_cast<double>(frame.rows));
+    const int contentWidth = std::max(1, static_cast<int>(std::round(frame.cols * scale)));
+    const int contentHeight = std::max(1, static_cast<int>(std::round(frame.rows * scale)));
+    const int x = (targetSize.width - contentWidth) / 2;
+    const int y = (targetSize.height - contentHeight) / 2;
+
+    cv::Mat canvas(targetSize, frame.type(), cv::Scalar::all(0));
+    cv::Mat resized;
+    cv::resize(frame, resized, cv::Size(contentWidth, contentHeight), 0.0, 0.0, cv::INTER_LINEAR);
+    resized.copyTo(canvas(cv::Rect(x, y, contentWidth, contentHeight)));
+    info.contentRect = cv::Rect(x, y, contentWidth, contentHeight);
+    return canvas;
+}
+
+cv::Rect scaleRect(cv::Rect rect, cv::Size fromSize, cv::Size toSize)
+{
+    const double scaleX = static_cast<double>(toSize.width) / static_cast<double>(fromSize.width);
+    const double scaleY = static_cast<double>(toSize.height) / static_cast<double>(fromSize.height);
+    const int x = std::clamp(static_cast<int>(std::round(rect.x * scaleX)), 0, std::max(0, toSize.width - 1));
+    const int y = std::clamp(static_cast<int>(std::round(rect.y * scaleY)), 0, std::max(0, toSize.height - 1));
+    const int right = std::clamp(static_cast<int>(std::round((rect.x + rect.width) * scaleX)), x + 1, toSize.width);
+    const int bottom = std::clamp(static_cast<int>(std::round((rect.y + rect.height) * scaleY)), y + 1, toSize.height);
+    return cv::Rect(x, y, right - x, bottom - y);
 }
 
 #endif
@@ -566,8 +601,8 @@ bool TensorRtMaskBackend::generate(
     }
 
     const auto preprocessStartedAt = std::chrono::steady_clock::now();
-    cv::Mat resized;
-    cv::resize(frame, resized, cv::Size(impl_->inputWidth, impl_->inputHeight), 0.0, 0.0, cv::INTER_LINEAR);
+    LetterboxInfo letterbox;
+    cv::Mat resized = letterboxFrame(frame, cv::Size(impl_->inputWidth, impl_->inputHeight), letterbox);
     cv::Mat rgb;
     cv::cvtColor(resized, rgb, cv::COLOR_BGR2RGB);
     cv::Mat rgbFloat;
@@ -613,9 +648,15 @@ bool TensorRtMaskBackend::generate(
     timings.inference = std::chrono::steady_clock::now() - inferenceStartedAt;
 
     const auto postprocessStartedAt = std::chrono::steady_clock::now();
-    if (!convertOutputToMask(impl_->outputHost, impl_->outputDims, impl_->threshold, personMask)) {
+    cv::Mat modelMask;
+    if (!convertOutputToMask(impl_->outputHost, impl_->outputDims, impl_->threshold, modelMask)) {
         return false;
     }
+    const cv::Rect outputContentRect = scaleRect(
+        letterbox.contentRect,
+        cv::Size(impl_->inputWidth, impl_->inputHeight),
+        modelMask.size());
+    cv::resize(modelMask(outputContentRect), personMask, frame.size(), 0.0, 0.0, cv::INTER_LINEAR);
     timings.postprocess = std::chrono::steady_clock::now() - postprocessStartedAt;
     return true;
 #else

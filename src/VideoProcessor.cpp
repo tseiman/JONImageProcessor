@@ -634,26 +634,44 @@ cv::Mat applyMaskPostprocessing(
         cv::cvtColor(mask, processed, cv::COLOR_BGR2GRAY);
     }
 
+    const double highThreshold = std::clamp(config.maskThreshold, 0.0, 1.0) * 255.0;
+    const double lowThreshold = std::max(0.0, (std::clamp(config.maskThreshold, 0.0, 1.0) - 0.15) * 255.0);
+
+    cv::Mat strongForeground;
+    cv::threshold(processed, strongForeground, highThreshold, 255, cv::THRESH_BINARY);
+
+    cv::Mat foreground = strongForeground;
+    if (!previousMask.empty() && previousMask.size() == processed.size()) {
+        cv::Mat previousForeground;
+        cv::Mat weakForeground;
+        cv::threshold(previousMask, previousForeground, 127, 255, cv::THRESH_BINARY);
+        cv::threshold(processed, weakForeground, lowThreshold, 255, cv::THRESH_BINARY);
+        cv::bitwise_and(previousForeground, weakForeground, weakForeground);
+        cv::bitwise_or(strongForeground, weakForeground, foreground);
+    }
+
+    cv::Mat alpha = cv::Mat::zeros(processed.size(), CV_8UC1);
+    processed.copyTo(alpha, foreground);
+
     if (config.maskMorphology != MaskMorphologyMode::Off) {
         const int closeSize = config.maskMorphology == MaskMorphologyMode::Strong ? 9 : 5;
-        const int dilateSize = config.maskMorphology == MaskMorphologyMode::Strong ? 7 : 3;
-        const int blurSize = config.maskMorphology == MaskMorphologyMode::Strong ? 9 : 5;
-
-        cv::Mat binary;
-        cv::threshold(processed, binary, 127, 255, cv::THRESH_BINARY);
+        const int dilateSize = config.maskMorphology == MaskMorphologyMode::Strong ? 7 : 5;
+        const int blurSize = config.maskMorphology == MaskMorphologyMode::Strong ? 11 : 7;
 
         const cv::Mat closeKernel = cv::getStructuringElement(
             cv::MORPH_ELLIPSE,
             cv::Size(closeSize, closeSize));
-        cv::morphologyEx(binary, binary, cv::MORPH_CLOSE, closeKernel);
+        cv::morphologyEx(foreground, foreground, cv::MORPH_CLOSE, closeKernel);
 
         const cv::Mat dilateKernel = cv::getStructuringElement(
             cv::MORPH_ELLIPSE,
             cv::Size(dilateSize, dilateSize));
-        cv::dilate(binary, processed, dilateKernel);
+        cv::dilate(foreground, foreground, dilateKernel);
 
-        cv::GaussianBlur(processed, processed, cv::Size(blurSize, blurSize), 0.0);
+        alpha.setTo(255, foreground);
+        cv::GaussianBlur(alpha, alpha, cv::Size(blurSize, blurSize), 0.0);
     }
+    processed = alpha;
 
     if (config.maskSmoothing > 0.0 && !previousMask.empty() && previousMask.size() == processed.size()) {
         cv::Mat smoothed;

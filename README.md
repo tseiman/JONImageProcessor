@@ -300,9 +300,9 @@ journalctl -u JONImageProcessor.service -f
 - `--camera-connect-timeout <seconds>`: seconds to show `Camera connecting...` after runtime camera re-enable before disconnected status. Default: `10`.
 - `--mask-model <path>`: TensorRT mask model path. Required unless `--no-mask` is used.
 - `-s`, `--segmentation-size <WxH>`: TensorRT input size. Default: `384x384`.
-- `--mask-threshold <0.0..1.0>`: foreground threshold. Default: `0.5`.
+- `--mask-threshold <0.0..1.0>`: foreground threshold. A lower internal hysteresis threshold is used to keep weak person regions from disappearing immediately. Default: `0.5`.
 - `--mask-smoothing <0.0..1.0>`: temporal mask smoothing. Default: `0.65`.
-- `--mask-morphology <off|light|strong>`: mask cleanup mode. Default: `light`.
+- `--mask-morphology <off|light|strong>`: mask cleanup mode. `light` and `strong` grow and feather the foreground mask to reduce over-cut body edges. Default: `light`.
 - `--background-effect <none|color|blur|image>`: background effect. `none` passes the camera frame through without background replacement. Default: `color`.
 - `--background-image <path>`: image, video, or HTML file used by `--background-effect image`. JPEG/PNG are loaded as static images; video files are decoded with OpenCV; HTML/CSS/JavaScript is rendered through WPE WebKit when the binary was built with WPE support.
 - `--background-image-folder <path>`: base folder for background images selected through IPC. Default: `.`.
@@ -426,6 +426,8 @@ Display mode is fixed to fill. The image fills the output canvas while preservin
 ## Benchmarking
 
 Use `--benchmark` to collect timing statistics for capture, resize, TensorRT preprocessing, TensorRT inference, postprocessing, mask upscale, background effect, display, and total frame time. The values can be read through IPC. Add `--verbose` when benchmark progress and shutdown summaries should be written to the log.
+
+TensorRT segmentation preprocessing preserves the source aspect ratio with letterboxing instead of stretching the camera frame into the model input. The padding is removed from the model output before the mask is composited back onto the processed frame. This keeps body proportions closer to the camera image at `384x384` model sizes.
 
 For pipeline timing without display or effects:
 
