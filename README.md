@@ -1,3 +1,4 @@
+<img src="docs/logo.svg" align="right" width="72" height="72" alt="JIP logo">
 # JONImageProcessor
 
 JONImageProcessor is a C++17 video processing prototype for NVIDIA Jetson Orin Nano. It captures a live camera image through V4L2 or reads a video file for development, generates a person mask with TensorRT, and renders a processed fullscreen image through DRM/KMS or an OpenCV HighGUI window.
