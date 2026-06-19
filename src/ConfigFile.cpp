@@ -386,7 +386,9 @@ bool applyConfig(const Json& root, ProcessorConfig& config, ConfigLoadResult& re
 
     if (const Json* camera = objectChild(root, "camera")) {
         if (camera->type != Json::Type::Object) { error = "camera must be an object"; return false; }
-        warnUnknownFields(*camera, "camera.", {"device", "format", "connectTimeoutSeconds"});
+        warnUnknownFields(*camera, "camera.", {"device", "format", "enabled", "enable", "connectTimeoutSeconds"});
+        if (!readBoolean(*camera, "enabled", config.cameraEnabled, error)) return false;
+        if (!readBoolean(*camera, "enable", config.cameraEnabled, error)) return false;
         if (!readString(*camera, "device", config.devicePath, error)) return false;
         std::string format;
         if (!readString(*camera, "format", format, error)) return false;

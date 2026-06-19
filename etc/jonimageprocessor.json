@@ -1,6 +1,7 @@
 {
   "configDirectory": "/opt/JONImageProcessor/etc/overlays",
   "camera": {
+    "enabled": true,
     "device": "/dev/video0",
     "format": "MJPG",
     "connectTimeoutSeconds": 10
