@@ -114,6 +114,14 @@ For `--background-effect none`, the processed camera frame is passed through wit
 
 TensorRT mask preprocessing uses aspect-ratio-preserving letterboxing instead of stretching the camera frame to the model input size. RGB input is normalized to `[-1..1]` for MODNet-style matting models. The model output is cropped back to the non-padded content region before it is resized to the processing frame. The mask postprocess path keeps a weak foreground region when it was foreground in the previous frame, then applies the configured morphology mode to grow and feather the alpha mask.
 
+## Runtime Configuration
+
+The IPC server updates a shared runtime `ProcessorConfig`. Single-key `set` requests and overlay config requests both validate a full candidate config first; if validation succeeds, the new config is copied into the running processor and is picked up on subsequent frames.
+
+Overlay configs are selected with IPC key `config`. The value is a safe base name without `.json`; the file is loaded from the read-only `configDirectory` configured in the main JSON file. Overlay files use the same grouped JSON shape as the main configuration, but `configDirectory` inside an overlay is ignored.
+
+Runtime-active fields include segmentation threshold, smoothing, morphology, background effect/media, pause media/text settings, camera enabled state, no-mask/no-overlay, and benchmark collection. Startup-only fields such as display backend, IPC socket path, processing size, segmentation model path, and camera device path are not reinitialized by applying an overlay and require a service restart.
+
 ## Ownership Boundaries
 
 - `CommandLineOptions` owns CLI parsing and validation only.
