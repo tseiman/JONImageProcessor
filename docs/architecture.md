@@ -118,7 +118,7 @@ TensorRT mask preprocessing uses aspect-ratio-preserving letterboxing instead of
 
 The IPC server updates a shared runtime `ProcessorConfig`. Single-key `set` requests and overlay config requests both validate a full candidate config first; if validation succeeds, the new config is copied into the running processor and is picked up on subsequent frames.
 
-Overlay configs are selected with IPC key `config`. The value is a safe base name without `.json`; the file is loaded from the read-only `configDirectory` configured in the main JSON file. Overlay files use the same grouped JSON shape as the main configuration, but `configDirectory` inside an overlay is ignored.
+Overlay configs are selected with IPC key `config`. The value is a safe base name without `.json`; the file is loaded from the read-only `configDirectory` configured in the main JSON file. Overlay files are optional, and an empty active config name means no overlay is selected. Missing or invalid overlay files return an IPC JSON error and leave the previous runtime config unchanged. Overlay names may contain only letters, digits, `_`, and `-`, so path traversal and absolute paths cannot be expressed through IPC. Overlay files use the same grouped JSON shape as the main configuration, but `configDirectory` inside an overlay is ignored.
 
 Runtime-active fields include segmentation threshold, smoothing, morphology, background effect/media, pause media/text settings, camera enabled state, no-mask/no-overlay, and benchmark collection. Startup-only fields such as display backend, IPC socket path, processing size, segmentation model path, and camera device path are not reinitialized by applying an overlay and require a service restart.
 
