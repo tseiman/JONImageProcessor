@@ -1,5 +1,6 @@
 #include "ipc/IPCServer.h"
 
+#include "ConfigFile.h"
 #include "Logger.h"
 #include "Version.h"
 
@@ -232,6 +233,18 @@ bool isSafeRelativePath(const std::string& path)
     return true;
 }
 
+bool isSafeConfigName(const std::string& name)
+{
+    if (name.empty() || name.size() > 128) return false;
+    for (char c : name) {
+        const unsigned char uc = static_cast<unsigned char>(c);
+        if (!std::isalnum(uc) && c != '-' && c != '_') {
+            return false;
+        }
+    }
+    return true;
+}
+
 std::string joinPath(const std::string& folder, const std::string& relativePath)
 {
     if (folder.empty() || folder == ".") return relativePath;
@@ -370,6 +383,8 @@ std::string valueJson(const ProcessorConfig& c, const std::string& key, const Be
     if (key == "camera.enabled") return c.cameraEnabled ? "true" : "false";
     if (key == "benchmark") return benchmarkJson(b);
     if (key == "version" || key == "system.version") return "\"" + escapeJson(jonImageProcessorVersionText()) + "\"";
+    if (key == "configDirectory" || key == "system.configDirectory") return "\"" + escapeJson(c.configDirectory) + "\"";
+    if (key == "config") return "\"" + escapeJson(c.activeConfigName) + "\"";
     return {};
 }
 
@@ -386,7 +401,8 @@ bool knownKey(const std::string& key)
         || key == "pause.textPosition" || key == "pause.textSize" || key == "pause.font"
         || key == "pause.fontDirectory" || key == "pause.fontAlign"
         || key == "runtime.noMask" || key == "runtime.noOverlay" || key == "camera.enabled"
-        || key == "version" || key == "system.version";
+        || key == "version" || key == "system.version" || key == "configDirectory"
+        || key == "system.configDirectory" || key == "config";
 }
 
 std::string validateRuntimeConfig(const ProcessorConfig& config)
@@ -544,7 +560,9 @@ std::string IPCServer::handleLine(const std::string& line)
             << "\",\"fontAlign\":\"" << pauseFontAlignToString(current.pauseImageFontAlign) << "\"}"
             << ",\"runtime\":{\"noMask\":" << (current.noMask ? "true" : "false")
             << ",\"noOverlay\":" << (current.noOverlay ? "true" : "false") << "}"
-            << ",\"system\":{\"version\":\"" << escapeJson(jonImageProcessorVersionText()) << "\"}";
+            << ",\"system\":{\"version\":\"" << escapeJson(jonImageProcessorVersionText())
+            << "\",\"configDirectory\":\"" << escapeJson(current.configDirectory) << "\"}"
+            << ",\"config\":\"" << escapeJson(current.activeConfigName) << "\"";
         if (current.benchmark) {
             out << ",\"benchmark\":" << benchmarkJson(benchmark);
         }
@@ -574,7 +592,8 @@ std::string IPCServer::handleLine(const std::string& line)
     if (key == "version" || key == "system.version") {
         return loggedErrorResponse("version is read-only");
     }
-    if (key == "background.folder" || key == "pause.folder" || key == "pause.fontDirectory") {
+    if (key == "configDirectory" || key == "system.configDirectory"
+        || key == "background.folder" || key == "pause.folder" || key == "pause.fontDirectory") {
         return loggedErrorResponse(key + " is read-only");
     }
     if (!knownKey(key)) {
@@ -583,7 +602,18 @@ std::string IPCServer::handleLine(const std::string& line)
 
     ProcessorConfig updated = current;
     const JsonValue value = request["value"];
-    if (key == "mask_threshold" || key == "segmentation.threshold"
+    if (key == "config") {
+        if (value.type != JsonValue::Type::String) return loggedErrorResponse("invalid value type");
+        if (!isSafeConfigName(value.text)) return loggedErrorResponse("invalid config name");
+        if (updated.configDirectory.empty()) return loggedErrorResponse("configDirectory is not configured");
+        const std::string path = joinPath(updated.configDirectory, value.text + ".json");
+        ConfigLoadResult loadResult;
+        std::string loadError;
+        if (!loadJsonConfigOverlayFile(path, updated, loadResult, loadError)) {
+            return loggedErrorResponse(loadError);
+        }
+        updated.activeConfigName = value.text;
+    } else if (key == "mask_threshold" || key == "segmentation.threshold"
         || key == "mask_smoothing" || key == "segmentation.smoothing"
         || key == "background_overlay_alpha" || key == "background.overlayAlpha") {
         if (value.type != JsonValue::Type::Number) return loggedErrorResponse("invalid value type");

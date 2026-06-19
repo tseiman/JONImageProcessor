@@ -372,6 +372,7 @@ Supported JSON groups:
 
 ```json
 {
+  "configDirectory": "/opt/JONImageProcessor/etc/overlays",
   "camera": {
     "device": "/dev/video0",
     "format": "MJPG",
@@ -425,7 +426,7 @@ Supported JSON groups:
 }
 ```
 
-All fields are optional. Unknown JSON fields log warnings and are ignored. Invalid JSON, invalid types, and invalid values stop startup with an error. JSON syntax errors include line and column information where possible. `--test-config` warns about missing referenced files. Normal startup fails if an active segmentation model, background media, pause media, background image folder, pause image folder, or configured TTF pause font does not exist. Runtime IPC updates for image paths validate that the file can be read and return a JSON error if not. IPC only accepts relative image names under `background.folder` or `pause.folder`; absolute paths and `..` traversal are rejected. `background.loopIfVideo` and `pause.loopIfVideo` loop media files when OpenCV detects them as video. HTML media files are detected from file content. They require a binary built with WPE WebKit and WPEBackend-fdo support; otherwise startup, `--test-config`, and IPC updates reject them clearly. `camera.connectTimeoutSeconds` controls how long `Camera connecting...` is shown after runtime camera re-enable before falling back to `Camera DISCONNECTED`. `pause.enabled` switches camera status screens from the generated pattern to `pause.image` while the camera is off, connecting, or disconnected; it does not replace a live camera frame. `pause.showStatusText` controls whether the status label is rendered over that image. `pause.textColor` uses `RRGGBBAA` hex, for example `ffffff0a`. `pause.textPosition` uses `XxY` or `auto`; `pause.textSize` controls the rendered text scale. `pause.font` accepts the built-in OpenCV Hershey font names or a safe TTF base name. TTF names must not contain `/`, `\`, or `..`; `<name>.ttf` is loaded from `pause.fontDirectory` when FreeType support was available at build time. `pause.fontAlign` controls multiline text alignment with values `left`, `center`, or `right`. `diagnostics.benchmark` enables benchmark collection for IPC without passing `--benchmark`.
+All fields are optional. Unknown JSON fields log warnings and are ignored. Invalid JSON, invalid types, and invalid values stop startup with an error. JSON syntax errors include line and column information where possible. `--test-config` warns about missing referenced files. Normal startup fails if an active segmentation model, background media, pause media, background image folder, pause image folder, or configured TTF pause font does not exist. Runtime IPC updates for image paths validate that the file can be read and return a JSON error if not. IPC only accepts relative image names under `background.folder` or `pause.folder`; absolute paths and `..` traversal are rejected. `configDirectory` is only loaded from the main JSON configuration and is read-only through IPC. It points to a directory that contains runtime overlay configuration files. Overlay files use the same grouped JSON shape, are named `<name>.json`, and can be applied with IPC key `config`; `configDirectory` inside overlay files is ignored. `background.loopIfVideo` and `pause.loopIfVideo` loop media files when OpenCV detects them as video. HTML media files are detected from file content. They require a binary built with WPE WebKit and WPEBackend-fdo support; otherwise startup, `--test-config`, and IPC updates reject them clearly. `camera.connectTimeoutSeconds` controls how long `Camera connecting...` is shown after runtime camera re-enable before falling back to `Camera DISCONNECTED`. `pause.enabled` switches camera status screens from the generated pattern to `pause.image` while the camera is off, connecting, or disconnected; it does not replace a live camera frame. `pause.showStatusText` controls whether the status label is rendered over that image. `pause.textColor` uses `RRGGBBAA` hex, for example `ffffff0a`. `pause.textPosition` uses `XxY` or `auto`; `pause.textSize` controls the rendered text scale. `pause.font` accepts the built-in OpenCV Hershey font names or a safe TTF base name. TTF names must not contain `/`, `\`, or `..`; `<name>.ttf` is loaded from `pause.fontDirectory` when FreeType support was available at build time. `pause.fontAlign` controls multiline text alignment with values `left`, `center`, or `right`. `diagnostics.benchmark` enables benchmark collection for IPC without passing `--benchmark`.
 
 ## Runtime Behavior
 
@@ -461,6 +462,7 @@ Commands:
 
 Writable keys:
 
+- `config`: overlay configuration name without `.json`. The file is loaded from read-only `configDirectory` and applied over the current runtime configuration.
 - `camera.enabled`: boolean. When false, live camera processing is paused and a `Camera OFF` status screen is rendered. If the camera is already open, the V4L2 device remains open to avoid a close/reopen cycle.
 - `pause.enabled`: boolean. When true, camera status screens use `pause.image`; when false, they use the generated test pattern.
 - `pause.image`: relative image name under `pause.folder` when set through IPC.
@@ -490,6 +492,9 @@ The older flat key names such as `mask_threshold` and `background_effect` are st
 
 Read-only key:
 
+- `configDirectory`: directory containing IPC-selectable overlay configuration files.
+- `system.configDirectory`: same value as grouped system field.
+- `system.version`: current binary version string.
 - `benchmark`: current benchmark snapshot. This key is available only when benchmark mode is enabled with `--benchmark` or `diagnostics.benchmark`.
 
 Examples:
@@ -512,6 +517,10 @@ echo '{"cmd":"get","key":"benchmark"}' | socat - UNIX-CONNECT:/tmp/jonimageproce
 
 ```bash
 echo '{"cmd":"set","key":"camera.enabled","value":false}' | socat - UNIX-CONNECT:/tmp/jonimageprocessor.sock
+```
+
+```bash
+echo '{"cmd":"set","key":"config","value":"meeting-room"}' | socat - UNIX-CONNECT:/tmp/jonimageprocessor.sock
 ```
 
 Invalid JSON, unknown commands, unknown keys, invalid value types, invalid ranges, disabled benchmark reads, and attempts to set `benchmark` return `{"ok":false,...}`. There is intentionally no shutdown command.

@@ -365,13 +365,24 @@ void warnUnknownFields(const Json& object, const std::string& prefix, const std:
     }
 }
 
-bool applyConfig(const Json& root, ProcessorConfig& config, ConfigLoadResult& result, std::string& error)
+bool applyConfig(const Json& root, ProcessorConfig& config, ConfigLoadResult& result, std::string& error, bool allowConfigDirectory)
 {
     if (root.type != Json::Type::Object) {
         error = "JSON config root must be an object";
         return false;
     }
-    warnUnknownFields(root, "", {"camera", "processing", "segmentation", "background", "pause", "output", "ipc", "display", "diagnostics"});
+    warnUnknownFields(root, "", {"configDirectory", "camera", "processing", "segmentation", "background", "pause", "output", "ipc", "display", "diagnostics"});
+
+    if (const Json* configDirectory = objectChild(root, "configDirectory")) {
+        if (!allowConfigDirectory) {
+            LOG_WARNING("Ignoring configDirectory from overlay config");
+        } else if (configDirectory->type != Json::Type::String) {
+            error = "Invalid JSON type for configDirectory";
+            return false;
+        } else {
+            config.configDirectory = configDirectory->text;
+        }
+    }
 
     if (const Json* camera = objectChild(root, "camera")) {
         if (camera->type != Json::Type::Object) { error = "camera must be an object"; return false; }
@@ -536,7 +547,7 @@ std::string findDefaultConfigPath(const char*)
     return {};
 }
 
-bool loadJsonConfigFile(const std::string& path, ProcessorConfig& config, ConfigLoadResult& result, std::string& error)
+bool loadJsonConfigFileImpl(const std::string& path, ProcessorConfig& config, ConfigLoadResult& result, std::string& error, bool allowConfigDirectory)
 {
     std::ifstream file(path);
     if (!file) {
@@ -552,11 +563,21 @@ bool loadJsonConfigFile(const std::string& path, ProcessorConfig& config, Config
         error = "Invalid JSON config file: " + path + ": " + parseError;
         return false;
     }
-    if (!applyConfig(root, config, result, error)) {
+    if (!applyConfig(root, config, result, error, allowConfigDirectory)) {
         error = path + ": " + error;
         return false;
     }
     result.loaded = true;
     LOG_INFO("Loaded config file: " << path);
     return true;
+}
+
+bool loadJsonConfigFile(const std::string& path, ProcessorConfig& config, ConfigLoadResult& result, std::string& error)
+{
+    return loadJsonConfigFileImpl(path, config, result, error, true);
+}
+
+bool loadJsonConfigOverlayFile(const std::string& path, ProcessorConfig& config, ConfigLoadResult& result, std::string& error)
+{
+    return loadJsonConfigFileImpl(path, config, result, error, false);
 }

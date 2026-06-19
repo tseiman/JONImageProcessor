@@ -80,6 +80,8 @@ struct ProcessorConfig {
     std::string pauseImageFont = "simplex";
     std::string pauseImageFontDirectory = ".";
     std::string ipcSocketPath = "/tmp/jonimageprocessor.sock";
+    std::string configDirectory;
+    std::string activeConfigName;
     RgbColor backgroundOverlayColor;
     RgbaColor pauseImageTextColor;
     Point2i pauseImageTextPosition;

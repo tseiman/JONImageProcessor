@@ -1,4 +1,5 @@
 {
+  "configDirectory": "/opt/JONImageProcessor/etc/overlays",
   "camera": {
     "device": "/dev/video0",
     "format": "MJPG",
