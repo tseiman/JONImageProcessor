@@ -353,6 +353,19 @@ bool parsePauseFontAlign(const std::string& value, PauseFontAlign& align)
     return false;
 }
 
+bool parsePauseSource(const std::string& value, PauseSource& source)
+{
+    if (value == "image") {
+        source = PauseSource::Image;
+        return true;
+    }
+    if (value == "camera") {
+        source = PauseSource::Camera;
+        return true;
+    }
+    return false;
+}
+
 void warnUnknownFields(const Json& object, const std::string& prefix, const std::initializer_list<const char*> allowed)
 {
     if (object.type != Json::Type::Object) return;
@@ -463,8 +476,13 @@ bool applyConfig(const Json& root, ProcessorConfig& config, ConfigLoadResult& re
 
     if (const Json* pause = objectChild(root, "pause")) {
         if (pause->type != Json::Type::Object) { error = "pause must be an object"; return false; }
-        warnUnknownFields(*pause, "pause.", {"enabled", "image", "folder", "loopIfVideo", "showStatusText", "textColor", "textPosition", "textSize", "font", "fontDirectory", "fontAlign"});
+        warnUnknownFields(*pause, "pause.", {"enabled", "source", "cameraDevice", "image", "folder", "loopIfVideo", "showStatusText", "textColor", "textPosition", "textSize", "font", "fontDirectory", "fontAlign"});
         if (!readBoolean(*pause, "enabled", config.pauseImageEnabled, error)) return false;
+        std::string source;
+        if (!readString(*pause, "source", source, error)) return false;
+        if (!source.empty() && !parsePauseSource(source, config.pauseSource)) { error = "Invalid pause.source"; return false; }
+        if (!readString(*pause, "cameraDevice", config.pauseCameraDevice, error)) return false;
+        if (config.pauseCameraDevice.empty()) { error = "Invalid pause.cameraDevice"; return false; }
         if (!readString(*pause, "image", config.pauseImagePath, error)) return false;
         if (!readString(*pause, "folder", config.pauseImageFolder, error)) return false;
         if (config.pauseImageFolder.empty()) { error = "Invalid pause.folder"; return false; }

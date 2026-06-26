@@ -39,6 +39,8 @@ enum OptionId {
     OptionBackgroundImage,
     OptionBackgroundImageFolder,
     OptionBackgroundLoopIfVideo,
+    OptionPauseSource,
+    OptionPauseCameraDevice,
     OptionPauseImage,
     OptionPauseImageFolder,
     OptionPauseLoopIfVideo,
@@ -96,6 +98,8 @@ const std::vector<OptionDefinition>& optionDefinitions()
         {OptionBackgroundImage, 0, "background-image", required_argument, "path", "Image/video/html file for --background-effect image", ""},
         {OptionBackgroundImageFolder, 0, "background-image-folder", required_argument, "path", "Base folder for background images set through IPC", "."},
         {OptionBackgroundLoopIfVideo, 0, "background-loop-if-video", required_argument, "true|false", "Loop background file when it is a video", "false"},
+        {OptionPauseSource, 0, "pause-source", required_argument, "image|camera", "Pause source: image media or secondary camera", "image"},
+        {OptionPauseCameraDevice, 0, "pause-camera-device", required_argument, "path", "Secondary camera device used when --pause-source camera is selected", "/dev/video10"},
         {OptionPauseImage, 0, "pause-image", required_argument, "path", "Image/video/html file for camera status screens", ""},
         {OptionPauseImageFolder, 0, "pause-image-folder", required_argument, "path", "Base folder for pause images set through IPC", "."},
         {OptionPauseLoopIfVideo, 0, "pause-loop-if-video", required_argument, "true|false", "Loop pause file when it is a video", "false"},
@@ -351,14 +355,17 @@ void warnMissingConfiguredFiles(const ProcessorConfig& config)
         LOG_WARNING("Configured background image folder does not exist: " << config.backgroundImageFolder);
     }
     const std::string pausePath = resolveMediaPath(config.pauseImageFolder, config.pauseImagePath);
-    if (config.pauseImageEnabled && !pausePath.empty() && !fileExists(pausePath)) {
+    if (config.pauseImageEnabled && config.pauseSource == PauseSource::Image && !pausePath.empty() && !fileExists(pausePath)) {
         LOG_WARNING("Configured pause media does not exist: " << pausePath);
     }
 #if !defined(JON_ENABLE_WPE_HTML_RENDERER)
-    if (config.pauseImageEnabled && !pausePath.empty() && looksLikeHtmlFile(pausePath)) {
+    if (config.pauseImageEnabled && config.pauseSource == PauseSource::Image && !pausePath.empty() && looksLikeHtmlFile(pausePath)) {
         LOG_WARNING("Configured pause HTML media is not supported in this build: " << pausePath);
     }
 #endif
+    if (config.pauseImageEnabled && config.pauseSource == PauseSource::Camera && config.pauseCameraDevice.empty()) {
+        LOG_WARNING("Configured pause camera device is empty");
+    }
     if (!directoryExists(config.pauseImageFolder)) {
         LOG_WARNING("Configured pause image folder does not exist: " << config.pauseImageFolder);
     }
@@ -417,7 +424,11 @@ bool validateStartupFiles(const ProcessorConfig& config, std::string& error)
         }
 #endif
     }
-    if (!config.pauseImagePath.empty()) {
+    if (config.pauseImageEnabled && config.pauseSource == PauseSource::Camera && config.pauseCameraDevice.empty()) {
+        error = "Pause camera device must not be empty";
+        return false;
+    }
+    if (config.pauseSource == PauseSource::Image && !config.pauseImagePath.empty()) {
         const std::string pausePath = resolveMediaPath(config.pauseImageFolder, config.pauseImagePath);
         if (!fileExists(pausePath)) {
             error = "Pause media does not exist: " + pausePath;
@@ -505,6 +516,21 @@ bool parseBackgroundEffect(const char* value, BackgroundEffect& effect, std::str
         return true;
     }
     error = "Invalid background effect: " + parsed + " (allowed: none, color, blur, image)";
+    return false;
+}
+
+bool parsePauseSource(const char* value, PauseSource& source, std::string& error)
+{
+    const std::string parsed(value);
+    if (parsed == "image") {
+        source = PauseSource::Image;
+        return true;
+    }
+    if (parsed == "camera") {
+        source = PauseSource::Camera;
+        return true;
+    }
+    error = "Invalid pause source: " + parsed + " (allowed: image, camera)";
     return false;
 }
 
@@ -779,6 +805,16 @@ bool parseCommandLine(int argc, char** argv, CommandLineResult& result, std::str
         case OptionBackgroundLoopIfVideo:
             if (!parseBooleanText(optarg, "--background-loop-if-video", result.config.backgroundLoopIfVideo, error)) return false;
             break;
+        case OptionPauseSource:
+            if (!parsePauseSource(optarg, result.config.pauseSource, error)) return false;
+            break;
+        case OptionPauseCameraDevice:
+            result.config.pauseCameraDevice = optarg;
+            if (result.config.pauseCameraDevice.empty()) {
+                error = "--pause-camera-device must not be empty.";
+                return false;
+            }
+            break;
         case OptionPauseImage:
             result.config.pauseImagePath = optarg;
             if (result.config.pauseImagePath.empty()) {
@@ -1004,6 +1040,17 @@ std::string pauseFontAlignToString(PauseFontAlign align)
         return "center";
     case PauseFontAlign::Right:
         return "right";
+    }
+    return "unknown";
+}
+
+std::string pauseSourceToString(PauseSource source)
+{
+    switch (source) {
+    case PauseSource::Image:
+        return "image";
+    case PauseSource::Camera:
+        return "camera";
     }
     return "unknown";
 }

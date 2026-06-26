@@ -25,6 +25,8 @@
   },
   "pause": {
     "enabled": false,
+    "source": "image",
+    "cameraDevice": "/dev/video10",
     "image": "sample_pause.jpg",
     "folder": "testdata",
     "loopIfVideo": false,

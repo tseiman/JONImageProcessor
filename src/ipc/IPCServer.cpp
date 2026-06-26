@@ -340,6 +340,12 @@ bool setStringEnum(const std::string& value, ProcessorConfig& config, const std:
         else return false;
         return true;
     }
+    if (key == "pause.source") {
+        if (value == "image") config.pauseSource = PauseSource::Image;
+        else if (value == "camera") config.pauseSource = PauseSource::Camera;
+        else return false;
+        return true;
+    }
     return false;
 }
 
@@ -368,6 +374,8 @@ std::string valueJson(const ProcessorConfig& c, const std::string& key, const Be
     if (key == "background_overlay_alpha" || key == "background.overlayAlpha") return std::to_string(c.backgroundOverlayAlpha);
     if (key == "blur_strength" || key == "background.blurStrength") return std::to_string(c.blurStrength);
     if (key == "pause.enabled") return c.pauseImageEnabled ? "true" : "false";
+    if (key == "pause.source") return "\"" + pauseSourceToString(c.pauseSource) + "\"";
+    if (key == "pause.cameraDevice") return "\"" + escapeJson(c.pauseCameraDevice) + "\"";
     if (key == "pause.image") return "\"" + escapeJson(c.pauseImagePath) + "\"";
     if (key == "pause.folder") return "\"" + escapeJson(c.pauseImageFolder) + "\"";
     if (key == "pause.loopIfVideo") return c.pauseLoopIfVideo ? "true" : "false";
@@ -397,7 +405,8 @@ bool knownKey(const std::string& key)
         || key == "segmentation.threshold" || key == "segmentation.smoothing" || key == "segmentation.morphology"
         || key == "background.effect" || key == "background.image" || key == "background.loopIfVideo" || key == "background.overlayColor"
         || key == "background.overlayAlpha" || key == "background.blurStrength" || key == "background.folder"
-        || key == "pause.enabled" || key == "pause.image" || key == "pause.loopIfVideo" || key == "pause.folder" || key == "pause.showStatusText" || key == "pause.textColor"
+        || key == "pause.enabled" || key == "pause.source" || key == "pause.cameraDevice"
+        || key == "pause.image" || key == "pause.loopIfVideo" || key == "pause.folder" || key == "pause.showStatusText" || key == "pause.textColor"
         || key == "pause.textPosition" || key == "pause.textSize" || key == "pause.font"
         || key == "pause.fontDirectory" || key == "pause.fontAlign"
         || key == "runtime.noMask" || key == "runtime.noOverlay" || key == "camera.enabled"
@@ -423,14 +432,17 @@ std::string validateRuntimeConfig(const ProcessorConfig& config)
 #endif
     }
     const std::string pausePath = joinPath(config.pauseImageFolder, config.pauseImagePath);
-    if (!config.pauseImagePath.empty() && !fileExists(pausePath)) {
+    if (config.pauseSource == PauseSource::Image && !config.pauseImagePath.empty() && !fileExists(pausePath)) {
         return "pause.image cannot be read: " + config.pauseImagePath;
     }
 #if !defined(JON_ENABLE_WPE_HTML_RENDERER)
-    if (!config.pauseImagePath.empty() && looksLikeHtmlFile(pausePath)) {
+    if (config.pauseSource == PauseSource::Image && !config.pauseImagePath.empty() && looksLikeHtmlFile(pausePath)) {
         return "pause HTML media is not supported in this build";
     }
 #endif
+    if (config.pauseSource == PauseSource::Camera && config.pauseCameraDevice.empty()) {
+        return "pause.cameraDevice must not be empty";
+    }
     if (!isBuiltInPauseFont(config.pauseImageFont)) {
         const std::string fontPath = joinPath(config.pauseImageFontDirectory, config.pauseImageFont + ".ttf");
 #if !defined(JON_ENABLE_FREETYPE_TEXT)
@@ -548,6 +560,8 @@ std::string IPCServer::handleLine(const std::string& line)
             << "\",\"overlayAlpha\":" << current.backgroundOverlayAlpha
             << ",\"blurStrength\":" << current.blurStrength << "}"
             << ",\"pause\":{\"enabled\":" << (current.pauseImageEnabled ? "true" : "false")
+            << ",\"source\":\"" << pauseSourceToString(current.pauseSource)
+            << "\",\"cameraDevice\":\"" << escapeJson(current.pauseCameraDevice)
             << ",\"image\":\"" << escapeJson(current.pauseImagePath)
             << "\",\"folder\":\"" << escapeJson(current.pauseImageFolder)
             << "\",\"loopIfVideo\":" << (current.pauseLoopIfVideo ? "true" : "false")
@@ -626,9 +640,15 @@ std::string IPCServer::handleLine(const std::string& line)
         const int blur = static_cast<int>(value.number);
         if (value.number != static_cast<double>(blur) || blur < 1 || blur > 100) return loggedErrorResponse("invalid value");
         updated.blurStrength = blur;
-    } else if (key == "mask_morphology" || key == "segmentation.morphology" || key == "background_effect" || key == "background.effect") {
+    } else if (key == "mask_morphology" || key == "segmentation.morphology"
+        || key == "background_effect" || key == "background.effect"
+        || key == "pause.source") {
         if (value.type != JsonValue::Type::String) return loggedErrorResponse("invalid value type");
         if (!setStringEnum(value.text, updated, key)) return loggedErrorResponse("invalid value");
+    } else if (key == "pause.cameraDevice") {
+        if (value.type != JsonValue::Type::String) return loggedErrorResponse("invalid value type");
+        if (value.text.empty()) return loggedErrorResponse("invalid value");
+        updated.pauseCameraDevice = value.text;
     } else if (key == "background_image" || key == "background.image") {
         if (value.type != JsonValue::Type::String) return loggedErrorResponse("invalid value type");
         if (!isSafeRelativePath(value.text)) return loggedErrorResponse("invalid relative image path");

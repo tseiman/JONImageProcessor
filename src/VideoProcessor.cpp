@@ -279,8 +279,66 @@ struct MediaFile {
     }
 };
 
+struct PauseCameraSource {
+    cv::VideoCapture capture;
+    std::string device;
+    bool warnedReadFailure = false;
+
+    void release()
+    {
+        if (capture.isOpened()) {
+            capture.release();
+        }
+        device.clear();
+        warnedReadFailure = false;
+    }
+
+    bool ensureOpened(const std::string& nextDevice)
+    {
+        if (capture.isOpened() && device == nextDevice) {
+            return true;
+        }
+        release();
+        if (nextDevice.empty()) {
+            LOG_ERROR("Pause camera device is empty");
+            return false;
+        }
+        LOG_INFO("Opening pause camera device: " << nextDevice);
+        if (nextDevice.rfind("/dev/video", 0) == 0) {
+            capture.open(nextDevice, cv::CAP_V4L2);
+        } else {
+            capture.open(nextDevice);
+        }
+        if (!capture.isOpened()) {
+            LOG_WARNING("Cannot open pause camera device: " << nextDevice);
+            return false;
+        }
+        capture.set(cv::CAP_PROP_BUFFERSIZE, 1);
+        device = nextDevice;
+        warnedReadFailure = false;
+        return true;
+    }
+
+    bool read(cv::Mat& frame)
+    {
+        if (!capture.isOpened()) {
+            return false;
+        }
+        if (!capture.read(frame) || frame.empty()) {
+            if (!warnedReadFailure) {
+                LOG_WARNING("Cannot read pause camera frame: " << device);
+                warnedReadFailure = true;
+            }
+            return false;
+        }
+        warnedReadFailure = false;
+        return true;
+    }
+};
+
 struct StatusFrameBuffers {
     MediaFile pauseMedia;
+    PauseCameraSource pauseCamera;
     cv::Mat scaledPauseImage;
 #if defined(JON_ENABLE_FREETYPE_TEXT)
     FT_Library ftLibrary = nullptr;
@@ -470,7 +528,27 @@ cv::Mat makeStatusFrame(
         }
     };
 
-    if (config != nullptr && buffers != nullptr && config->pauseImageEnabled && !config->pauseImagePath.empty()) {
+    if (config != nullptr && buffers != nullptr && config->pauseImageEnabled && config->pauseSource == PauseSource::Camera) {
+        buffers->pauseMedia.release();
+        cv::Mat pauseFrame;
+        if (buffers->pauseCamera.ensureOpened(config->pauseCameraDevice) && buffers->pauseCamera.read(pauseFrame) && !pauseFrame.empty()) {
+            cv::resize(pauseFrame, buffers->scaledPauseImage, size, 0.0, 0.0, cv::INTER_LINEAR);
+            cv::Mat frame = buffers->scaledPauseImage.clone();
+            if (config->pauseImageShowStatusText) {
+                const int marginX = size.width / 8;
+                const cv::Point textPosition(
+                    config->pauseImageTextPosition.x >= 0 ? config->pauseImageTextPosition.x : marginX + 32,
+                    config->pauseImageTextPosition.y >= 0 ? config->pauseImageTextPosition.y : size.height / 2 - 10);
+                renderPauseStatusText(frame, status, *config, *buffers, textPosition);
+            }
+            return frame;
+        }
+        if (!buffers->scaledPauseImage.empty()) {
+            return buffers->scaledPauseImage.clone();
+        }
+        logGeneratedStatusReason("pause camera unavailable");
+    } else if (config != nullptr && buffers != nullptr && config->pauseImageEnabled && !config->pauseImagePath.empty()) {
+        buffers->pauseCamera.release();
         const std::string resolvedPath = mediaPath(config->pauseImageFolder, config->pauseImagePath);
         if (!buffers->pauseMedia.ensureLoaded(resolvedPath, config->pauseLoopIfVideo, size, "pause")) {
             buffers->scaledPauseImage.release();
@@ -502,10 +580,19 @@ cv::Mat makeStatusFrame(
             }
         }
     } else if (config != nullptr && !config->pauseImageEnabled) {
+        if (buffers != nullptr) {
+            buffers->pauseCamera.release();
+        }
         logGeneratedStatusReason("pause.enabled=false");
     } else if (config != nullptr && config->pauseImagePath.empty()) {
+        if (buffers != nullptr) {
+            buffers->pauseCamera.release();
+        }
         logGeneratedStatusReason("pause.image is empty");
     } else {
+        if (buffers != nullptr) {
+            buffers->pauseCamera.release();
+        }
         logGeneratedStatusReason("pause media config unavailable");
     }
 
@@ -943,6 +1030,8 @@ void logStartupInfo(const ProcessorConfig& config, const ScreenInfo& screenInfo)
     LOG_VERBOSE("Background image folder: " << config.backgroundImageFolder);
     LOG_VERBOSE("Background loop if video: " << (config.backgroundLoopIfVideo ? "true" : "false"));
     LOG_VERBOSE("Pause image enabled: " << (config.pauseImageEnabled ? "true" : "false"));
+    LOG_VERBOSE("Pause source: " << pauseSourceToString(config.pauseSource));
+    LOG_VERBOSE("Pause camera device: " << config.pauseCameraDevice);
     LOG_VERBOSE("Pause image: " << (config.pauseImagePath.empty() ? "none" : config.pauseImagePath));
     LOG_VERBOSE("Pause image folder: " << config.pauseImageFolder);
     LOG_VERBOSE("Pause loop if video: " << (config.pauseLoopIfVideo ? "true" : "false"));

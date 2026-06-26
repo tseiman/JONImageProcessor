@@ -37,6 +37,11 @@ enum class PauseFontAlign {
     Right
 };
 
+enum class PauseSource {
+    Image,
+    Camera
+};
+
 struct RgbColor {
     int r = 0;
     int g = 255;
@@ -77,6 +82,7 @@ struct ProcessorConfig {
     std::string backgroundImageFolder = ".";
     std::string pauseImagePath;
     std::string pauseImageFolder = ".";
+    std::string pauseCameraDevice = "/dev/video10";
     std::string pauseImageFont = "simplex";
     std::string pauseImageFontDirectory = ".";
     std::string ipcSocketPath = "/tmp/jonimageprocessor.sock";
@@ -86,6 +92,7 @@ struct ProcessorConfig {
     RgbaColor pauseImageTextColor;
     Point2i pauseImageTextPosition;
     PauseFontAlign pauseImageFontAlign = PauseFontAlign::Left;
+    PauseSource pauseSource = PauseSource::Image;
     double backgroundOverlayAlpha = 0.35;
     double pauseImageTextSize = 1.6;
     int blurStrength = 15;
@@ -121,3 +128,4 @@ std::string cameraFormatToString(CameraFormat format);
 std::string maskMorphologyModeToString(MaskMorphologyMode mode);
 std::string backgroundEffectToString(BackgroundEffect effect);
 std::string pauseFontAlignToString(PauseFontAlign align);
+std::string pauseSourceToString(PauseSource source);
