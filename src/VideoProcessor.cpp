@@ -1270,6 +1270,7 @@ int VideoProcessor::run()
             std::this_thread::sleep_for(std::chrono::milliseconds(33));
             readOk = true;
         } else if (lowLatencyMode) {
+            statusFrameBuffers.pauseCamera.release();
             if (cameraRuntimePaused) {
                 LOG_INFO("Camera input resumed by runtime config");
                 cameraRuntimePaused = false;
@@ -1338,6 +1339,7 @@ int VideoProcessor::run()
                 std::chrono::steady_clock::duration frameHandover {};
                 readOk = lowLatencyCapture.waitForLatestFrame(frame, captureWait, frameHandover);
                 if (readOk) {
+                    statusFrameBuffers.pauseCamera.release();
                     benchmark.add(BenchmarkStage::CaptureWait, captureWait);
                     benchmark.add(BenchmarkStage::FrameHandover, frameHandover);
                 } else if (!shutdownRequested()) {
