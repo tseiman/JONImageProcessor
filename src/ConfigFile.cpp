@@ -423,9 +423,10 @@ bool applyConfig(const Json& root, ProcessorConfig& config, ConfigLoadResult& re
 
     if (const Json* secondaryCamera = objectChild(root, "secondaryCamera")) {
         if (secondaryCamera->type != Json::Type::Object) { error = "secondaryCamera must be an object"; return false; }
-        warnUnknownFields(*secondaryCamera, "secondaryCamera.", {"device"});
+        warnUnknownFields(*secondaryCamera, "secondaryCamera.", {"device", "pipeline"});
         if (!readString(*secondaryCamera, "device", config.secondaryCameraDevice, error)) return false;
-        if (config.secondaryCameraDevice.empty()) { error = "Invalid secondaryCamera.device"; return false; }
+        if (!readString(*secondaryCamera, "pipeline", config.secondaryCameraPipeline, error)) return false;
+        if (config.secondaryCameraDevice.empty() && config.secondaryCameraPipeline.empty()) { error = "Invalid secondaryCamera source"; return false; }
     }
 
     if (const Json* processing = objectChild(root, "processing")) {

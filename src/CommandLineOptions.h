@@ -83,6 +83,7 @@ struct ProcessorConfig {
     std::string pauseImagePath;
     std::string pauseImageFolder = ".";
     std::string secondaryCameraDevice = "/dev/video10";
+    std::string secondaryCameraPipeline;
     std::string pauseImageFont = "simplex";
     std::string pauseImageFontDirectory = ".";
     std::string ipcSocketPath = "/tmp/jonimageprocessor.sock";

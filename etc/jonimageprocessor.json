@@ -7,7 +7,8 @@
     "connectTimeoutSeconds": 10
   },
   "secondaryCamera": {
-    "device": "/dev/video10"
+    "device": "/dev/video10",
+    "pipeline": ""
   },
   "processing": {
     "size": "1280x720"
