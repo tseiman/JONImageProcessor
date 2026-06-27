@@ -282,7 +282,8 @@ struct MediaFile {
 struct PauseCameraSource {
     cv::VideoCapture capture;
     std::string device;
-    bool warnedReadFailure = false;
+    std::string warnedOpenFailureDevice;
+    std::string warnedReadFailureDevice;
 
     void release()
     {
@@ -290,7 +291,6 @@ struct PauseCameraSource {
             capture.release();
         }
         device.clear();
-        warnedReadFailure = false;
     }
 
     bool ensureOpened(const std::string& nextDevice)
@@ -300,7 +300,7 @@ struct PauseCameraSource {
         }
         release();
         if (nextDevice.empty()) {
-            LOG_ERROR("Pause camera device is empty");
+            LOG_ERROR("Secondary camera device is empty");
             return false;
         }
         LOG_INFO("Opening pause camera device: " << nextDevice);
@@ -310,12 +310,16 @@ struct PauseCameraSource {
             capture.open(nextDevice);
         }
         if (!capture.isOpened()) {
-            LOG_WARNING("Cannot open pause camera device: " << nextDevice);
+            if (warnedOpenFailureDevice != nextDevice) {
+                LOG_WARNING("Cannot open pause camera device: " << nextDevice);
+                warnedOpenFailureDevice = nextDevice;
+            }
             return false;
         }
         capture.set(cv::CAP_PROP_BUFFERSIZE, 1);
         device = nextDevice;
-        warnedReadFailure = false;
+        warnedOpenFailureDevice.clear();
+        warnedReadFailureDevice.clear();
         return true;
     }
 
@@ -325,13 +329,15 @@ struct PauseCameraSource {
             return false;
         }
         if (!capture.read(frame) || frame.empty()) {
-            if (!warnedReadFailure) {
+            if (warnedReadFailureDevice != device) {
                 LOG_WARNING("Cannot read pause camera frame: " << device);
-                warnedReadFailure = true;
+                warnedReadFailureDevice = device;
             }
+            capture.release();
+            device.clear();
             return false;
         }
-        warnedReadFailure = false;
+        warnedReadFailureDevice.clear();
         return true;
     }
 };
@@ -531,7 +537,7 @@ cv::Mat makeStatusFrame(
     if (config != nullptr && buffers != nullptr && config->pauseImageEnabled && config->pauseSource == PauseSource::Camera) {
         buffers->pauseMedia.release();
         cv::Mat pauseFrame;
-        if (buffers->pauseCamera.ensureOpened(config->pauseCameraDevice) && buffers->pauseCamera.read(pauseFrame) && !pauseFrame.empty()) {
+        if (buffers->pauseCamera.ensureOpened(config->secondaryCameraDevice) && buffers->pauseCamera.read(pauseFrame) && !pauseFrame.empty()) {
             cv::resize(pauseFrame, buffers->scaledPauseImage, size, 0.0, 0.0, cv::INTER_LINEAR);
             cv::Mat frame = buffers->scaledPauseImage.clone();
             if (config->pauseImageShowStatusText) {
@@ -543,10 +549,9 @@ cv::Mat makeStatusFrame(
             }
             return frame;
         }
-        if (!buffers->scaledPauseImage.empty()) {
-            return buffers->scaledPauseImage.clone();
-        }
+        buffers->scaledPauseImage.release();
         logGeneratedStatusReason("pause camera unavailable");
+        return makeStatusFrame(size, "Camera 2. DISCONNECTED");
     } else if (config != nullptr && buffers != nullptr && config->pauseImageEnabled && !config->pauseImagePath.empty()) {
         buffers->pauseCamera.release();
         const std::string resolvedPath = mediaPath(config->pauseImageFolder, config->pauseImagePath);
@@ -1031,7 +1036,7 @@ void logStartupInfo(const ProcessorConfig& config, const ScreenInfo& screenInfo)
     LOG_VERBOSE("Background loop if video: " << (config.backgroundLoopIfVideo ? "true" : "false"));
     LOG_VERBOSE("Pause image enabled: " << (config.pauseImageEnabled ? "true" : "false"));
     LOG_VERBOSE("Pause source: " << pauseSourceToString(config.pauseSource));
-    LOG_VERBOSE("Pause camera device: " << config.pauseCameraDevice);
+    LOG_VERBOSE("Secondary camera device: " << config.secondaryCameraDevice);
     LOG_VERBOSE("Pause image: " << (config.pauseImagePath.empty() ? "none" : config.pauseImagePath));
     LOG_VERBOSE("Pause image folder: " << config.pauseImageFolder);
     LOG_VERBOSE("Pause loop if video: " << (config.pauseLoopIfVideo ? "true" : "false"));

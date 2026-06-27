@@ -384,7 +384,7 @@ bool applyConfig(const Json& root, ProcessorConfig& config, ConfigLoadResult& re
         error = "JSON config root must be an object";
         return false;
     }
-    warnUnknownFields(root, "", {"configDirectory", "camera", "processing", "segmentation", "background", "pause", "output", "ipc", "display", "diagnostics"});
+    warnUnknownFields(root, "", {"configDirectory", "camera", "secondaryCamera", "processing", "segmentation", "background", "pause", "output", "ipc", "display", "diagnostics"});
 
     if (const Json* configDirectory = objectChild(root, "configDirectory")) {
         if (!allowConfigDirectory) {
@@ -419,6 +419,13 @@ bool applyConfig(const Json& root, ProcessorConfig& config, ConfigLoadResult& re
             error = "Invalid camera.connectTimeoutSeconds";
             return false;
         }
+    }
+
+    if (const Json* secondaryCamera = objectChild(root, "secondaryCamera")) {
+        if (secondaryCamera->type != Json::Type::Object) { error = "secondaryCamera must be an object"; return false; }
+        warnUnknownFields(*secondaryCamera, "secondaryCamera.", {"device"});
+        if (!readString(*secondaryCamera, "device", config.secondaryCameraDevice, error)) return false;
+        if (config.secondaryCameraDevice.empty()) { error = "Invalid secondaryCamera.device"; return false; }
     }
 
     if (const Json* processing = objectChild(root, "processing")) {
@@ -476,13 +483,11 @@ bool applyConfig(const Json& root, ProcessorConfig& config, ConfigLoadResult& re
 
     if (const Json* pause = objectChild(root, "pause")) {
         if (pause->type != Json::Type::Object) { error = "pause must be an object"; return false; }
-        warnUnknownFields(*pause, "pause.", {"enabled", "source", "cameraDevice", "image", "folder", "loopIfVideo", "showStatusText", "textColor", "textPosition", "textSize", "font", "fontDirectory", "fontAlign"});
+        warnUnknownFields(*pause, "pause.", {"enabled", "source", "image", "folder", "loopIfVideo", "showStatusText", "textColor", "textPosition", "textSize", "font", "fontDirectory", "fontAlign"});
         if (!readBoolean(*pause, "enabled", config.pauseImageEnabled, error)) return false;
         std::string source;
         if (!readString(*pause, "source", source, error)) return false;
         if (!source.empty() && !parsePauseSource(source, config.pauseSource)) { error = "Invalid pause.source"; return false; }
-        if (!readString(*pause, "cameraDevice", config.pauseCameraDevice, error)) return false;
-        if (config.pauseCameraDevice.empty()) { error = "Invalid pause.cameraDevice"; return false; }
         if (!readString(*pause, "image", config.pauseImagePath, error)) return false;
         if (!readString(*pause, "folder", config.pauseImageFolder, error)) return false;
         if (config.pauseImageFolder.empty()) { error = "Invalid pause.folder"; return false; }

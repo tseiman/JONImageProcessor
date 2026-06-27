@@ -40,7 +40,7 @@ enum OptionId {
     OptionBackgroundImageFolder,
     OptionBackgroundLoopIfVideo,
     OptionPauseSource,
-    OptionPauseCameraDevice,
+    OptionSecondaryCameraDevice,
     OptionPauseImage,
     OptionPauseImageFolder,
     OptionPauseLoopIfVideo,
@@ -99,7 +99,7 @@ const std::vector<OptionDefinition>& optionDefinitions()
         {OptionBackgroundImageFolder, 0, "background-image-folder", required_argument, "path", "Base folder for background images set through IPC", "."},
         {OptionBackgroundLoopIfVideo, 0, "background-loop-if-video", required_argument, "true|false", "Loop background file when it is a video", "false"},
         {OptionPauseSource, 0, "pause-source", required_argument, "image|camera", "Pause source: image media or secondary camera", "image"},
-        {OptionPauseCameraDevice, 0, "pause-camera-device", required_argument, "path", "Secondary camera device used when --pause-source camera is selected", "/dev/video10"},
+        {OptionSecondaryCameraDevice, 0, "secondary-camera-device", required_argument, "path", "Secondary camera device used when --pause-source camera is selected", "/dev/video10"},
         {OptionPauseImage, 0, "pause-image", required_argument, "path", "Image/video/html file for camera status screens", ""},
         {OptionPauseImageFolder, 0, "pause-image-folder", required_argument, "path", "Base folder for pause images set through IPC", "."},
         {OptionPauseLoopIfVideo, 0, "pause-loop-if-video", required_argument, "true|false", "Loop pause file when it is a video", "false"},
@@ -363,8 +363,8 @@ void warnMissingConfiguredFiles(const ProcessorConfig& config)
         LOG_WARNING("Configured pause HTML media is not supported in this build: " << pausePath);
     }
 #endif
-    if (config.pauseImageEnabled && config.pauseSource == PauseSource::Camera && config.pauseCameraDevice.empty()) {
-        LOG_WARNING("Configured pause camera device is empty");
+    if (config.pauseImageEnabled && config.pauseSource == PauseSource::Camera && config.secondaryCameraDevice.empty()) {
+        LOG_WARNING("Configured secondary camera device is empty");
     }
     if (!directoryExists(config.pauseImageFolder)) {
         LOG_WARNING("Configured pause image folder does not exist: " << config.pauseImageFolder);
@@ -424,8 +424,8 @@ bool validateStartupFiles(const ProcessorConfig& config, std::string& error)
         }
 #endif
     }
-    if (config.pauseImageEnabled && config.pauseSource == PauseSource::Camera && config.pauseCameraDevice.empty()) {
-        error = "Pause camera device must not be empty";
+    if (config.pauseImageEnabled && config.pauseSource == PauseSource::Camera && config.secondaryCameraDevice.empty()) {
+        error = "Secondary camera device must not be empty";
         return false;
     }
     if (config.pauseSource == PauseSource::Image && !config.pauseImagePath.empty()) {
@@ -808,10 +808,10 @@ bool parseCommandLine(int argc, char** argv, CommandLineResult& result, std::str
         case OptionPauseSource:
             if (!parsePauseSource(optarg, result.config.pauseSource, error)) return false;
             break;
-        case OptionPauseCameraDevice:
-            result.config.pauseCameraDevice = optarg;
-            if (result.config.pauseCameraDevice.empty()) {
-                error = "--pause-camera-device must not be empty.";
+        case OptionSecondaryCameraDevice:
+            result.config.secondaryCameraDevice = optarg;
+            if (result.config.secondaryCameraDevice.empty()) {
+                error = "--secondary-camera-device must not be empty.";
                 return false;
             }
             break;

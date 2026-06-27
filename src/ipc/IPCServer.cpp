@@ -375,7 +375,7 @@ std::string valueJson(const ProcessorConfig& c, const std::string& key, const Be
     if (key == "blur_strength" || key == "background.blurStrength") return std::to_string(c.blurStrength);
     if (key == "pause.enabled") return c.pauseImageEnabled ? "true" : "false";
     if (key == "pause.source") return "\"" + pauseSourceToString(c.pauseSource) + "\"";
-    if (key == "pause.cameraDevice") return "\"" + escapeJson(c.pauseCameraDevice) + "\"";
+    if (key == "secondaryCamera.device") return "\"" + escapeJson(c.secondaryCameraDevice) + "\"";
     if (key == "pause.image") return "\"" + escapeJson(c.pauseImagePath) + "\"";
     if (key == "pause.folder") return "\"" + escapeJson(c.pauseImageFolder) + "\"";
     if (key == "pause.loopIfVideo") return c.pauseLoopIfVideo ? "true" : "false";
@@ -405,11 +405,12 @@ bool knownKey(const std::string& key)
         || key == "segmentation.threshold" || key == "segmentation.smoothing" || key == "segmentation.morphology"
         || key == "background.effect" || key == "background.image" || key == "background.loopIfVideo" || key == "background.overlayColor"
         || key == "background.overlayAlpha" || key == "background.blurStrength" || key == "background.folder"
-        || key == "pause.enabled" || key == "pause.source" || key == "pause.cameraDevice"
+        || key == "pause.enabled" || key == "pause.source"
         || key == "pause.image" || key == "pause.loopIfVideo" || key == "pause.folder" || key == "pause.showStatusText" || key == "pause.textColor"
         || key == "pause.textPosition" || key == "pause.textSize" || key == "pause.font"
         || key == "pause.fontDirectory" || key == "pause.fontAlign"
         || key == "runtime.noMask" || key == "runtime.noOverlay" || key == "camera.enabled"
+        || key == "secondaryCamera.device"
         || key == "version" || key == "system.version" || key == "configDirectory"
         || key == "system.configDirectory" || key == "config";
 }
@@ -440,8 +441,8 @@ std::string validateRuntimeConfig(const ProcessorConfig& config)
         return "pause HTML media is not supported in this build";
     }
 #endif
-    if (config.pauseSource == PauseSource::Camera && config.pauseCameraDevice.empty()) {
-        return "pause.cameraDevice must not be empty";
+    if (config.pauseSource == PauseSource::Camera && config.secondaryCameraDevice.empty()) {
+        return "secondaryCamera.device must not be empty";
     }
     if (!isBuiltInPauseFont(config.pauseImageFont)) {
         const std::string fontPath = joinPath(config.pauseImageFontDirectory, config.pauseImageFont + ".ttf");
@@ -549,6 +550,7 @@ std::string IPCServer::handleLine(const std::string& line)
         std::ostringstream out;
         out << "{\"ok\":true,\"values\":{"
             << "\"camera\":{\"enabled\":" << (current.cameraEnabled ? "true" : "false") << "}"
+            << ",\"secondaryCamera\":{\"device\":\"" << escapeJson(current.secondaryCameraDevice) << "\"}"
             << ",\"segmentation\":{\"threshold\":" << current.maskThreshold
             << ",\"smoothing\":" << current.maskSmoothing
             << ",\"morphology\":\"" << maskMorphologyModeToString(current.maskMorphology) << "\"}"
@@ -561,8 +563,7 @@ std::string IPCServer::handleLine(const std::string& line)
             << ",\"blurStrength\":" << current.blurStrength << "}"
             << ",\"pause\":{\"enabled\":" << (current.pauseImageEnabled ? "true" : "false")
             << ",\"source\":\"" << pauseSourceToString(current.pauseSource)
-            << "\",\"cameraDevice\":\"" << escapeJson(current.pauseCameraDevice)
-            << ",\"image\":\"" << escapeJson(current.pauseImagePath)
+            << "\",\"image\":\"" << escapeJson(current.pauseImagePath)
             << "\",\"folder\":\"" << escapeJson(current.pauseImageFolder)
             << "\",\"loopIfVideo\":" << (current.pauseLoopIfVideo ? "true" : "false")
             << ",\"showStatusText\":" << (current.pauseImageShowStatusText ? "true" : "false")
@@ -607,7 +608,8 @@ std::string IPCServer::handleLine(const std::string& line)
         return loggedErrorResponse("version is read-only");
     }
     if (key == "configDirectory" || key == "system.configDirectory"
-        || key == "background.folder" || key == "pause.folder" || key == "pause.fontDirectory") {
+        || key == "background.folder" || key == "pause.folder" || key == "pause.fontDirectory"
+        || key == "secondaryCamera.device") {
         return loggedErrorResponse(key + " is read-only");
     }
     if (!knownKey(key)) {
@@ -645,10 +647,6 @@ std::string IPCServer::handleLine(const std::string& line)
         || key == "pause.source") {
         if (value.type != JsonValue::Type::String) return loggedErrorResponse("invalid value type");
         if (!setStringEnum(value.text, updated, key)) return loggedErrorResponse("invalid value");
-    } else if (key == "pause.cameraDevice") {
-        if (value.type != JsonValue::Type::String) return loggedErrorResponse("invalid value type");
-        if (value.text.empty()) return loggedErrorResponse("invalid value");
-        updated.pauseCameraDevice = value.text;
     } else if (key == "background_image" || key == "background.image") {
         if (value.type != JsonValue::Type::String) return loggedErrorResponse("invalid value type");
         if (!isSafeRelativePath(value.text)) return loggedErrorResponse("invalid relative image path");

@@ -6,6 +6,9 @@
     "format": "MJPG",
     "connectTimeoutSeconds": 10
   },
+  "secondaryCamera": {
+    "device": "/dev/video10"
+  },
   "processing": {
     "size": "1280x720"
   },
@@ -26,7 +29,6 @@
   "pause": {
     "enabled": false,
     "source": "image",
-    "cameraDevice": "/dev/video10",
     "image": "sample_pause.jpg",
     "folder": "testdata",
     "loopIfVideo": false,

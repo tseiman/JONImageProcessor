@@ -82,7 +82,7 @@ struct ProcessorConfig {
     std::string backgroundImageFolder = ".";
     std::string pauseImagePath;
     std::string pauseImageFolder = ".";
-    std::string pauseCameraDevice = "/dev/video10";
+    std::string secondaryCameraDevice = "/dev/video10";
     std::string pauseImageFont = "simplex";
     std::string pauseImageFontDirectory = ".";
     std::string ipcSocketPath = "/tmp/jonimageprocessor.sock";

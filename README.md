@@ -315,8 +315,8 @@ journalctl -u JONImageProcessor.service -f
 - `--background-image <path>`: image, video, or HTML file used by `--background-effect image`. JPEG/PNG are loaded as static images; video files are decoded with OpenCV; HTML/CSS/JavaScript is rendered through WPE WebKit when the binary was built with WPE support.
 - `--background-image-folder <path>`: base folder for background images selected through IPC. Default: `.`.
 - `--background-loop-if-video <true|false>`: loop the background media when it is a video. Default: `false`.
-- `--pause-source <image|camera>`: pause media source. `image` uses `--pause-image`; `camera` uses the secondary pause camera device. Default: `image`.
-- `--pause-camera-device <path>`: secondary camera device used when `--pause-source camera` is selected. Default: `/dev/video10`.
+- `--pause-source <image|camera>`: pause media source. `image` uses `--pause-image`; `camera` uses the secondary camera device. Default: `image`.
+- `--secondary-camera-device <path>`: secondary camera device used when `--pause-source camera` is selected. Default: `/dev/video10`.
 - `--pause-image <path>`: image, video, or HTML file used for camera status screens when `--pause-image-enabled true` is set. JPEG/PNG are loaded as static images; video files are decoded with OpenCV; HTML/CSS/JavaScript is rendered through WPE WebKit when the binary was built with WPE support.
 - `--pause-image-folder <path>`: base folder for pause images selected through IPC. Default: `.`.
 - `--pause-loop-if-video <true|false>`: loop the pause media when it is a video. Default: `false`.
@@ -400,10 +400,12 @@ Supported JSON groups:
     "overlayAlpha": 0.35,
     "blurStrength": 15
   },
+  "secondaryCamera": {
+    "device": "/dev/video10"
+  },
   "pause": {
     "enabled": false,
     "source": "image",
-    "cameraDevice": "/dev/video10",
     "image": "sample_pause.jpg",
     "folder": "testdata",
     "loopIfVideo": false,
@@ -431,7 +433,7 @@ Supported JSON groups:
 }
 ```
 
-All fields are optional. Unknown JSON fields log warnings and are ignored. Invalid JSON, invalid types, and invalid values stop startup with an error. JSON syntax errors include line and column information where possible. `--test-config` warns about missing referenced files. Normal startup fails if an active segmentation model, background media, pause media, background image folder, pause image folder, or configured TTF pause font does not exist. Runtime IPC updates for image paths validate that the file can be read and return a JSON error if not. IPC only accepts relative image names under `background.folder` or `pause.folder`; absolute paths and `..` traversal are rejected. `configDirectory` is only loaded from the main JSON configuration and is read-only through IPC. It points to a directory that contains runtime overlay configuration files. Overlay files are optional; running without an active overlay is valid. Overlay files use the same grouped JSON shape, are named `<name>.json`, and can be applied live with IPC key `config` while the process is running; accepted values replace the current runtime configuration immediately without restarting the service. If an IPC `config` value points to a missing or invalid overlay file, the IPC response is `{"ok":false,...}` and the current runtime configuration remains unchanged. The IPC `config` name is a safe base name only: letters, digits, `_`, and `-` are accepted; slashes, dots, absolute paths, and traversal sequences are rejected. `configDirectory` inside overlay files is ignored. Startup-only values in an overlay may be parsed but do not reinitialize already-created components such as the display backend, TensorRT model, IPC socket, processing size, or camera device path. `camera.enabled` is the JSON equivalent of IPC key `camera.enabled`; `camera.enable` is also accepted as a compatibility spelling. `pause.source=image` keeps the existing pause image/video/HTML behavior; `pause.source=camera` uses `pause.cameraDevice`, for example a v4l2loopback AirPlay device such as `/dev/video10`. `background.loopIfVideo` and `pause.loopIfVideo` loop media files when OpenCV detects them as video. HTML media files are detected from file content. They require a binary built with WPE WebKit and WPEBackend-fdo support; otherwise startup, `--test-config`, and IPC updates reject them clearly. `camera.connectTimeoutSeconds` controls how long `Camera connecting...` is shown after runtime camera re-enable before falling back to `Camera DISCONNECTED`. `pause.enabled` switches camera status screens from the generated pattern to `pause.image` or `pause.cameraDevice` while the camera is off, connecting, or disconnected; it does not replace a live camera frame. `pause.showStatusText` controls whether the status label is rendered over that image. `pause.textColor` uses `RRGGBBAA` hex, for example `ffffff0a`. `pause.textPosition` uses `XxY` or `auto`; `pause.textSize` controls the rendered text scale. `pause.font` accepts the built-in OpenCV Hershey font names or a safe TTF base name. TTF names must not contain `/`, `\`, or `..`; `<name>.ttf` is loaded from `pause.fontDirectory` when FreeType support was available at build time. `pause.fontAlign` controls multiline text alignment with values `left`, `center`, or `right`. `diagnostics.benchmark` enables benchmark collection for IPC without passing `--benchmark`.
+All fields are optional. Unknown JSON fields log warnings and are ignored. Invalid JSON, invalid types, and invalid values stop startup with an error. JSON syntax errors include line and column information where possible. `--test-config` warns about missing referenced files. Normal startup fails if an active segmentation model, background media, pause media, background image folder, pause image folder, or configured TTF pause font does not exist. Runtime IPC updates for image paths validate that the file can be read and return a JSON error if not. IPC only accepts relative image names under `background.folder` or `pause.folder`; absolute paths and `..` traversal are rejected. `configDirectory` is only loaded from the main JSON configuration and is read-only through IPC. It points to a directory that contains runtime overlay configuration files. Overlay files are optional; running without an active overlay is valid. Overlay files use the same grouped JSON shape, are named `<name>.json`, and can be applied live with IPC key `config` while the process is running; accepted values replace the current runtime configuration immediately without restarting the service. If an IPC `config` value points to a missing or invalid overlay file, the IPC response is `{"ok":false,...}` and the current runtime configuration remains unchanged. The IPC `config` name is a safe base name only: letters, digits, `_`, and `-` are accepted; slashes, dots, absolute paths, and traversal sequences are rejected. `configDirectory` inside overlay files is ignored. Startup-only values in an overlay may be parsed but do not reinitialize already-created components such as the display backend, TensorRT model, IPC socket, processing size, primary camera device path, or secondary camera device path. `camera.enabled` is the JSON equivalent of IPC key `camera.enabled`; `camera.enable` is also accepted as a compatibility spelling. `pause.source=image` keeps the existing pause image/video/HTML behavior; `pause.source=camera` uses `secondaryCamera.device`, for example a v4l2loopback AirPlay device such as `/dev/video10`. `background.loopIfVideo` and `pause.loopIfVideo` loop media files when OpenCV detects them as video. HTML media files are detected from file content. They require a binary built with WPE WebKit and WPEBackend-fdo support; otherwise startup, `--test-config`, and IPC updates reject them clearly. `camera.connectTimeoutSeconds` controls how long `Camera connecting...` is shown after runtime camera re-enable before falling back to `Camera DISCONNECTED`. `pause.enabled` switches camera status screens from the generated pattern to `pause.image` or the secondary camera while the camera is off, connecting, or disconnected; it does not replace a live camera frame. `pause.showStatusText` controls whether the status label is rendered over that image. `pause.textColor` uses `RRGGBBAA` hex, for example `ffffff0a`. `pause.textPosition` uses `XxY` or `auto`; `pause.textSize` controls the rendered text scale. `pause.font` accepts the built-in OpenCV Hershey font names or a safe TTF base name. TTF names must not contain `/`, `\`, or `..`; `<name>.ttf` is loaded from `pause.fontDirectory` when FreeType support was available at build time. `pause.fontAlign` controls multiline text alignment with values `left`, `center`, or `right`. `diagnostics.benchmark` enables benchmark collection for IPC without passing `--benchmark`.
 
 ## Runtime Behavior
 
@@ -465,13 +467,12 @@ Commands:
 - `set`: update one writable key.
 - `list`: read all runtime keys.
 
-Writable keys:
+Runtime keys:
 
 - `config`: overlay configuration name without `.json`. The file is loaded from read-only `configDirectory` and applied immediately over the current runtime configuration.
 - `camera.enabled`: boolean. When false, live camera processing is paused and a `Camera OFF` status screen is rendered. If the camera is already open, the V4L2 device remains open to avoid a close/reopen cycle.
 - `pause.enabled`: boolean. When true, camera status screens use `pause.image`; when false, they use the generated test pattern.
 - `pause.source`: `image` or `camera`.
-- `pause.cameraDevice`: secondary camera device used when `pause.source=camera`, for example `/dev/video10`.
 - `pause.image`: relative image name under `pause.folder` when set through IPC.
 - `pause.folder`: read-only base folder used when `pause.image` is set through IPC.
 - `pause.loopIfVideo`: boolean. Loop `pause.image` when OpenCV detects it as video.
@@ -502,6 +503,7 @@ Read-only key:
 - `configDirectory`: directory containing IPC-selectable overlay configuration files.
 - `system.configDirectory`: same value as grouped system field.
 - `system.version`: current binary version string.
+- `secondaryCamera.device`: secondary camera device used when `pause.source=camera`, for example `/dev/video10`.
 - `benchmark`: current benchmark snapshot. This key is available only when benchmark mode is enabled with `--benchmark` or `diagnostics.benchmark`.
 
 Examples:
@@ -531,7 +533,7 @@ echo '{"cmd":"set","key":"pause.source","value":"camera"}' | socat - UNIX-CONNEC
 ```
 
 ```bash
-echo '{"cmd":"set","key":"pause.cameraDevice","value":"/dev/video10"}' | socat - UNIX-CONNECT:/tmp/jonimageprocessor.sock
+echo '{"cmd":"get","key":"secondaryCamera.device"}' | socat - UNIX-CONNECT:/tmp/jonimageprocessor.sock
 ```
 
 ```bash
