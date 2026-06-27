@@ -308,6 +308,26 @@ struct PauseCameraSource {
         return pipeline.str();
     }
 
+    static std::string flexibleGstreamerPipeline(const std::string& nextDevice)
+    {
+        std::ostringstream pipeline;
+        pipeline << "v4l2src device=" << nextDevice
+            << " ! queue max-size-buffers=1 leaky=downstream"
+            << " ! videoconvert ! video/x-raw,format=BGR"
+            << " ! appsink drop=true max-buffers=1 sync=false";
+        return pipeline.str();
+    }
+
+    bool tryOpenGstreamer(const std::string& pipeline, const std::string& mode)
+    {
+        capture.open(pipeline, cv::CAP_GSTREAMER);
+        if (!capture.isOpened()) {
+            return false;
+        }
+        openMode = mode;
+        return true;
+    }
+
     bool ensureOpened(const std::string& nextDevice, const cv::Size& captureSize)
     {
         if (capture.isOpened() && device == nextDevice) {
@@ -319,21 +339,21 @@ struct PauseCameraSource {
             return false;
         }
         LOG_INFO("Opening pause camera device: " << nextDevice);
-        if (nextDevice.rfind("/dev/video", 0) == 0) {
+        if (nextDevice.find('!') != std::string::npos) {
+            tryOpenGstreamer(nextDevice, "gstreamer-pipeline");
+        } else if (nextDevice.rfind("/dev/video", 0) == 0) {
+            tryOpenGstreamer(flexibleGstreamerPipeline(nextDevice), "gstreamer-auto");
             const std::array<std::string, 2> rawFormats { "UYVY", "YUY2" };
-            for (const std::string& format : rawFormats) {
-                const std::string pipeline = gstreamerPipeline(nextDevice, captureSize, format);
-                capture.open(pipeline, cv::CAP_GSTREAMER);
-                if (capture.isOpened()) {
-                    openMode = "gstreamer-" + format;
-                    break;
+            if (!capture.isOpened()) {
+                for (const std::string& format : rawFormats) {
+                    const std::string pipeline = gstreamerPipeline(nextDevice, captureSize, format);
+                    if (tryOpenGstreamer(pipeline, "gstreamer-" + format)) {
+                        break;
+                    }
                 }
             }
             if (!capture.isOpened()) {
-                capture.open(nextDevice, cv::CAP_V4L2);
-                if (capture.isOpened()) {
-                    openMode = "opencv-v4l2";
-                }
+                LOG_WARNING("Cannot open pause camera through GStreamer. Check that OpenCV has GStreamer support and that the v4l2loopback device is streaming: " << nextDevice);
             }
         } else {
             capture.open(nextDevice);
@@ -366,8 +386,10 @@ struct PauseCameraSource {
                 LOG_WARNING("Cannot read pause camera frame: " << device);
                 warnedReadFailureDevice = device;
             }
-            capture.release();
-            device.clear();
+            if (openMode.rfind("gstreamer", 0) != 0) {
+                capture.release();
+                device.clear();
+            }
             return false;
         }
         warnedReadFailureDevice.clear();
