@@ -282,6 +282,7 @@ struct MediaFile {
 struct PauseCameraSource {
     cv::VideoCapture capture;
     std::string device;
+    std::string openMode;
     std::string warnedOpenFailureDevice;
     std::string warnedReadFailureDevice;
 
@@ -291,9 +292,23 @@ struct PauseCameraSource {
             capture.release();
         }
         device.clear();
+        openMode.clear();
     }
 
-    bool ensureOpened(const std::string& nextDevice)
+    static std::string gstreamerPipeline(const std::string& nextDevice, const cv::Size& captureSize, const std::string& format)
+    {
+        std::ostringstream pipeline;
+        pipeline << "v4l2src device=" << nextDevice
+            << " ! video/x-raw,format=" << format
+            << ",width=" << captureSize.width
+            << ",height=" << captureSize.height
+            << ",framerate=30/1"
+            << " ! videoconvert ! video/x-raw,format=BGR"
+            << " ! appsink drop=true max-buffers=1 sync=false";
+        return pipeline.str();
+    }
+
+    bool ensureOpened(const std::string& nextDevice, const cv::Size& captureSize)
     {
         if (capture.isOpened() && device == nextDevice) {
             return true;
@@ -305,9 +320,26 @@ struct PauseCameraSource {
         }
         LOG_INFO("Opening pause camera device: " << nextDevice);
         if (nextDevice.rfind("/dev/video", 0) == 0) {
-            capture.open(nextDevice, cv::CAP_V4L2);
+            const std::array<std::string, 2> rawFormats { "UYVY", "YUY2" };
+            for (const std::string& format : rawFormats) {
+                const std::string pipeline = gstreamerPipeline(nextDevice, captureSize, format);
+                capture.open(pipeline, cv::CAP_GSTREAMER);
+                if (capture.isOpened()) {
+                    openMode = "gstreamer-" + format;
+                    break;
+                }
+            }
+            if (!capture.isOpened()) {
+                capture.open(nextDevice, cv::CAP_V4L2);
+                if (capture.isOpened()) {
+                    openMode = "opencv-v4l2";
+                }
+            }
         } else {
             capture.open(nextDevice);
+            if (capture.isOpened()) {
+                openMode = "opencv";
+            }
         }
         if (!capture.isOpened()) {
             if (warnedOpenFailureDevice != nextDevice) {
@@ -320,6 +352,7 @@ struct PauseCameraSource {
         device = nextDevice;
         warnedOpenFailureDevice.clear();
         warnedReadFailureDevice.clear();
+        LOG_INFO("Pause camera opened using " << openMode << ": " << nextDevice);
         return true;
     }
 
@@ -537,7 +570,8 @@ cv::Mat makeStatusFrame(
     if (config != nullptr && buffers != nullptr && config->pauseImageEnabled && config->pauseSource == PauseSource::Camera) {
         buffers->pauseMedia.release();
         cv::Mat pauseFrame;
-        if (buffers->pauseCamera.ensureOpened(config->secondaryCameraDevice) && buffers->pauseCamera.read(pauseFrame) && !pauseFrame.empty()) {
+        const cv::Size captureSize(config->width, config->height);
+        if (buffers->pauseCamera.ensureOpened(config->secondaryCameraDevice, captureSize) && buffers->pauseCamera.read(pauseFrame) && !pauseFrame.empty()) {
             cv::resize(pauseFrame, buffers->scaledPauseImage, size, 0.0, 0.0, cv::INTER_LINEAR);
             cv::Mat frame = buffers->scaledPauseImage.clone();
             if (config->pauseImageShowStatusText) {
