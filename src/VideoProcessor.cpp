@@ -26,14 +26,21 @@
 #endif
 
 #include <sys/stat.h>
+#include <sys/select.h>
+#include <sys/socket.h>
+#include <netdb.h>
+#include <unistd.h>
 
 #include <algorithm>
 #include <array>
 #include <atomic>
 #include <chrono>
 #include <cctype>
+#include <cerrno>
 #include <cmath>
 #include <ctime>
+#include <cstring>
+#include <cstdlib>
 #include <fstream>
 #include <memory>
 #include <mutex>
@@ -280,6 +287,13 @@ struct MediaFile {
 };
 
 struct PauseCameraSource {
+    struct TcpBgrPipeline {
+        std::string host;
+        int port = 0;
+        int width = 0;
+        int height = 0;
+    };
+
     struct State {
         std::mutex mutex;
         std::thread worker;
@@ -294,6 +308,110 @@ struct PauseCameraSource {
     std::shared_ptr<State> state = std::make_shared<State>();
     std::string warnedOpenFailurePipeline;
     std::string warnedReadFailurePipeline;
+
+    static bool readIntProperty(const std::string& text, const std::string& key, int& value)
+    {
+        const std::string prefix = key + "=";
+        const std::size_t pos = text.find(prefix);
+        if (pos == std::string::npos) {
+            return false;
+        }
+        const char* begin = text.c_str() + pos + prefix.size();
+        char* end = nullptr;
+        const long parsed = std::strtol(begin, &end, 10);
+        if (begin == end || parsed <= 0 || parsed > 100000) {
+            return false;
+        }
+        value = static_cast<int>(parsed);
+        return true;
+    }
+
+    static bool readStringProperty(const std::string& text, const std::string& key, std::string& value)
+    {
+        const std::string prefix = key + "=";
+        const std::size_t pos = text.find(prefix);
+        if (pos == std::string::npos) {
+            return false;
+        }
+        std::size_t begin = pos + prefix.size();
+        std::size_t end = text.find_first_of(" !", begin);
+        if (end == std::string::npos) {
+            end = text.size();
+        }
+        value = text.substr(begin, end - begin);
+        if (value.size() >= 2 && ((value.front() == '"' && value.back() == '"') || (value.front() == '\'' && value.back() == '\''))) {
+            value = value.substr(1, value.size() - 2);
+        }
+        return !value.empty();
+    }
+
+    static bool parseTcpBgrPipeline(const std::string& pipeline, TcpBgrPipeline& parsed)
+    {
+        if (pipeline.find("tcpclientsrc") == std::string::npos || pipeline.find("rawvideoparse") == std::string::npos) {
+            return false;
+        }
+        std::string lowered = pipeline;
+        std::transform(lowered.begin(), lowered.end(), lowered.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+        if (lowered.find("format=bgr") == std::string::npos) {
+            return false;
+        }
+        return readStringProperty(pipeline, "host", parsed.host)
+            && readIntProperty(pipeline, "port", parsed.port)
+            && readIntProperty(pipeline, "width", parsed.width)
+            && readIntProperty(pipeline, "height", parsed.height);
+    }
+
+    static int connectTcp(const TcpBgrPipeline& endpoint)
+    {
+        addrinfo hints {};
+        hints.ai_socktype = SOCK_STREAM;
+        hints.ai_family = AF_UNSPEC;
+        addrinfo* result = nullptr;
+        const std::string portText = std::to_string(endpoint.port);
+        if (getaddrinfo(endpoint.host.c_str(), portText.c_str(), &hints, &result) != 0) {
+            return -1;
+        }
+
+        int fd = -1;
+        for (addrinfo* ai = result; ai != nullptr; ai = ai->ai_next) {
+            fd = socket(ai->ai_family, ai->ai_socktype, ai->ai_protocol);
+            if (fd < 0) {
+                continue;
+            }
+
+            timeval timeout {};
+            timeout.tv_sec = 0;
+            timeout.tv_usec = 250000;
+            setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout));
+
+            if (connect(fd, ai->ai_addr, ai->ai_addrlen) == 0) {
+                break;
+            }
+            close(fd);
+            fd = -1;
+        }
+        freeaddrinfo(result);
+        return fd;
+    }
+
+    static bool readFull(int fd, std::vector<unsigned char>& buffer)
+    {
+        std::size_t offset = 0;
+        while (offset < buffer.size()) {
+            const ssize_t bytes = recv(fd, buffer.data() + offset, buffer.size() - offset, 0);
+            if (bytes == 0) {
+                return false;
+            }
+            if (bytes < 0) {
+                if (errno == EINTR) {
+                    continue;
+                }
+                return false;
+            }
+            offset += static_cast<std::size_t>(bytes);
+        }
+        return true;
+    }
 
     void release()
     {
@@ -316,6 +434,7 @@ struct PauseCameraSource {
         workerState->worker = std::thread([workerState]() {
             cv::VideoCapture capture;
             std::string localPipeline;
+            std::string localTcpPipeline;
             std::string lastOpenFailure;
             std::string lastReadFailure;
 
@@ -331,10 +450,76 @@ struct PauseCameraSource {
                         capture.release();
                     }
                     localPipeline.clear();
+                    localTcpPipeline.clear();
                     std::this_thread::sleep_for(std::chrono::milliseconds(100));
                     continue;
                 }
 
+                TcpBgrPipeline tcpPipeline;
+                if (parseTcpBgrPipeline(wantedPipeline, tcpPipeline)) {
+                    if (capture.isOpened()) {
+                        capture.release();
+                    }
+                    localPipeline.clear();
+                    if (localTcpPipeline != wantedPipeline) {
+                        localTcpPipeline = wantedPipeline;
+                        lastOpenFailure.clear();
+                        lastReadFailure.clear();
+                        LOG_INFO("Opening pause camera TCP BGR stream: " << tcpPipeline.host << ":" << tcpPipeline.port
+                            << " " << tcpPipeline.width << "x" << tcpPipeline.height);
+                    }
+
+                    const int fd = connectTcp(tcpPipeline);
+                    if (fd < 0) {
+                        if (lastOpenFailure != wantedPipeline) {
+                            LOG_ERROR("Cannot open secondary camera TCP stream");
+                            lastOpenFailure = wantedPipeline;
+                        }
+                        std::this_thread::sleep_for(std::chrono::seconds(2));
+                        continue;
+                    }
+
+                    lastOpenFailure.clear();
+                    const std::size_t frameBytes = static_cast<std::size_t>(tcpPipeline.width) * static_cast<std::size_t>(tcpPipeline.height) * 3U;
+                    std::vector<unsigned char> frameBuffer(frameBytes);
+                    while (!workerState->stop) {
+                        std::string stillWanted;
+                        {
+                            std::lock_guard<std::mutex> lock(workerState->mutex);
+                            stillWanted = workerState->desiredPipeline;
+                        }
+                        if (stillWanted != wantedPipeline) {
+                            break;
+                        }
+                        if (!readFull(fd, frameBuffer)) {
+                            if (lastReadFailure != wantedPipeline) {
+                                LOG_WARNING("Cannot read pause camera TCP frame");
+                                lastReadFailure = wantedPipeline;
+                            }
+                            break;
+                        }
+                        cv::Mat wrapped(tcpPipeline.height, tcpPipeline.width, CV_8UC3, frameBuffer.data());
+                        {
+                            std::lock_guard<std::mutex> lock(workerState->mutex);
+                            if (workerState->desiredPipeline == wantedPipeline) {
+                                workerState->lastFrame = wrapped.clone();
+                                workerState->hasFrame = true;
+                                workerState->activePipeline = wantedPipeline;
+                            }
+                        }
+                    }
+                    close(fd);
+                    {
+                        std::lock_guard<std::mutex> lock(workerState->mutex);
+                        if (workerState->activePipeline == wantedPipeline) {
+                            workerState->activePipeline.clear();
+                        }
+                    }
+                    std::this_thread::sleep_for(std::chrono::milliseconds(250));
+                    continue;
+                }
+
+                localTcpPipeline.clear();
                 if (!capture.isOpened() || localPipeline != wantedPipeline) {
                     if (capture.isOpened()) {
                         capture.release();
