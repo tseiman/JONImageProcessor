@@ -397,6 +397,7 @@ struct PauseCameraSource {
             frame = wrapped.clone();
         } else if (sampleFormat == "RGB") {
             cv::Mat wrapped(height, width, CV_8UC3, map.data);
+            frame.create(height, width, CV_8UC3);
             cv::cvtColor(wrapped, frame, cv::COLOR_RGB2BGR);
         } else {
             cv::Mat wrapped(height, width, CV_8UC4, map.data);
@@ -593,7 +594,7 @@ struct PauseCameraSource {
 
                 frames++;
                 if (frames <= 5 || frames % 900 == 0) {
-                    LOG_INFO("Pause camera appsink frame received: " << frames);
+                    LOG_VERBOSE("Pause camera appsink frame received: " << frames);
                 }
                 {
                     std::lock_guard<std::mutex> lock(workerState->mutex);
