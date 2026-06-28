@@ -20,16 +20,17 @@
 #include <opencv2/imgproc.hpp>
 #include <opencv2/videoio.hpp>
 
+#if defined(JON_ENABLE_GSTREAMER_APP)
+#include <gst/gst.h>
+#include <gst/app/gstappsink.h>
+#endif
+
 #if defined(JON_ENABLE_FREETYPE_TEXT)
 #include <ft2build.h>
 #include FT_FREETYPE_H
 #endif
 
 #include <sys/stat.h>
-#include <sys/select.h>
-#include <sys/socket.h>
-#include <netdb.h>
-#include <unistd.h>
 
 #include <algorithm>
 #include <array>
@@ -287,14 +288,6 @@ struct MediaFile {
 };
 
 struct PauseCameraSource {
-    struct TcpBgrPipeline {
-        std::string host;
-        int port = 0;
-        int width = 0;
-        int height = 0;
-        int fps = 30;
-    };
-
     struct State {
         std::mutex mutex;
         std::thread worker;
@@ -310,148 +303,113 @@ struct PauseCameraSource {
     std::string warnedOpenFailurePipeline;
     std::string warnedReadFailurePipeline;
 
-    static bool readIntProperty(const std::string& text, const std::string& key, int& value)
+#if defined(JON_ENABLE_GSTREAMER_APP)
+    struct GstObjectDeleter {
+        void operator()(GstElement* element) const { if (element) gst_object_unref(element); }
+        void operator()(GstSample* sample) const { if (sample) gst_sample_unref(sample); }
+        void operator()(GstCaps* caps) const { if (caps) gst_caps_unref(caps); }
+        void operator()(GstBus* bus) const { if (bus) gst_object_unref(bus); }
+        void operator()(GstMessage* message) const { if (message) gst_message_unref(message); }
+    };
+
+    using GstElementPtr = std::unique_ptr<GstElement, GstObjectDeleter>;
+    using GstSamplePtr = std::unique_ptr<GstSample, GstObjectDeleter>;
+    using GstBusPtr = std::unique_ptr<GstBus, GstObjectDeleter>;
+    using GstMessagePtr = std::unique_ptr<GstMessage, GstObjectDeleter>;
+
+    static void ensureGStreamerInitialized()
     {
-        const std::string prefix = key + "=";
-        const std::size_t pos = text.find(prefix);
-        if (pos == std::string::npos) {
+        static std::once_flag once;
+        std::call_once(once, []() {
+            gst_init(nullptr, nullptr);
+        });
+    }
+
+    static GstElement* findAppSink(GstElement* pipeline)
+    {
+        GstElement* namedSink = gst_bin_get_by_name(GST_BIN(pipeline), "airplay_sink");
+        if (namedSink && GST_IS_APP_SINK(namedSink)) {
+            return namedSink;
+        }
+        if (namedSink) {
+            gst_object_unref(namedSink);
+        }
+
+        GstIterator* iterator = gst_bin_iterate_sinks(GST_BIN(pipeline));
+        GValue value = G_VALUE_INIT;
+        while (gst_iterator_next(iterator, &value) == GST_ITERATOR_OK) {
+            auto* element = GST_ELEMENT(g_value_get_object(&value));
+            if (element && GST_IS_APP_SINK(element)) {
+                gst_object_ref(element);
+                g_value_unset(&value);
+                gst_iterator_free(iterator);
+                return element;
+            }
+            g_value_unset(&value);
+        }
+        gst_iterator_free(iterator);
+        return nullptr;
+    }
+
+    static bool sampleToBgrMat(GstSample* sample, cv::Mat& frame, std::string& error)
+    {
+        GstCaps* caps = gst_sample_get_caps(sample);
+        GstBuffer* buffer = gst_sample_get_buffer(sample);
+        if (!caps || !buffer || gst_caps_get_size(caps) < 1) {
+            error = "appsink sample has no caps or buffer";
             return false;
         }
-        const char* begin = text.c_str() + pos + prefix.size();
-        char* end = nullptr;
-        const long parsed = std::strtol(begin, &end, 10);
-        if (begin == end || parsed <= 0 || parsed > 100000) {
+
+        GstStructure* structure = gst_caps_get_structure(caps, 0);
+        int width = 0;
+        int height = 0;
+        const char* format = gst_structure_get_string(structure, "format");
+        if (!format || !gst_structure_get_int(structure, "width", &width) || !gst_structure_get_int(structure, "height", &height)
+            || width <= 0 || height <= 0) {
+            error = "appsink sample has invalid caps";
             return false;
         }
-        value = static_cast<int>(parsed);
+        if (std::string(format) != "BGR") {
+            error = "appsink sample format is not BGR: ";
+            error += format;
+            return false;
+        }
+
+        GstMapInfo map {};
+        if (!gst_buffer_map(buffer, &map, GST_MAP_READ)) {
+            error = "cannot map appsink buffer";
+            return false;
+        }
+        const std::size_t expected = static_cast<std::size_t>(width) * static_cast<std::size_t>(height) * 3U;
+        if (map.size < expected) {
+            gst_buffer_unmap(buffer, &map);
+            std::ostringstream stream;
+            stream << "appsink buffer too small: " << map.size << "/" << expected;
+            error = stream.str();
+            return false;
+        }
+
+        cv::Mat wrapped(height, width, CV_8UC3, map.data);
+        frame = wrapped.clone();
+        gst_buffer_unmap(buffer, &map);
         return true;
     }
 
-    static bool readStringProperty(const std::string& text, const std::string& key, std::string& value)
+    static void logGStreamerMessage(GstMessage* message, const std::string& pipeline)
     {
-        const std::string prefix = key + "=";
-        const std::size_t pos = text.find(prefix);
-        if (pos == std::string::npos) {
-            return false;
+        GError* error = nullptr;
+        gchar* debug = nullptr;
+        if (GST_MESSAGE_TYPE(message) == GST_MESSAGE_ERROR) {
+            gst_message_parse_error(message, &error, &debug);
+            LOG_ERROR("Secondary camera GStreamer error: " << (error ? error->message : "unknown") << " pipeline=" << pipeline);
+        } else if (GST_MESSAGE_TYPE(message) == GST_MESSAGE_WARNING) {
+            gst_message_parse_warning(message, &error, &debug);
+            LOG_WARNING("Secondary camera GStreamer warning: " << (error ? error->message : "unknown") << " pipeline=" << pipeline);
         }
-        std::size_t begin = pos + prefix.size();
-        std::size_t end = text.find_first_of(" !", begin);
-        if (end == std::string::npos) {
-            end = text.size();
-        }
-        value = text.substr(begin, end - begin);
-        if (value.size() >= 2 && ((value.front() == '"' && value.back() == '"') || (value.front() == '\'' && value.back() == '\''))) {
-            value = value.substr(1, value.size() - 2);
-        }
-        return !value.empty();
+        if (debug) g_free(debug);
+        if (error) g_error_free(error);
     }
-
-    static bool parseTcpBgrPipeline(const std::string& pipeline, TcpBgrPipeline& parsed)
-    {
-        if (pipeline.find("tcpclientsrc") == std::string::npos || pipeline.find("rawvideoparse") == std::string::npos) {
-            return false;
-        }
-        std::string lowered = pipeline;
-        std::transform(lowered.begin(), lowered.end(), lowered.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
-        if (lowered.find("format=bgr") == std::string::npos) {
-            return false;
-        }
-        return readStringProperty(pipeline, "host", parsed.host)
-            && readIntProperty(pipeline, "port", parsed.port)
-            && readIntProperty(pipeline, "width", parsed.width)
-            && readIntProperty(pipeline, "height", parsed.height)
-            && (!readIntProperty(pipeline, "framerate", parsed.fps) || parsed.fps > 0);
-    }
-
-    static int connectTcp(const TcpBgrPipeline& endpoint)
-    {
-        addrinfo hints {};
-        hints.ai_socktype = SOCK_STREAM;
-        hints.ai_family = AF_UNSPEC;
-        addrinfo* result = nullptr;
-        const std::string portText = std::to_string(endpoint.port);
-        if (getaddrinfo(endpoint.host.c_str(), portText.c_str(), &hints, &result) != 0) {
-            return -1;
-        }
-
-        int fd = -1;
-        for (addrinfo* ai = result; ai != nullptr; ai = ai->ai_next) {
-            fd = socket(ai->ai_family, ai->ai_socktype, ai->ai_protocol);
-            if (fd < 0) {
-                continue;
-            }
-
-            timeval timeout {};
-            timeout.tv_sec = 2;
-            timeout.tv_usec = 0;
-            setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout));
-
-            if (connect(fd, ai->ai_addr, ai->ai_addrlen) == 0) {
-                break;
-            }
-            close(fd);
-            fd = -1;
-        }
-        freeaddrinfo(result);
-        return fd;
-    }
-
-    static bool stillWantsPipeline(const std::shared_ptr<State>& state, const std::string& wantedPipeline)
-    {
-        std::lock_guard<std::mutex> lock(state->mutex);
-        return !state->stop && state->desiredPipeline == wantedPipeline;
-    }
-
-    static bool readFull(
-        int fd,
-        std::vector<unsigned char>& buffer,
-        std::size_t& bytesRead,
-        const std::shared_ptr<State>& state,
-        const std::string& wantedPipeline)
-    {
-        std::size_t offset = 0;
-        while (offset < buffer.size()) {
-            if (!stillWantsPipeline(state, wantedPipeline)) {
-                bytesRead = offset;
-                return false;
-            }
-
-            fd_set readSet;
-            FD_ZERO(&readSet);
-            FD_SET(fd, &readSet);
-            timeval timeout {};
-            timeout.tv_sec = 0;
-            timeout.tv_usec = 100000;
-
-            const int ready = select(fd + 1, &readSet, nullptr, nullptr, &timeout);
-            if (ready == 0) {
-                continue;
-            }
-            if (ready < 0) {
-                if (errno == EINTR) {
-                    continue;
-                }
-                bytesRead = offset;
-                return false;
-            }
-
-            const ssize_t bytes = recv(fd, buffer.data() + offset, buffer.size() - offset, 0);
-            if (bytes == 0) {
-                bytesRead = offset;
-                return false;
-            }
-            if (bytes < 0) {
-                if (errno == EINTR) {
-                    continue;
-                }
-                bytesRead = offset;
-                return false;
-            }
-            offset += static_cast<std::size_t>(bytes);
-        }
-        bytesRead = offset;
-        return true;
-    }
+#endif
 
     void release()
     {
@@ -472,11 +430,19 @@ struct PauseCameraSource {
         state->started = true;
         auto workerState = state;
         workerState->worker = std::thread([workerState]() {
-            cv::VideoCapture capture;
+#if defined(JON_ENABLE_GSTREAMER_APP)
+            ensureGStreamerInitialized();
+            GstElementPtr pipeline;
+            GstElementPtr appSink;
+            GstBusPtr bus;
             std::string localPipeline;
-            std::string localTcpPipeline;
             std::string lastOpenFailure;
             std::string lastReadFailure;
+            std::uint64_t frames = 0;
+            auto statsStart = std::chrono::steady_clock::now();
+#else
+            std::string lastOpenFailure;
+#endif
 
             while (!workerState->stop) {
                 std::string wantedPipeline;
@@ -486,161 +452,166 @@ struct PauseCameraSource {
                 }
 
                 if (wantedPipeline.empty()) {
-                    if (capture.isOpened()) {
-                        capture.release();
+#if defined(JON_ENABLE_GSTREAMER_APP)
+                    if (pipeline) {
+                        gst_element_set_state(pipeline.get(), GST_STATE_NULL);
                     }
+                    appSink.reset();
+                    bus.reset();
+                    pipeline.reset();
                     localPipeline.clear();
-                    localTcpPipeline.clear();
+#endif
                     std::this_thread::sleep_for(std::chrono::milliseconds(100));
                     continue;
                 }
 
-                TcpBgrPipeline tcpPipeline;
-                if (parseTcpBgrPipeline(wantedPipeline, tcpPipeline)) {
-                    if (capture.isOpened()) {
-                        capture.release();
+#if defined(JON_ENABLE_GSTREAMER_APP)
+                if (!pipeline || !appSink || localPipeline != wantedPipeline) {
+                    if (pipeline) {
+                        gst_element_set_state(pipeline.get(), GST_STATE_NULL);
                     }
-                    localPipeline.clear();
-                    if (localTcpPipeline != wantedPipeline) {
-                        localTcpPipeline = wantedPipeline;
-                        lastOpenFailure.clear();
-                        lastReadFailure.clear();
-                        LOG_INFO("Opening pause camera TCP BGR stream: " << tcpPipeline.host << ":" << tcpPipeline.port
-                            << " " << tcpPipeline.width << "x" << tcpPipeline.height);
-                    }
-
-                    const int fd = connectTcp(tcpPipeline);
-                    if (fd < 0) {
-                        if (lastOpenFailure != wantedPipeline) {
-                            LOG_ERROR("Cannot open secondary camera TCP stream");
-                            lastOpenFailure = wantedPipeline;
-                        }
-                        std::this_thread::sleep_for(std::chrono::seconds(2));
-                        continue;
-                    }
-
-                    lastOpenFailure.clear();
-                    const std::size_t frameBytes = static_cast<std::size_t>(tcpPipeline.width) * static_cast<std::size_t>(tcpPipeline.height) * 3U;
-                    std::vector<unsigned char> frameBuffer(frameBytes);
-                    std::uint64_t tcpFrames = 0;
-                    std::uint64_t tcpBytes = 0;
-                    auto tcpStatsStart = std::chrono::steady_clock::now();
-                    const auto frameDelay = std::chrono::duration<double>(1.0 / static_cast<double>(std::clamp(tcpPipeline.fps, 1, 120)));
-                    auto nextFrameAt = std::chrono::steady_clock::now();
-                    while (!workerState->stop) {
-                        std::string stillWanted;
-                        {
-                            std::lock_guard<std::mutex> lock(workerState->mutex);
-                            stillWanted = workerState->desiredPipeline;
-                        }
-                        if (stillWanted != wantedPipeline) {
-                            break;
-                        }
-                        std::size_t bytesRead = 0;
-                        if (!readFull(fd, frameBuffer, bytesRead, workerState, wantedPipeline)) {
-                            if (lastReadFailure != wantedPipeline) {
-                                LOG_WARNING("Cannot read pause camera TCP frame, bytes=" << bytesRead << "/" << frameBytes);
-                                lastReadFailure = wantedPipeline;
-                            }
-                            break;
-                        }
-                        nextFrameAt += std::chrono::duration_cast<std::chrono::steady_clock::duration>(frameDelay);
-                        tcpFrames++;
-                        tcpBytes += bytesRead;
-                        if (tcpFrames <= 5 || tcpFrames % 900 == 0) {
-                            LOG_INFO("Pause camera TCP frame received: " << tcpFrames);
-                        }
-                        cv::Mat wrapped(tcpPipeline.height, tcpPipeline.width, CV_8UC3, frameBuffer.data());
-                        {
-                            std::lock_guard<std::mutex> lock(workerState->mutex);
-                            if (workerState->desiredPipeline == wantedPipeline) {
-                                workerState->lastFrame = wrapped.clone();
-                                workerState->hasFrame = true;
-                                workerState->activePipeline = wantedPipeline;
-                            }
-                        }
-                        const auto now = std::chrono::steady_clock::now();
-                        const double elapsedSeconds = std::chrono::duration<double>(now - tcpStatsStart).count();
-                        if (elapsedSeconds >= 5.0) {
-                            LOG_VERBOSE("Pause camera TCP stream: fps=" << (static_cast<double>(tcpFrames) / elapsedSeconds)
-                                << " MB/s=" << (static_cast<double>(tcpBytes) / elapsedSeconds / 1000000.0)
-                                << " frames=" << tcpFrames);
-                            tcpFrames = 0;
-                            tcpBytes = 0;
-                            tcpStatsStart = now;
-                        }
-                        std::this_thread::sleep_until(nextFrameAt);
-                        if (std::chrono::steady_clock::now() > nextFrameAt + std::chrono::seconds(1)) {
-                            nextFrameAt = std::chrono::steady_clock::now();
-                        }
-                    }
-                    close(fd);
-                    {
-                        std::lock_guard<std::mutex> lock(workerState->mutex);
-                        if (workerState->activePipeline == wantedPipeline) {
-                            workerState->activePipeline.clear();
-                        }
-                    }
-                    std::this_thread::sleep_for(std::chrono::milliseconds(250));
-                    continue;
-                }
-
-                localTcpPipeline.clear();
-                if (!capture.isOpened() || localPipeline != wantedPipeline) {
-                    if (capture.isOpened()) {
-                        capture.release();
-                    }
+                    appSink.reset();
+                    bus.reset();
+                    pipeline.reset();
                     localPipeline.clear();
                     if (lastOpenFailure != wantedPipeline) {
-                        LOG_INFO("Opening pause camera pipeline");
+                        LOG_INFO("Opening pause camera GStreamer pipeline");
                     }
-                    capture.open(wantedPipeline, cv::CAP_GSTREAMER);
-                    if (!capture.isOpened()) {
+
+                    GError* parseError = nullptr;
+                    GstElement* rawPipeline = gst_parse_launch(wantedPipeline.c_str(), &parseError);
+                    if (!rawPipeline) {
                         if (lastOpenFailure != wantedPipeline) {
-                            LOG_ERROR("Cannot open secondary camera pipeline");
+                            LOG_ERROR("Cannot parse secondary camera GStreamer pipeline: "
+                                << (parseError ? parseError->message : "unknown"));
                             lastOpenFailure = wantedPipeline;
                         }
+                        if (parseError) g_error_free(parseError);
                         std::this_thread::sleep_for(std::chrono::seconds(2));
                         continue;
                     }
-                    capture.set(cv::CAP_PROP_BUFFERSIZE, 1);
+                    if (parseError) {
+                        LOG_WARNING("Secondary camera GStreamer parse warning: " << parseError->message);
+                        g_error_free(parseError);
+                    }
+
+                    pipeline.reset(rawPipeline);
+                    appSink.reset(findAppSink(pipeline.get()));
+                    if (!appSink) {
+                        if (lastOpenFailure != wantedPipeline) {
+                            LOG_ERROR("Secondary camera pipeline does not contain an appsink");
+                            lastOpenFailure = wantedPipeline;
+                        }
+                        gst_element_set_state(pipeline.get(), GST_STATE_NULL);
+                        pipeline.reset();
+                        std::this_thread::sleep_for(std::chrono::seconds(2));
+                        continue;
+                    }
+                    gst_app_sink_set_emit_signals(GST_APP_SINK(appSink.get()), FALSE);
+                    gst_app_sink_set_max_buffers(GST_APP_SINK(appSink.get()), 1);
+                    gst_app_sink_set_drop(GST_APP_SINK(appSink.get()), TRUE);
+
+                    bus.reset(gst_element_get_bus(pipeline.get()));
+                    const GstStateChangeReturn stateResult = gst_element_set_state(pipeline.get(), GST_STATE_PLAYING);
+                    if (stateResult == GST_STATE_CHANGE_FAILURE) {
+                        if (lastOpenFailure != wantedPipeline) {
+                            LOG_ERROR("Cannot start secondary camera GStreamer pipeline");
+                            lastOpenFailure = wantedPipeline;
+                        }
+                        gst_element_set_state(pipeline.get(), GST_STATE_NULL);
+                        appSink.reset();
+                        bus.reset();
+                        pipeline.reset();
+                        std::this_thread::sleep_for(std::chrono::seconds(2));
+                        continue;
+                    }
+
                     localPipeline = wantedPipeline;
                     lastOpenFailure.clear();
                     lastReadFailure.clear();
+                    frames = 0;
+                    statsStart = std::chrono::steady_clock::now();
                     {
                         std::lock_guard<std::mutex> lock(workerState->mutex);
                         if (workerState->desiredPipeline == wantedPipeline) {
                             workerState->activePipeline = wantedPipeline;
                         }
                     }
-                    LOG_INFO("Pause camera opened using gstreamer-pipeline");
+                    LOG_INFO("Pause camera opened using GStreamer appsink pipeline");
                 }
 
-                cv::Mat frame;
-                if (!capture.read(frame) || frame.empty()) {
-                    if (lastReadFailure != localPipeline) {
-                        LOG_WARNING("Cannot read pause camera frame: " << localPipeline);
-                        lastReadFailure = localPipeline;
-                    }
-                    capture.release();
-                    {
-                        std::lock_guard<std::mutex> lock(workerState->mutex);
-                        if (workerState->activePipeline == localPipeline) {
-                            workerState->activePipeline.clear();
+                if (bus) {
+                    while (GstMessage* rawMessage = gst_bus_pop_filtered(bus.get(), static_cast<GstMessageType>(GST_MESSAGE_ERROR | GST_MESSAGE_WARNING | GST_MESSAGE_EOS))) {
+                        GstMessagePtr message(rawMessage);
+                        if (GST_MESSAGE_TYPE(rawMessage) == GST_MESSAGE_ERROR || GST_MESSAGE_TYPE(rawMessage) == GST_MESSAGE_WARNING) {
+                            logGStreamerMessage(rawMessage, localPipeline);
+                        }
+                        if (GST_MESSAGE_TYPE(rawMessage) == GST_MESSAGE_ERROR || GST_MESSAGE_TYPE(rawMessage) == GST_MESSAGE_EOS) {
+                            gst_element_set_state(pipeline.get(), GST_STATE_NULL);
+                            appSink.reset();
+                            bus.reset();
+                            pipeline.reset();
+                            localPipeline.clear();
+                            {
+                                std::lock_guard<std::mutex> lock(workerState->mutex);
+                                workerState->activePipeline.clear();
+                            }
+                            std::this_thread::sleep_for(std::chrono::seconds(2));
+                            break;
                         }
                     }
-                    std::this_thread::sleep_for(std::chrono::seconds(2));
+                    if (!pipeline || !appSink) {
+                        continue;
+                    }
+                }
+
+                GstSamplePtr sample(gst_app_sink_try_pull_sample(GST_APP_SINK(appSink.get()), 100 * GST_MSECOND));
+                if (!sample) {
                     continue;
                 }
 
+                cv::Mat frame;
+                std::string frameError;
+                if (!sampleToBgrMat(sample.get(), frame, frameError) || frame.empty()) {
+                    if (lastReadFailure != localPipeline) {
+                        LOG_WARNING("Cannot read secondary camera appsink frame: " << frameError);
+                        lastReadFailure = localPipeline;
+                    }
+                    continue;
+                }
+
+                frames++;
+                if (frames <= 5 || frames % 900 == 0) {
+                    LOG_INFO("Pause camera appsink frame received: " << frames);
+                }
                 {
                     std::lock_guard<std::mutex> lock(workerState->mutex);
                     if (workerState->desiredPipeline == localPipeline) {
-                        workerState->lastFrame = frame.clone();
+                        workerState->lastFrame = frame;
                         workerState->hasFrame = true;
                     }
                 }
+                const auto now = std::chrono::steady_clock::now();
+                const double elapsedSeconds = std::chrono::duration<double>(now - statsStart).count();
+                if (elapsedSeconds >= 5.0) {
+                    LOG_VERBOSE("Pause camera appsink stream: fps=" << (static_cast<double>(frames) / elapsedSeconds)
+                        << " frames=" << frames);
+                    frames = 0;
+                    statsStart = now;
+                }
+#else
+                if (lastOpenFailure != wantedPipeline) {
+                    LOG_ERROR("Secondary camera requires a build with GStreamer appsink support");
+                    lastOpenFailure = wantedPipeline;
+                }
+                std::this_thread::sleep_for(std::chrono::seconds(2));
+#endif
             }
+#if defined(JON_ENABLE_GSTREAMER_APP)
+            if (pipeline) {
+                gst_element_set_state(pipeline.get(), GST_STATE_NULL);
+            }
+#endif
         });
         workerState->worker.detach();
     }

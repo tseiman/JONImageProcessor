@@ -13,6 +13,10 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 find_package(OpenCV REQUIRED COMPONENTS core imgproc imgcodecs highgui videoio)
 find_package(PkgConfig QUIET)
 if (PkgConfig_FOUND)
+    pkg_check_modules(GSTREAMER_APP QUIET
+        gstreamer-1.0
+        gstreamer-app-1.0
+    )
     pkg_check_modules(WPE_HTML_RENDERER_11 QUIET
         wpe-webkit-1.1
         wpe-1.0
@@ -44,6 +48,11 @@ if (PkgConfig_FOUND)
         set(WPE_HTML_RENDERER_LIBRARY_DIRS ${WPE_HTML_RENDERER_10_LIBRARY_DIRS})
         set(WPE_HTML_RENDERER_LIBRARIES ${WPE_HTML_RENDERER_10_LIBRARIES})
     endif()
+endif()
+if (GSTREAMER_APP_FOUND)
+    message(STATUS "GStreamer appsink secondary camera reader enabled")
+else()
+    message(STATUS "GStreamer appsink development files not found; secondary camera source will be unavailable")
 endif()
 if (WPE_HTML_RENDERER_FOUND)
     message(STATUS "WPE WebKit HTML media renderer enabled")
@@ -154,6 +163,13 @@ target_include_directories(JONImageProcessor PRIVATE
 )
 
 target_link_libraries(JONImageProcessor PRIVATE ${OpenCV_LIBS})
+
+if (GSTREAMER_APP_FOUND)
+    target_compile_definitions(JONImageProcessor PRIVATE JON_ENABLE_GSTREAMER_APP=1)
+    target_include_directories(JONImageProcessor PRIVATE ${GSTREAMER_APP_INCLUDE_DIRS})
+    target_link_directories(JONImageProcessor PRIVATE ${GSTREAMER_APP_LIBRARY_DIRS})
+    target_link_libraries(JONImageProcessor PRIVATE ${GSTREAMER_APP_LIBRARIES})
+endif()
 
 if (WPE_HTML_RENDERER_FOUND)
     target_compile_definitions(JONImageProcessor PRIVATE JON_ENABLE_WPE_HTML_RENDERER=1)
