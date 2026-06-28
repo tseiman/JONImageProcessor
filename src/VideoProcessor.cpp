@@ -292,6 +292,7 @@ struct PauseCameraSource {
         int port = 0;
         int width = 0;
         int height = 0;
+        int fps = 30;
     };
 
     struct State {
@@ -358,7 +359,8 @@ struct PauseCameraSource {
         return readStringProperty(pipeline, "host", parsed.host)
             && readIntProperty(pipeline, "port", parsed.port)
             && readIntProperty(pipeline, "width", parsed.width)
-            && readIntProperty(pipeline, "height", parsed.height);
+            && readIntProperty(pipeline, "height", parsed.height)
+            && (!readIntProperty(pipeline, "framerate", parsed.fps) || parsed.fps > 0);
     }
 
     static int connectTcp(const TcpBgrPipeline& endpoint)
@@ -523,6 +525,8 @@ struct PauseCameraSource {
                     std::uint64_t tcpFrames = 0;
                     std::uint64_t tcpBytes = 0;
                     auto tcpStatsStart = std::chrono::steady_clock::now();
+                    const auto frameDelay = std::chrono::duration<double>(1.0 / static_cast<double>(std::clamp(tcpPipeline.fps, 1, 120)));
+                    auto nextFrameAt = std::chrono::steady_clock::now();
                     while (!workerState->stop) {
                         std::string stillWanted;
                         {
@@ -540,6 +544,7 @@ struct PauseCameraSource {
                             }
                             break;
                         }
+                        nextFrameAt += std::chrono::duration_cast<std::chrono::steady_clock::duration>(frameDelay);
                         tcpFrames++;
                         tcpBytes += bytesRead;
                         if (tcpFrames <= 5 || tcpFrames % 900 == 0) {
@@ -563,6 +568,10 @@ struct PauseCameraSource {
                             tcpFrames = 0;
                             tcpBytes = 0;
                             tcpStatsStart = now;
+                        }
+                        std::this_thread::sleep_until(nextFrameAt);
+                        if (std::chrono::steady_clock::now() > nextFrameAt + std::chrono::seconds(1)) {
+                            nextFrameAt = std::chrono::steady_clock::now();
                         }
                     }
                     close(fd);
