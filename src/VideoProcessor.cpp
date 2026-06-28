@@ -376,10 +376,10 @@ struct PauseCameraSource {
             error = "cannot map appsink buffer";
             return false;
         }
-        const int channels = (sampleFormat == "BGR") ? 3 : ((sampleFormat == "BGRx" || sampleFormat == "BGRA") ? 4 : 0);
+        const int channels = (sampleFormat == "BGR" || sampleFormat == "RGB") ? 3 : ((sampleFormat == "BGRx" || sampleFormat == "BGRA") ? 4 : 0);
         if (channels == 0) {
             gst_buffer_unmap(buffer, &map);
-            error = "appsink sample format is not BGR/BGRx/BGRA: ";
+            error = "appsink sample format is not BGR/RGB/BGRx/BGRA: ";
             error += format;
             return false;
         }
@@ -392,9 +392,12 @@ struct PauseCameraSource {
             return false;
         }
 
-        if (channels == 3) {
+        if (sampleFormat == "BGR") {
             cv::Mat wrapped(height, width, CV_8UC3, map.data);
             frame = wrapped.clone();
+        } else if (sampleFormat == "RGB") {
+            cv::Mat wrapped(height, width, CV_8UC3, map.data);
+            cv::cvtColor(wrapped, frame, cv::COLOR_RGB2BGR);
         } else {
             cv::Mat wrapped(height, width, CV_8UC4, map.data);
             cv::cvtColor(wrapped, frame, cv::COLOR_BGRA2BGR);
