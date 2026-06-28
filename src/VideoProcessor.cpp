@@ -280,90 +280,151 @@ struct MediaFile {
 };
 
 struct PauseCameraSource {
-    cv::VideoCapture capture;
-    std::string device;
-    std::string openMode;
-    std::string warnedOpenFailureDevice;
-    std::string warnedReadFailureDevice;
-    cv::Mat lastFrame;
+    struct State {
+        std::mutex mutex;
+        std::thread worker;
+        std::string desiredPipeline;
+        std::string activePipeline;
+        cv::Mat lastFrame;
+        bool hasFrame = false;
+        bool started = false;
+        bool stop = false;
+    };
+
+    std::shared_ptr<State> state = std::make_shared<State>();
+    std::string warnedOpenFailurePipeline;
+    std::string warnedReadFailurePipeline;
 
     void release()
     {
-        if (capture.isOpened()) {
-            capture.release();
+        std::lock_guard<std::mutex> lock(state->mutex);
+        if (!state->desiredPipeline.empty()) {
+            state->desiredPipeline.clear();
+            state->activePipeline.clear();
+            state->lastFrame.release();
+            state->hasFrame = false;
         }
-        device.clear();
-        openMode.clear();
-        lastFrame.release();
     }
 
-    bool tryOpenGstreamer(const std::string& pipeline, const std::string& mode)
+    void ensureWorkerStarted()
     {
-        capture.open(pipeline, cv::CAP_GSTREAMER);
-        if (!capture.isOpened()) {
-            return false;
+        if (state->started) {
+            return;
         }
-        openMode = mode;
-        return true;
+        state->started = true;
+        auto workerState = state;
+        workerState->worker = std::thread([workerState]() {
+            cv::VideoCapture capture;
+            std::string localPipeline;
+            std::string lastOpenFailure;
+            std::string lastReadFailure;
+
+            while (!workerState->stop) {
+                std::string wantedPipeline;
+                {
+                    std::lock_guard<std::mutex> lock(workerState->mutex);
+                    wantedPipeline = workerState->desiredPipeline;
+                }
+
+                if (wantedPipeline.empty()) {
+                    if (capture.isOpened()) {
+                        capture.release();
+                    }
+                    localPipeline.clear();
+                    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+                    continue;
+                }
+
+                if (!capture.isOpened() || localPipeline != wantedPipeline) {
+                    if (capture.isOpened()) {
+                        capture.release();
+                    }
+                    localPipeline.clear();
+                    if (lastOpenFailure != wantedPipeline) {
+                        LOG_INFO("Opening pause camera pipeline");
+                    }
+                    capture.open(wantedPipeline, cv::CAP_GSTREAMER);
+                    if (!capture.isOpened()) {
+                        if (lastOpenFailure != wantedPipeline) {
+                            LOG_ERROR("Cannot open secondary camera pipeline");
+                            lastOpenFailure = wantedPipeline;
+                        }
+                        std::this_thread::sleep_for(std::chrono::seconds(2));
+                        continue;
+                    }
+                    capture.set(cv::CAP_PROP_BUFFERSIZE, 1);
+                    localPipeline = wantedPipeline;
+                    lastOpenFailure.clear();
+                    lastReadFailure.clear();
+                    {
+                        std::lock_guard<std::mutex> lock(workerState->mutex);
+                        if (workerState->desiredPipeline == wantedPipeline) {
+                            workerState->activePipeline = wantedPipeline;
+                        }
+                    }
+                    LOG_INFO("Pause camera opened using gstreamer-pipeline");
+                }
+
+                cv::Mat frame;
+                if (!capture.read(frame) || frame.empty()) {
+                    if (lastReadFailure != localPipeline) {
+                        LOG_WARNING("Cannot read pause camera frame: " << localPipeline);
+                        lastReadFailure = localPipeline;
+                    }
+                    capture.release();
+                    {
+                        std::lock_guard<std::mutex> lock(workerState->mutex);
+                        if (workerState->activePipeline == localPipeline) {
+                            workerState->activePipeline.clear();
+                        }
+                    }
+                    std::this_thread::sleep_for(std::chrono::seconds(2));
+                    continue;
+                }
+
+                {
+                    std::lock_guard<std::mutex> lock(workerState->mutex);
+                    if (workerState->desiredPipeline == localPipeline) {
+                        workerState->lastFrame = frame.clone();
+                        workerState->hasFrame = true;
+                    }
+                }
+            }
+        });
+        workerState->worker.detach();
     }
 
     bool ensureOpened(const std::string& nextPipeline)
     {
-        if (capture.isOpened() && device == nextPipeline) {
-            return true;
-        }
-        release();
         if (nextPipeline.empty()) {
-            if (warnedOpenFailureDevice != "<empty>") {
+            release();
+            if (warnedOpenFailurePipeline != "<empty>") {
                 LOG_ERROR("Secondary camera pipeline is empty");
-                warnedOpenFailureDevice = "<empty>";
+                warnedOpenFailurePipeline = "<empty>";
             }
             return false;
         }
-        if (warnedOpenFailureDevice != nextPipeline) {
-            LOG_INFO("Opening pause camera pipeline");
-        }
-        tryOpenGstreamer(nextPipeline, "gstreamer-pipeline");
-        if (!capture.isOpened()) {
-            if (warnedOpenFailureDevice != nextPipeline) {
-                LOG_ERROR("Cannot open secondary camera pipeline");
-                warnedOpenFailureDevice = nextPipeline;
+        ensureWorkerStarted();
+        {
+            std::lock_guard<std::mutex> lock(state->mutex);
+            if (state->desiredPipeline != nextPipeline) {
+                state->desiredPipeline = nextPipeline;
+                state->activePipeline.clear();
+                state->lastFrame.release();
+                state->hasFrame = false;
             }
-            return false;
         }
-        capture.set(cv::CAP_PROP_BUFFERSIZE, 1);
-        device = nextPipeline;
-        warnedOpenFailureDevice.clear();
-        warnedReadFailureDevice.clear();
-        LOG_INFO("Pause camera opened using " << openMode);
         return true;
     }
 
     bool read(cv::Mat& frame, const cv::Size& fallbackSize)
     {
-        if (!capture.isOpened()) {
+        (void)fallbackSize;
+        std::lock_guard<std::mutex> lock(state->mutex);
+        if (!state->hasFrame || state->lastFrame.empty()) {
             return false;
         }
-        if (!capture.read(frame) || frame.empty()) {
-            if (warnedReadFailureDevice != device) {
-                LOG_WARNING("Cannot read pause camera frame: " << device);
-                warnedReadFailureDevice = device;
-            }
-            if (openMode.rfind("gstreamer", 0) != 0) {
-                capture.release();
-                device.clear();
-                lastFrame.release();
-                return false;
-            }
-            if (!lastFrame.empty()) {
-                frame = lastFrame;
-                return true;
-            }
-            frame = cv::Mat::zeros(fallbackSize, CV_8UC3);
-            return true;
-        }
-        lastFrame = frame.clone();
-        warnedReadFailureDevice.clear();
+        frame = state->lastFrame;
         return true;
     }
 };
