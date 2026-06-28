@@ -369,18 +369,21 @@ struct PauseCameraSource {
             error = "appsink sample has invalid caps";
             return false;
         }
-        if (std::string(format) != "BGR") {
-            error = "appsink sample format is not BGR: ";
-            error += format;
-            return false;
-        }
+        const std::string sampleFormat(format);
 
         GstMapInfo map {};
         if (!gst_buffer_map(buffer, &map, GST_MAP_READ)) {
             error = "cannot map appsink buffer";
             return false;
         }
-        const std::size_t expected = static_cast<std::size_t>(width) * static_cast<std::size_t>(height) * 3U;
+        const int channels = (sampleFormat == "BGR") ? 3 : ((sampleFormat == "BGRx" || sampleFormat == "BGRA") ? 4 : 0);
+        if (channels == 0) {
+            gst_buffer_unmap(buffer, &map);
+            error = "appsink sample format is not BGR/BGRx/BGRA: ";
+            error += format;
+            return false;
+        }
+        const std::size_t expected = static_cast<std::size_t>(width) * static_cast<std::size_t>(height) * static_cast<std::size_t>(channels);
         if (map.size < expected) {
             gst_buffer_unmap(buffer, &map);
             std::ostringstream stream;
@@ -389,8 +392,13 @@ struct PauseCameraSource {
             return false;
         }
 
-        cv::Mat wrapped(height, width, CV_8UC3, map.data);
-        frame = wrapped.clone();
+        if (channels == 3) {
+            cv::Mat wrapped(height, width, CV_8UC3, map.data);
+            frame = wrapped.clone();
+        } else {
+            cv::Mat wrapped(height, width, CV_8UC4, map.data);
+            cv::cvtColor(wrapped, frame, cv::COLOR_BGRA2BGR);
+        }
         gst_buffer_unmap(buffer, &map);
         return true;
     }
