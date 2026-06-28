@@ -380,8 +380,8 @@ struct PauseCameraSource {
             }
 
             timeval timeout {};
-            timeout.tv_sec = 0;
-            timeout.tv_usec = 250000;
+            timeout.tv_sec = 2;
+            timeout.tv_usec = 0;
             setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout));
 
             if (connect(fd, ai->ai_addr, ai->ai_addrlen) == 0) {
@@ -394,22 +394,25 @@ struct PauseCameraSource {
         return fd;
     }
 
-    static bool readFull(int fd, std::vector<unsigned char>& buffer)
+    static bool readFull(int fd, std::vector<unsigned char>& buffer, std::size_t& bytesRead)
     {
         std::size_t offset = 0;
         while (offset < buffer.size()) {
             const ssize_t bytes = recv(fd, buffer.data() + offset, buffer.size() - offset, 0);
             if (bytes == 0) {
+                bytesRead = offset;
                 return false;
             }
             if (bytes < 0) {
                 if (errno == EINTR) {
                     continue;
                 }
+                bytesRead = offset;
                 return false;
             }
             offset += static_cast<std::size_t>(bytes);
         }
+        bytesRead = offset;
         return true;
     }
 
@@ -482,6 +485,9 @@ struct PauseCameraSource {
                     lastOpenFailure.clear();
                     const std::size_t frameBytes = static_cast<std::size_t>(tcpPipeline.width) * static_cast<std::size_t>(tcpPipeline.height) * 3U;
                     std::vector<unsigned char> frameBuffer(frameBytes);
+                    std::uint64_t tcpFrames = 0;
+                    std::uint64_t tcpBytes = 0;
+                    auto tcpStatsStart = std::chrono::steady_clock::now();
                     while (!workerState->stop) {
                         std::string stillWanted;
                         {
@@ -491,13 +497,16 @@ struct PauseCameraSource {
                         if (stillWanted != wantedPipeline) {
                             break;
                         }
-                        if (!readFull(fd, frameBuffer)) {
+                        std::size_t bytesRead = 0;
+                        if (!readFull(fd, frameBuffer, bytesRead)) {
                             if (lastReadFailure != wantedPipeline) {
-                                LOG_WARNING("Cannot read pause camera TCP frame");
+                                LOG_WARNING("Cannot read pause camera TCP frame, bytes=" << bytesRead << "/" << frameBytes);
                                 lastReadFailure = wantedPipeline;
                             }
                             break;
                         }
+                        tcpFrames++;
+                        tcpBytes += bytesRead;
                         cv::Mat wrapped(tcpPipeline.height, tcpPipeline.width, CV_8UC3, frameBuffer.data());
                         {
                             std::lock_guard<std::mutex> lock(workerState->mutex);
@@ -506,6 +515,16 @@ struct PauseCameraSource {
                                 workerState->hasFrame = true;
                                 workerState->activePipeline = wantedPipeline;
                             }
+                        }
+                        const auto now = std::chrono::steady_clock::now();
+                        const double elapsedSeconds = std::chrono::duration<double>(now - tcpStatsStart).count();
+                        if (elapsedSeconds >= 5.0) {
+                            LOG_VERBOSE("Pause camera TCP stream: fps=" << (static_cast<double>(tcpFrames) / elapsedSeconds)
+                                << " MB/s=" << (static_cast<double>(tcpBytes) / elapsedSeconds / 1000000.0)
+                                << " frames=" << tcpFrames);
+                            tcpFrames = 0;
+                            tcpBytes = 0;
+                            tcpStatsStart = now;
                         }
                     }
                     close(fd);
