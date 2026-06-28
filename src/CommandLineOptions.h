@@ -82,7 +82,6 @@ struct ProcessorConfig {
     std::string backgroundImageFolder = ".";
     std::string pauseImagePath;
     std::string pauseImageFolder = ".";
-    std::string secondaryCameraDevice = "/dev/video10";
     std::string secondaryCameraPipeline;
     std::string pauseImageFont = "simplex";
     std::string pauseImageFontDirectory = ".";

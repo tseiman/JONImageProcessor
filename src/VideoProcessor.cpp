@@ -297,29 +297,6 @@ struct PauseCameraSource {
         lastFrame.release();
     }
 
-    static std::string gstreamerPipeline(const std::string& nextDevice, const cv::Size& captureSize, const std::string& format)
-    {
-        std::ostringstream pipeline;
-        pipeline << "v4l2src device=" << nextDevice
-            << " ! video/x-raw,format=" << format
-            << ",width=" << captureSize.width
-            << ",height=" << captureSize.height
-            << ",framerate=30/1"
-            << " ! videoconvert ! video/x-raw,format=BGR"
-            << " ! appsink drop=true max-buffers=1 sync=false";
-        return pipeline.str();
-    }
-
-    static std::string flexibleGstreamerPipeline(const std::string& nextDevice)
-    {
-        std::ostringstream pipeline;
-        pipeline << "v4l2src device=" << nextDevice
-            << " ! queue max-size-buffers=1 leaky=downstream"
-            << " ! videoconvert ! video/x-raw,format=BGR"
-            << " ! appsink drop=true max-buffers=1 sync=false";
-        return pipeline.str();
-    }
-
     bool tryOpenGstreamer(const std::string& pipeline, const std::string& mode)
     {
         capture.open(pipeline, cv::CAP_GSTREAMER);
@@ -330,52 +307,35 @@ struct PauseCameraSource {
         return true;
     }
 
-    bool ensureOpened(const std::string& nextDevice, const std::string& nextPipeline, const cv::Size& captureSize)
+    bool ensureOpened(const std::string& nextPipeline)
     {
-        const std::string source = nextPipeline.empty() ? nextDevice : nextPipeline;
-        if (capture.isOpened() && device == source) {
+        if (capture.isOpened() && device == nextPipeline) {
             return true;
         }
         release();
-        if (source.empty()) {
-            LOG_ERROR("Secondary camera source is empty");
+        if (nextPipeline.empty()) {
+            if (warnedOpenFailureDevice != "<empty>") {
+                LOG_ERROR("Secondary camera pipeline is empty");
+                warnedOpenFailureDevice = "<empty>";
+            }
             return false;
         }
-        LOG_INFO("Opening pause camera source: " << source);
-        if (!nextPipeline.empty() || source.find('!') != std::string::npos) {
-            tryOpenGstreamer(source, "gstreamer-pipeline");
-        } else if (source.rfind("/dev/video", 0) == 0) {
-            tryOpenGstreamer(flexibleGstreamerPipeline(source), "gstreamer-auto");
-            const std::array<std::string, 2> rawFormats { "UYVY", "YUY2" };
-            if (!capture.isOpened()) {
-                for (const std::string& format : rawFormats) {
-                    const std::string pipeline = gstreamerPipeline(source, captureSize, format);
-                    if (tryOpenGstreamer(pipeline, "gstreamer-" + format)) {
-                        break;
-                    }
-                }
-            }
-            if (!capture.isOpened()) {
-                LOG_WARNING("Cannot open pause camera through GStreamer. Check that OpenCV has GStreamer support and that the source is streaming: " << source);
-            }
-        } else {
-            capture.open(source);
-            if (capture.isOpened()) {
-                openMode = "opencv";
-            }
+        if (warnedOpenFailureDevice != nextPipeline) {
+            LOG_INFO("Opening pause camera pipeline");
         }
+        tryOpenGstreamer(nextPipeline, "gstreamer-pipeline");
         if (!capture.isOpened()) {
-            if (warnedOpenFailureDevice != source) {
-                LOG_WARNING("Cannot open pause camera source: " << source);
-                warnedOpenFailureDevice = source;
+            if (warnedOpenFailureDevice != nextPipeline) {
+                LOG_ERROR("Cannot open secondary camera pipeline");
+                warnedOpenFailureDevice = nextPipeline;
             }
             return false;
         }
         capture.set(cv::CAP_PROP_BUFFERSIZE, 1);
-        device = source;
+        device = nextPipeline;
         warnedOpenFailureDevice.clear();
         warnedReadFailureDevice.clear();
-        LOG_INFO("Pause camera opened using " << openMode << ": " << source);
+        LOG_INFO("Pause camera opened using " << openMode);
         return true;
     }
 
@@ -604,7 +564,7 @@ cv::Mat makeStatusFrame(
         buffers->pauseMedia.release();
         cv::Mat pauseFrame;
         const cv::Size captureSize(config->width, config->height);
-        if (buffers->pauseCamera.ensureOpened(config->secondaryCameraDevice, config->secondaryCameraPipeline, captureSize)
+        if (buffers->pauseCamera.ensureOpened(config->secondaryCameraPipeline)
             && buffers->pauseCamera.read(pauseFrame, captureSize) && !pauseFrame.empty()) {
             cv::resize(pauseFrame, buffers->scaledPauseImage, size, 0.0, 0.0, cv::INTER_LINEAR);
             cv::Mat frame = buffers->scaledPauseImage.clone();
@@ -1104,7 +1064,6 @@ void logStartupInfo(const ProcessorConfig& config, const ScreenInfo& screenInfo)
     LOG_VERBOSE("Background loop if video: " << (config.backgroundLoopIfVideo ? "true" : "false"));
     LOG_VERBOSE("Pause image enabled: " << (config.pauseImageEnabled ? "true" : "false"));
     LOG_VERBOSE("Pause source: " << pauseSourceToString(config.pauseSource));
-    LOG_VERBOSE("Secondary camera device: " << config.secondaryCameraDevice);
     LOG_VERBOSE("Secondary camera pipeline: " << (config.secondaryCameraPipeline.empty() ? "none" : config.secondaryCameraPipeline));
     LOG_VERBOSE("Pause image: " << (config.pauseImagePath.empty() ? "none" : config.pauseImagePath));
     LOG_VERBOSE("Pause image folder: " << config.pauseImageFolder);

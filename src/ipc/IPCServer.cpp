@@ -375,7 +375,6 @@ std::string valueJson(const ProcessorConfig& c, const std::string& key, const Be
     if (key == "blur_strength" || key == "background.blurStrength") return std::to_string(c.blurStrength);
     if (key == "pause.enabled") return c.pauseImageEnabled ? "true" : "false";
     if (key == "pause.source") return "\"" + pauseSourceToString(c.pauseSource) + "\"";
-    if (key == "secondaryCamera.device") return "\"" + escapeJson(c.secondaryCameraDevice) + "\"";
     if (key == "secondaryCamera.pipeline") return "\"" + escapeJson(c.secondaryCameraPipeline) + "\"";
     if (key == "pause.image") return "\"" + escapeJson(c.pauseImagePath) + "\"";
     if (key == "pause.folder") return "\"" + escapeJson(c.pauseImageFolder) + "\"";
@@ -411,7 +410,6 @@ bool knownKey(const std::string& key)
         || key == "pause.textPosition" || key == "pause.textSize" || key == "pause.font"
         || key == "pause.fontDirectory" || key == "pause.fontAlign"
         || key == "runtime.noMask" || key == "runtime.noOverlay" || key == "camera.enabled"
-        || key == "secondaryCamera.device"
         || key == "secondaryCamera.pipeline"
         || key == "version" || key == "system.version" || key == "configDirectory"
         || key == "system.configDirectory" || key == "config";
@@ -443,9 +441,6 @@ std::string validateRuntimeConfig(const ProcessorConfig& config)
         return "pause HTML media is not supported in this build";
     }
 #endif
-    if (config.pauseSource == PauseSource::Camera && config.secondaryCameraDevice.empty() && config.secondaryCameraPipeline.empty()) {
-        return "secondaryCamera.device or secondaryCamera.pipeline must not be empty";
-    }
     if (!isBuiltInPauseFont(config.pauseImageFont)) {
         const std::string fontPath = joinPath(config.pauseImageFontDirectory, config.pauseImageFont + ".ttf");
 #if !defined(JON_ENABLE_FREETYPE_TEXT)
@@ -552,8 +547,7 @@ std::string IPCServer::handleLine(const std::string& line)
         std::ostringstream out;
         out << "{\"ok\":true,\"values\":{"
             << "\"camera\":{\"enabled\":" << (current.cameraEnabled ? "true" : "false") << "}"
-            << ",\"secondaryCamera\":{\"device\":\"" << escapeJson(current.secondaryCameraDevice)
-            << "\",\"pipeline\":\"" << escapeJson(current.secondaryCameraPipeline) << "\"}"
+            << ",\"secondaryCamera\":{\"pipeline\":\"" << escapeJson(current.secondaryCameraPipeline) << "\"}"
             << ",\"segmentation\":{\"threshold\":" << current.maskThreshold
             << ",\"smoothing\":" << current.maskSmoothing
             << ",\"morphology\":\"" << maskMorphologyModeToString(current.maskMorphology) << "\"}"
@@ -612,7 +606,7 @@ std::string IPCServer::handleLine(const std::string& line)
     }
     if (key == "configDirectory" || key == "system.configDirectory"
         || key == "background.folder" || key == "pause.folder" || key == "pause.fontDirectory"
-        || key == "secondaryCamera.device" || key == "secondaryCamera.pipeline") {
+        || key == "secondaryCamera.pipeline") {
         return loggedErrorResponse(key + " is read-only");
     }
     if (!knownKey(key)) {
