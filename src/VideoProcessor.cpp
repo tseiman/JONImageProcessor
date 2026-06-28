@@ -23,6 +23,7 @@
 #if defined(JON_ENABLE_GSTREAMER_APP)
 #include <gst/gst.h>
 #include <gst/app/gstappsink.h>
+#include <gst/video/video.h>
 #endif
 
 #if defined(JON_ENABLE_FREETYPE_TEXT)
@@ -409,7 +410,19 @@ struct PauseCameraSource {
             error += format;
             return false;
         }
-        const std::size_t expected = static_cast<std::size_t>(width) * static_cast<std::size_t>(height) * static_cast<std::size_t>(channels);
+        std::size_t stride = static_cast<std::size_t>(width) * static_cast<std::size_t>(channels);
+        if (GstVideoMeta* meta = gst_buffer_get_video_meta(buffer)) {
+            if (meta->stride[0] > 0) {
+                stride = static_cast<std::size_t>(meta->stride[0]);
+            }
+        } else if (height > 0 && map.size % static_cast<std::size_t>(height) == 0) {
+            const std::size_t inferredStride = map.size / static_cast<std::size_t>(height);
+            if (inferredStride >= stride) {
+                stride = inferredStride;
+            }
+        }
+        const std::size_t expected = stride * static_cast<std::size_t>(height - 1)
+            + static_cast<std::size_t>(width) * static_cast<std::size_t>(channels);
         if (map.size < expected) {
             gst_buffer_unmap(buffer, &map);
             std::ostringstream stream;
@@ -419,14 +432,14 @@ struct PauseCameraSource {
         }
 
         if (sampleFormat == "BGR") {
-            cv::Mat wrapped(height, width, CV_8UC3, map.data);
+            cv::Mat wrapped(height, width, CV_8UC3, map.data, stride);
             frame = wrapped.clone();
         } else if (sampleFormat == "RGB") {
-            cv::Mat wrapped(height, width, CV_8UC3, map.data);
+            cv::Mat wrapped(height, width, CV_8UC3, map.data, stride);
             frame.create(height, width, CV_8UC3);
             cv::cvtColor(wrapped, frame, cv::COLOR_RGB2BGR);
         } else {
-            cv::Mat wrapped(height, width, CV_8UC4, map.data);
+            cv::Mat wrapped(height, width, CV_8UC4, map.data, stride);
             cv::cvtColor(wrapped, frame, cv::COLOR_BGRA2BGR);
         }
         gst_buffer_unmap(buffer, &map);
