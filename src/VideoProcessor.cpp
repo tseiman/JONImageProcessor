@@ -394,10 +394,45 @@ struct PauseCameraSource {
         return fd;
     }
 
-    static bool readFull(int fd, std::vector<unsigned char>& buffer, std::size_t& bytesRead)
+    static bool stillWantsPipeline(const std::shared_ptr<State>& state, const std::string& wantedPipeline)
+    {
+        std::lock_guard<std::mutex> lock(state->mutex);
+        return !state->stop && state->desiredPipeline == wantedPipeline;
+    }
+
+    static bool readFull(
+        int fd,
+        std::vector<unsigned char>& buffer,
+        std::size_t& bytesRead,
+        const std::shared_ptr<State>& state,
+        const std::string& wantedPipeline)
     {
         std::size_t offset = 0;
         while (offset < buffer.size()) {
+            if (!stillWantsPipeline(state, wantedPipeline)) {
+                bytesRead = offset;
+                return false;
+            }
+
+            fd_set readSet;
+            FD_ZERO(&readSet);
+            FD_SET(fd, &readSet);
+            timeval timeout {};
+            timeout.tv_sec = 0;
+            timeout.tv_usec = 100000;
+
+            const int ready = select(fd + 1, &readSet, nullptr, nullptr, &timeout);
+            if (ready == 0) {
+                continue;
+            }
+            if (ready < 0) {
+                if (errno == EINTR) {
+                    continue;
+                }
+                bytesRead = offset;
+                return false;
+            }
+
             const ssize_t bytes = recv(fd, buffer.data() + offset, buffer.size() - offset, 0);
             if (bytes == 0) {
                 bytesRead = offset;
@@ -498,7 +533,7 @@ struct PauseCameraSource {
                             break;
                         }
                         std::size_t bytesRead = 0;
-                        if (!readFull(fd, frameBuffer, bytesRead)) {
+                        if (!readFull(fd, frameBuffer, bytesRead, workerState, wantedPipeline)) {
                             if (lastReadFailure != wantedPipeline) {
                                 LOG_WARNING("Cannot read pause camera TCP frame, bytes=" << bytesRead << "/" << frameBytes);
                                 lastReadFailure = wantedPipeline;
@@ -507,6 +542,9 @@ struct PauseCameraSource {
                         }
                         tcpFrames++;
                         tcpBytes += bytesRead;
+                        if (tcpFrames <= 5 || tcpFrames % 900 == 0) {
+                            LOG_INFO("Pause camera TCP frame received: " << tcpFrames);
+                        }
                         cv::Mat wrapped(tcpPipeline.height, tcpPipeline.width, CV_8UC3, frameBuffer.data());
                         {
                             std::lock_guard<std::mutex> lock(workerState->mutex);
