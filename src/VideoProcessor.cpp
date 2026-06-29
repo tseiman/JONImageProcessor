@@ -39,6 +39,7 @@
 #include <chrono>
 #include <cctype>
 #include <cerrno>
+#include <cstdint>
 #include <cmath>
 #include <ctime>
 #include <cstring>
@@ -352,6 +353,78 @@ struct PauseCameraSource {
         return nullptr;
     }
 
+    static void logFrameContentDiagnostics(const cv::Mat& frame, const std::string& sampleFormat, std::size_t stride, std::size_t bufferSize)
+    {
+        if (frame.empty()) {
+            return;
+        }
+
+        static std::mutex diagnosticsMutex;
+        static std::uint64_t frameCount = 0;
+        static std::chrono::steady_clock::time_point lastLogTime;
+        static std::chrono::steady_clock::time_point lastBlackWarningTime;
+        static bool dumpedBlackFrame = false;
+        static bool dumpedOkFrame = false;
+
+        const auto now = std::chrono::steady_clock::now();
+        bool shouldInspect = false;
+        {
+            std::lock_guard<std::mutex> lock(diagnosticsMutex);
+            ++frameCount;
+            if (frameCount % 30 == 0 || lastLogTime.time_since_epoch().count() == 0
+                || now - lastLogTime >= std::chrono::seconds(1)) {
+                shouldInspect = true;
+                lastLogTime = now;
+            }
+        }
+        if (!shouldInspect) {
+            return;
+        }
+
+        const cv::Scalar meanValue = cv::mean(frame);
+        cv::Mat gray;
+        double minValue = 0.0;
+        double maxValue = 0.0;
+        cv::cvtColor(frame, gray, cv::COLOR_BGR2GRAY);
+        cv::minMaxLoc(gray, &minValue, &maxValue);
+
+        const bool isBlack = meanValue[0] < 3.0 && meanValue[1] < 3.0 && meanValue[2] < 3.0;
+        bool dumpBlack = false;
+        bool dumpOk = false;
+        bool warnBlack = false;
+        {
+            std::lock_guard<std::mutex> lock(diagnosticsMutex);
+            if (isBlack) {
+                warnBlack = lastBlackWarningTime.time_since_epoch().count() == 0
+                    || now - lastBlackWarningTime >= std::chrono::seconds(1);
+                if (warnBlack) {
+                    lastBlackWarningTime = now;
+                }
+                dumpBlack = !dumpedBlackFrame;
+                dumpedBlackFrame = true;
+            } else {
+                dumpOk = !dumpedOkFrame;
+                dumpedOkFrame = true;
+            }
+        }
+
+        LOG_INFO("Secondary camera frame content: size=" << frame.cols << "x" << frame.rows
+                 << " format=" << sampleFormat
+                 << " stride=" << stride
+                 << " buffer=" << bufferSize
+                 << " mean_bgr=" << meanValue[0] << "," << meanValue[1] << "," << meanValue[2]
+                 << " gray_minmax=" << minValue << "," << maxValue);
+        if (warnBlack) {
+            LOG_WARNING("Secondary camera frame content is black although caps are valid");
+        }
+        if (dumpBlack) {
+            cv::imwrite("/tmp/jon-airplay-black-debug.jpg", frame);
+        }
+        if (dumpOk) {
+            cv::imwrite("/tmp/jon-airplay-ok-debug.jpg", frame);
+        }
+    }
+
     static bool sampleToBgrMat(GstSample* sample, cv::Mat& frame, std::string& error)
     {
         GstCaps* caps = gst_sample_get_caps(sample);
@@ -377,6 +450,7 @@ struct PauseCameraSource {
             error = "cannot map appsink buffer";
             return false;
         }
+        const std::size_t bufferSize = map.size;
 
         GstVideoMeta* meta = gst_buffer_get_video_meta(buffer);
         const int channels = (sampleFormat == "BGR" || sampleFormat == "RGB") ? 3
@@ -386,8 +460,8 @@ struct PauseCameraSource {
             if (meta->stride[0] > 0) {
                 stride = static_cast<std::size_t>(meta->stride[0]);
             }
-        } else if (height > 0 && map.size % static_cast<std::size_t>(height) == 0) {
-            const std::size_t inferredStride = map.size / static_cast<std::size_t>(height);
+        } else if (height > 0 && bufferSize % static_cast<std::size_t>(height) == 0) {
+            const std::size_t inferredStride = bufferSize / static_cast<std::size_t>(height);
             if (inferredStride >= stride) {
                 stride = inferredStride;
             }
@@ -400,7 +474,7 @@ struct PauseCameraSource {
         }
         std::ostringstream signatureStream;
         signatureStream << sampleFormat << " " << width << "x" << height << " stride=" << stride
-                        << " buffer=" << map.size << " caps=" << capsText;
+                        << " buffer=" << bufferSize << " caps=" << capsText;
         static std::mutex lastCapsMutex;
         static std::string lastCapsSignature;
         const std::string capsSignature = signatureStream.str();
@@ -422,7 +496,7 @@ struct PauseCameraSource {
         };
         auto failBufferTooSmall = [&](std::size_t expected) {
             std::ostringstream stream;
-            stream << "appsink buffer too small: " << map.size << "/" << expected << " caps=" << capsText;
+            stream << "appsink buffer too small: " << bufferSize << "/" << expected << " caps=" << capsText;
             error = stream.str();
         };
 
@@ -439,7 +513,7 @@ struct PauseCameraSource {
             const std::size_t yOffset = planeOffset(0);
             const std::size_t uvOffset = meta ? planeOffset(1) : yStride * static_cast<std::size_t>(height);
             const std::size_t expected = uvOffset + uvStride * static_cast<std::size_t>(height / 2);
-            if (map.size < expected) {
+            if (bufferSize < expected) {
                 failBufferTooSmall(expected);
                 gst_buffer_unmap(buffer, &map);
                 return false;
@@ -448,6 +522,7 @@ struct PauseCameraSource {
             cv::Mat uvPlane(height / 2, width / 2, CV_8UC2, map.data + uvOffset, uvStride);
             cv::cvtColorTwoPlane(yPlane, uvPlane, frame, cv::COLOR_YUV2BGR_NV12);
             gst_buffer_unmap(buffer, &map);
+            logFrameContentDiagnostics(frame, sampleFormat, yStride, bufferSize);
             return true;
         }
 
@@ -468,7 +543,7 @@ struct PauseCameraSource {
             const std::size_t uOffset = meta ? planeOffset(1) : yStride * static_cast<std::size_t>(height);
             const std::size_t vOffset = meta ? planeOffset(2) : uOffset + uStride * chromaHeight;
             const std::size_t expected = vOffset + vStride * chromaHeight;
-            if (map.size < expected) {
+            if (bufferSize < expected) {
                 failBufferTooSmall(expected);
                 gst_buffer_unmap(buffer, &map);
                 return false;
@@ -491,6 +566,7 @@ struct PauseCameraSource {
             cv::Mat yuv(height + height / 2, width, CV_8UC1, tightData.data());
             cv::cvtColor(yuv, frame, cv::COLOR_YUV2BGR_I420);
             gst_buffer_unmap(buffer, &map);
+            logFrameContentDiagnostics(frame, sampleFormat, yStride, bufferSize);
             return true;
         }
 
@@ -505,7 +581,7 @@ struct PauseCameraSource {
 
         const std::size_t expected = stride * static_cast<std::size_t>(height - 1)
             + static_cast<std::size_t>(width) * static_cast<std::size_t>(channels);
-        if (map.size < expected) {
+        if (bufferSize < expected) {
             failBufferTooSmall(expected);
             gst_buffer_unmap(buffer, &map);
             return false;
@@ -526,6 +602,7 @@ struct PauseCameraSource {
             cv::cvtColor(wrapped, frame, cv::COLOR_BGRA2BGR);
         }
         gst_buffer_unmap(buffer, &map);
+        logFrameContentDiagnostics(frame, sampleFormat, stride, bufferSize);
         return true;
     }
 
