@@ -298,8 +298,6 @@ struct PauseCameraSource {
         bool hasFrame = false;
         bool started = false;
         bool stop = false;
-        int targetWidth = 0;
-        int targetHeight = 0;
     };
 
     std::shared_ptr<State> state = std::make_shared<State>();
@@ -354,31 +352,7 @@ struct PauseCameraSource {
         return nullptr;
     }
 
-    static cv::Mat letterbox(const cv::Mat& src, int targetWidth, int targetHeight)
-    {
-        if (src.empty() || targetWidth <= 0 || targetHeight <= 0) return src;
-        if (src.cols == targetWidth && src.rows == targetHeight) return src;
-
-        const double scaleX = static_cast<double>(targetWidth) / src.cols;
-        const double scaleY = static_cast<double>(targetHeight) / src.rows;
-        const double scale = std::min(scaleX, scaleY);
-
-        const int scaledW = static_cast<int>(std::round(src.cols * scale));
-        const int scaledH = static_cast<int>(std::round(src.rows * scale));
-
-        cv::Mat scaled;
-        cv::resize(src, scaled, cv::Size(scaledW, scaledH), 0.0, 0.0, cv::INTER_LINEAR);
-
-        cv::Mat result(targetHeight, targetWidth, CV_8UC3, cv::Scalar(0, 0, 0));
-
-        const int offsetX = (targetWidth - scaledW) / 2;
-        const int offsetY = (targetHeight - scaledH) / 2;
-        scaled.copyTo(result(cv::Rect(offsetX, offsetY, scaledW, scaledH)));
-
-        return result;
-    }
-
-    static bool sampleToBgrMat(GstSample* sample, cv::Mat& frame, std::string& error, int targetWidth = 0, int targetHeight = 0)
+    static bool sampleToBgrMat(GstSample* sample, cv::Mat& frame, std::string& error)
     {
         GstCaps* caps = gst_sample_get_caps(sample);
         GstBuffer* buffer = gst_sample_get_buffer(sample);
@@ -443,9 +417,6 @@ struct PauseCameraSource {
             cv::cvtColor(wrapped, frame, cv::COLOR_BGRA2BGR);
         }
         gst_buffer_unmap(buffer, &map);
-        if (targetWidth > 0 && targetHeight > 0) {
-            frame = letterbox(frame, targetWidth, targetHeight);
-        }
         return true;
     }
 
@@ -624,17 +595,9 @@ struct PauseCameraSource {
                     continue;
                 }
 
-                int targetWidth = 0;
-                int targetHeight = 0;
-                {
-                    std::lock_guard<std::mutex> lock(workerState->mutex);
-                    targetWidth = workerState->targetWidth;
-                    targetHeight = workerState->targetHeight;
-                }
-
                 cv::Mat frame;
                 std::string frameError;
-                if (!sampleToBgrMat(sample.get(), frame, frameError, targetWidth, targetHeight) || frame.empty()) {
+                if (!sampleToBgrMat(sample.get(), frame, frameError) || frame.empty()) {
                     if (lastReadFailure != localPipeline) {
                         LOG_WARNING("Cannot read secondary camera appsink frame: " << frameError);
                         lastReadFailure = localPipeline;
@@ -678,7 +641,7 @@ struct PauseCameraSource {
         workerState->worker.detach();
     }
 
-    bool ensureOpened(const std::string& nextPipeline, int targetWidth = 0, int targetHeight = 0)
+    bool ensureOpened(const std::string& nextPipeline)
     {
         if (nextPipeline.empty()) {
             release();
@@ -697,8 +660,6 @@ struct PauseCameraSource {
                 state->lastFrame.release();
                 state->hasFrame = false;
             }
-            state->targetWidth = targetWidth;
-            state->targetHeight = targetHeight;
         }
         return true;
     }
@@ -911,10 +872,16 @@ cv::Mat makeStatusFrame(
         buffers->pauseMedia.release();
         cv::Mat pauseFrame;
         const cv::Size captureSize(config->width, config->height);
-        if (buffers->pauseCamera.ensureOpened(config->secondaryCameraPipeline, config->width, config->height)
+        if (buffers->pauseCamera.ensureOpened(config->secondaryCameraPipeline)
             && buffers->pauseCamera.read(pauseFrame, captureSize) && !pauseFrame.empty()) {
-            cv::resize(pauseFrame, buffers->scaledPauseImage, size, 0.0, 0.0, cv::INTER_LINEAR);
-            cv::Mat frame = buffers->scaledPauseImage.clone();
+            cv::Mat frame;
+            // UxPlay/GStreamer is responsible for aspect-ratio preserving scaling and letterboxing.
+            // Avoid a second resize when the appsink frame already matches the output size.
+            if (pauseFrame.size() == size) {
+                frame = pauseFrame.clone();
+            } else {
+                cv::resize(pauseFrame, frame, size, 0.0, 0.0, cv::INTER_LINEAR);
+            }
             if (config->pauseImageShowStatusText) {
                 const int marginX = size.width / 8;
                 const cv::Point textPosition(
@@ -947,7 +914,11 @@ cv::Mat makeStatusFrame(
             } else {
                 buffers->pauseMedia.warnedFrameFailure = false;
                 cv::Mat frame;
-                cv::resize(pauseImage, buffers->scaledPauseImage, size, 0.0, 0.0, cv::INTER_LINEAR);
+                if (pauseImage.size() == size) {
+                    buffers->scaledPauseImage = pauseImage.clone();
+                } else {
+                    cv::resize(pauseImage, buffers->scaledPauseImage, size, 0.0, 0.0, cv::INTER_LINEAR);
+                }
                 frame = buffers->scaledPauseImage.clone();
                 if (config->pauseImageShowStatusText) {
                     const int marginX = size.width / 8;
