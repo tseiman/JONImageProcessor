@@ -1092,6 +1092,16 @@ cv::Mat makeStatusFrame(
             && buffers->pauseCamera.read(pauseFrame, captureSize) && !pauseFrame.empty()) {
             cv::Mat frame;
             if (pauseFrame.size() == size) {
+                static std::mutex preserveNoticeMutex;
+                static bool preserveNoticeLogged = false;
+                if (config->pausePreserveAspectRatio) {
+                    std::lock_guard<std::mutex> lock(preserveNoticeMutex);
+                    if (!preserveNoticeLogged) {
+                        LOG_INFO("Pause preserveAspectRatio has no visible effect because secondary camera frames already match output size: "
+                            << pauseFrame.cols << "x" << pauseFrame.rows);
+                        preserveNoticeLogged = true;
+                    }
+                }
                 frame = pauseFrame.clone();
             } else if (config->pausePreserveAspectRatio) {
                 // AirPlay/UxPlay may deliver device-shaped frames. Letterbox only here so the appsink reader stays a pure pixel-format converter.
