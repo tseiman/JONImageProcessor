@@ -482,7 +482,7 @@ bool applyConfig(const Json& root, ProcessorConfig& config, ConfigLoadResult& re
 
     if (const Json* pause = objectChild(root, "pause")) {
         if (pause->type != Json::Type::Object) { error = "pause must be an object"; return false; }
-        warnUnknownFields(*pause, "pause.", {"enabled", "source", "image", "folder", "loopIfVideo", "showStatusText", "textColor", "textPosition", "textSize", "font", "fontDirectory", "fontAlign"});
+        warnUnknownFields(*pause, "pause.", {"enabled", "source", "image", "folder", "loopIfVideo", "showStatusText", "textColor", "textPosition", "textSize", "font", "fontDirectory", "fontAlign", "preserveAspectRatio"});
         if (!readBoolean(*pause, "enabled", config.pauseImageEnabled, error)) return false;
         std::string source;
         if (!readString(*pause, "source", source, error)) return false;
@@ -513,6 +513,7 @@ bool applyConfig(const Json& root, ProcessorConfig& config, ConfigLoadResult& re
         std::string fontAlign;
         if (!readString(*pause, "fontAlign", fontAlign, error)) return false;
         if (!fontAlign.empty() && !parsePauseFontAlign(fontAlign, config.pauseImageFontAlign)) { error = "Invalid pause.fontAlign"; return false; }
+        if (!readBoolean(*pause, "preserveAspectRatio", config.pausePreserveAspectRatio, error)) return false;
     }
 
     if (const Json* output = objectChild(root, "output")) {

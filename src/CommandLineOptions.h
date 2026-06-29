@@ -106,6 +106,7 @@ struct ProcessorConfig {
     bool cameraEnabled = true;
     bool pauseImageEnabled = false;
     bool pauseImageShowStatusText = true;
+    bool pausePreserveAspectRatio = true;
     bool backgroundLoopIfVideo = false;
     bool pauseLoopIfVideo = false;
 };

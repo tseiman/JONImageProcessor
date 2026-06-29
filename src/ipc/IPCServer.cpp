@@ -386,6 +386,7 @@ std::string valueJson(const ProcessorConfig& c, const std::string& key, const Be
     if (key == "pause.font") return "\"" + escapeJson(c.pauseImageFont) + "\"";
     if (key == "pause.fontDirectory") return "\"" + escapeJson(c.pauseImageFontDirectory) + "\"";
     if (key == "pause.fontAlign") return "\"" + pauseFontAlignToString(c.pauseImageFontAlign) + "\"";
+    if (key == "pause.preserveAspectRatio") return c.pausePreserveAspectRatio ? "true" : "false";
     if (key == "no_mask" || key == "runtime.noMask") return c.noMask ? "true" : "false";
     if (key == "no_overlay" || key == "runtime.noOverlay") return c.noOverlay ? "true" : "false";
     if (key == "camera.enabled") return c.cameraEnabled ? "true" : "false";
@@ -408,7 +409,7 @@ bool knownKey(const std::string& key)
         || key == "pause.enabled" || key == "pause.source"
         || key == "pause.image" || key == "pause.loopIfVideo" || key == "pause.folder" || key == "pause.showStatusText" || key == "pause.textColor"
         || key == "pause.textPosition" || key == "pause.textSize" || key == "pause.font"
-        || key == "pause.fontDirectory" || key == "pause.fontAlign"
+        || key == "pause.fontDirectory" || key == "pause.fontAlign" || key == "pause.preserveAspectRatio"
         || key == "runtime.noMask" || key == "runtime.noOverlay" || key == "camera.enabled"
         || key == "secondaryCamera.pipeline"
         || key == "version" || key == "system.version" || key == "configDirectory"
@@ -569,7 +570,8 @@ std::string IPCServer::handleLine(const std::string& line)
             << "\",\"textSize\":" << current.pauseImageTextSize
             << ",\"font\":\"" << escapeJson(current.pauseImageFont)
             << "\",\"fontDirectory\":\"" << escapeJson(current.pauseImageFontDirectory)
-            << "\",\"fontAlign\":\"" << pauseFontAlignToString(current.pauseImageFontAlign) << "\"}"
+            << "\",\"fontAlign\":\"" << pauseFontAlignToString(current.pauseImageFontAlign)
+            << "\",\"preserveAspectRatio\":" << (current.pausePreserveAspectRatio ? "true" : "false") << "}"
             << ",\"runtime\":{\"noMask\":" << (current.noMask ? "true" : "false")
             << ",\"noOverlay\":" << (current.noOverlay ? "true" : "false") << "}"
             << ",\"system\":{\"version\":\"" << escapeJson(jonImageProcessorVersionText())
@@ -685,14 +687,16 @@ std::string IPCServer::handleLine(const std::string& line)
         if (!parseColor(value.text, updated.backgroundOverlayColor)) return loggedErrorResponse("invalid value");
     } else if (key == "no_mask" || key == "runtime.noMask" || key == "no_overlay" || key == "runtime.noOverlay"
         || key == "pause.enabled" || key == "pause.showStatusText"
-        || key == "background.loopIfVideo" || key == "pause.loopIfVideo") {
+        || key == "background.loopIfVideo" || key == "pause.loopIfVideo"
+        || key == "pause.preserveAspectRatio") {
         if (value.type != JsonValue::Type::Boolean) return loggedErrorResponse("invalid value type");
         if (key == "no_mask" || key == "runtime.noMask") updated.noMask = value.boolean;
         else if (key == "no_overlay" || key == "runtime.noOverlay") updated.noOverlay = value.boolean;
         else if (key == "pause.enabled") updated.pauseImageEnabled = value.boolean;
         else if (key == "pause.showStatusText") updated.pauseImageShowStatusText = value.boolean;
         else if (key == "background.loopIfVideo") updated.backgroundLoopIfVideo = value.boolean;
-        else updated.pauseLoopIfVideo = value.boolean;
+        else if (key == "pause.loopIfVideo") updated.pauseLoopIfVideo = value.boolean;
+        else updated.pausePreserveAspectRatio = value.boolean;
     } else if (key == "camera.enabled") {
         if (value.type != JsonValue::Type::Boolean) return loggedErrorResponse("invalid value type");
         updated.cameraEnabled = value.boolean;

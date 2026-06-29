@@ -38,7 +38,8 @@
     "textSize": 1.6,
     "font": "simplex",
     "fontDirectory": "/opt/JONImageProcessor/var/fonts",
-    "fontAlign": "left"
+    "fontAlign": "left",
+    "preserveAspectRatio": true
   },
   "output": {
     "size": "auto"

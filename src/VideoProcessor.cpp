@@ -45,6 +45,7 @@
 #include <cstring>
 #include <cstdlib>
 #include <fstream>
+#include <map>
 #include <memory>
 #include <mutex>
 #include <sstream>
@@ -1040,6 +1041,31 @@ void renderPauseStatusText(cv::Mat& frame, const std::string& status, const Proc
     cv::addWeighted(textOverlay, alpha, frame, 1.0 - alpha, 0.0, frame);
 }
 
+cv::Mat letterboxPauseCameraFrame(const cv::Mat& frame, const cv::Size& targetSize)
+{
+    if (frame.empty() || targetSize.width <= 0 || targetSize.height <= 0) {
+        return frame.clone();
+    }
+    if (frame.size() == targetSize) {
+        return frame.clone();
+    }
+
+    const double scale = std::min(
+        static_cast<double>(targetSize.width) / static_cast<double>(frame.cols),
+        static_cast<double>(targetSize.height) / static_cast<double>(frame.rows));
+    const int scaledWidth = std::max(1, static_cast<int>(std::round(static_cast<double>(frame.cols) * scale)));
+    const int scaledHeight = std::max(1, static_cast<int>(std::round(static_cast<double>(frame.rows) * scale)));
+
+    cv::Mat scaled;
+    cv::resize(frame, scaled, cv::Size(scaledWidth, scaledHeight), 0.0, 0.0, cv::INTER_LINEAR);
+
+    cv::Mat output(targetSize, frame.type(), cv::Scalar(0, 0, 0));
+    const int offsetX = (targetSize.width - scaledWidth) / 2;
+    const int offsetY = (targetSize.height - scaledHeight) / 2;
+    scaled.copyTo(output(cv::Rect(offsetX, offsetY, scaledWidth, scaledHeight)));
+    return output;
+}
+
 cv::Mat makeStatusFrame(
     const cv::Size& size,
     const std::string& status,
@@ -1047,10 +1073,14 @@ cv::Mat makeStatusFrame(
     StatusFrameBuffers* buffers = nullptr)
 {
     auto logGeneratedStatusReason = [](const std::string& reason) {
-        static std::string lastReason;
-        if (lastReason != reason) {
+        static std::mutex mutex;
+        static std::map<std::string, std::chrono::steady_clock::time_point> lastLogTimes;
+        const auto now = std::chrono::steady_clock::now();
+        std::lock_guard<std::mutex> lock(mutex);
+        auto it = lastLogTimes.find(reason);
+        if (it == lastLogTimes.end() || now - it->second >= std::chrono::seconds(30)) {
             LOG_INFO("Using generated camera status image: " << reason);
-            lastReason = reason;
+            lastLogTimes[reason] = now;
         }
     };
 
@@ -1061,10 +1091,11 @@ cv::Mat makeStatusFrame(
         if (buffers->pauseCamera.ensureOpened(config->secondaryCameraPipeline)
             && buffers->pauseCamera.read(pauseFrame, captureSize) && !pauseFrame.empty()) {
             cv::Mat frame;
-            // UxPlay/GStreamer is responsible for aspect-ratio preserving scaling and letterboxing.
-            // Avoid a second resize when the appsink frame already matches the output size.
             if (pauseFrame.size() == size) {
                 frame = pauseFrame.clone();
+            } else if (config->pausePreserveAspectRatio) {
+                // AirPlay/UxPlay may deliver device-shaped frames. Letterbox only here so the appsink reader stays a pure pixel-format converter.
+                frame = letterboxPauseCameraFrame(pauseFrame, size);
             } else {
                 cv::resize(pauseFrame, frame, size, 0.0, 0.0, cv::INTER_LINEAR);
             }
@@ -1586,6 +1617,7 @@ void logStartupInfo(const ProcessorConfig& config, const ScreenInfo& screenInfo)
     LOG_VERBOSE("Pause image font: " << config.pauseImageFont);
     LOG_VERBOSE("Pause image font directory: " << config.pauseImageFontDirectory);
     LOG_VERBOSE("Pause image font align: " << pauseFontAlignToString(config.pauseImageFontAlign));
+    LOG_VERBOSE("Pause preserve aspect ratio: " << (config.pausePreserveAspectRatio ? "true" : "false"));
     LOG_VERBOSE("Background overlay color: "
         << config.backgroundOverlayColor.r << ","
         << config.backgroundOverlayColor.g << ","

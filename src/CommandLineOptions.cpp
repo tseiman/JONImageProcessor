@@ -52,6 +52,7 @@ enum OptionId {
     OptionPauseImageFont,
     OptionPauseImageFontDirectory,
     OptionPauseImageFontAlign,
+    OptionPausePreserveAspectRatio,
     OptionBackgroundOverlayColor,
     OptionBackgroundOverlayAlpha,
     OptionBlurStrength,
@@ -111,6 +112,7 @@ const std::vector<OptionDefinition>& optionDefinitions()
         {OptionPauseImageFont, 0, "pause-image-font", required_argument, "font", "Pause image font: built-in Hershey name or safe TTF base name", "simplex"},
         {OptionPauseImageFontDirectory, 0, "pause-image-font-directory", required_argument, "path", "Directory for TTF pause image fonts", "."},
         {OptionPauseImageFontAlign, 0, "pause-image-font-align", required_argument, "left|center|right", "Pause image status text alignment", "left"},
+        {OptionPausePreserveAspectRatio, 0, "pause-preserve-aspect-ratio", required_argument, "true|false", "Letterbox secondary camera pause frames instead of stretching", "true"},
         {OptionBackgroundOverlayColor, 0, "background-overlay-color", required_argument, "R,G,B", "Background color for --background-effect color; ignored for none/blur/image", "0,255,0"},
         {OptionBackgroundOverlayAlpha, 0, "background-overlay-alpha", required_argument, "0.0..1.0", "Background alpha for --background-effect color; ignored for none/blur/image", "0.35"},
         {OptionBlurStrength, 0, "blur-strength", required_argument, "value", "Blur strength for --background-effect blur", "15"},
@@ -855,6 +857,9 @@ bool parseCommandLine(int argc, char** argv, CommandLineResult& result, std::str
             break;
         case OptionPauseImageFontAlign:
             if (!parsePauseFontAlign(optarg, result.config.pauseImageFontAlign, error)) return false;
+            break;
+        case OptionPausePreserveAspectRatio:
+            if (!parseBooleanText(optarg, "--pause-preserve-aspect-ratio", result.config.pausePreserveAspectRatio, error)) return false;
             break;
         case OptionBackgroundOverlayColor:
             if (!parseOverlayColor(optarg, result.config.backgroundOverlayColor, error)) return false;
