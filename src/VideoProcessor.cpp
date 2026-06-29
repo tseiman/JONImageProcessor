@@ -430,6 +430,20 @@ struct PauseCameraSource {
         }
     }
 
+    static bool isNearlyBlackFrame(const cv::Mat& frame)
+    {
+        if (frame.empty()) {
+            return true;
+        }
+        const cv::Scalar meanValue = cv::mean(frame);
+        cv::Mat gray;
+        cv::cvtColor(frame, gray, cv::COLOR_BGR2GRAY);
+        cv::Mat brightMask;
+        cv::threshold(gray, brightMask, 16.0, 255.0, cv::THRESH_BINARY);
+        const double brightRatio = static_cast<double>(cv::countNonZero(brightMask)) / static_cast<double>(gray.rows * gray.cols);
+        return meanValue[0] < 8.0 && meanValue[1] < 8.0 && meanValue[2] < 8.0 && brightRatio < 0.03;
+    }
+
     static bool sampleToBgrMat(GstSample* sample, cv::Mat& frame, std::string& error)
     {
         GstCaps* caps = gst_sample_get_caps(sample);
@@ -792,6 +806,17 @@ struct PauseCameraSource {
                     if (lastReadFailure != localPipeline) {
                         LOG_WARNING("Cannot read secondary camera appsink frame: " << frameError);
                         lastReadFailure = localPipeline;
+                    }
+                    continue;
+                }
+
+                if (isNearlyBlackFrame(frame)) {
+                    static std::chrono::steady_clock::time_point lastSkippedBlackLog;
+                    const auto now = std::chrono::steady_clock::now();
+                    if (lastSkippedBlackLog.time_since_epoch().count() == 0
+                        || now - lastSkippedBlackLog >= std::chrono::seconds(5)) {
+                        LOG_WARNING("Ignoring black secondary camera frame; keeping last valid frame");
+                        lastSkippedBlackLog = now;
                     }
                     continue;
                 }
