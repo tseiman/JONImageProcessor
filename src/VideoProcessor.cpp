@@ -377,15 +377,12 @@ struct PauseCameraSource {
             error = "cannot map appsink buffer";
             return false;
         }
-        const int channels = (sampleFormat == "BGR" || sampleFormat == "RGB") ? 3 : ((sampleFormat == "BGRx" || sampleFormat == "BGRA") ? 4 : 0);
-        if (channels == 0) {
-            gst_buffer_unmap(buffer, &map);
-            error = "appsink sample format is not BGR/RGB/BGRx/BGRA: ";
-            error += format;
-            return false;
-        }
-        std::size_t stride = static_cast<std::size_t>(width) * static_cast<std::size_t>(channels);
-        if (GstVideoMeta* meta = gst_buffer_get_video_meta(buffer)) {
+
+        GstVideoMeta* meta = gst_buffer_get_video_meta(buffer);
+        const int channels = (sampleFormat == "BGR" || sampleFormat == "RGB") ? 3
+            : ((sampleFormat == "BGRx" || sampleFormat == "BGRA" || sampleFormat == "RGBA") ? 4 : 0);
+        std::size_t stride = channels > 0 ? static_cast<std::size_t>(width) * static_cast<std::size_t>(channels) : static_cast<std::size_t>(width);
+        if (meta) {
             if (meta->stride[0] > 0) {
                 stride = static_cast<std::size_t>(meta->stride[0]);
             }
@@ -395,13 +392,122 @@ struct PauseCameraSource {
                 stride = inferredStride;
             }
         }
+
+        gchar* capsTextRaw = gst_caps_to_string(caps);
+        const std::string capsText = capsTextRaw ? capsTextRaw : "";
+        if (capsTextRaw) {
+            g_free(capsTextRaw);
+        }
+        std::ostringstream signatureStream;
+        signatureStream << sampleFormat << " " << width << "x" << height << " stride=" << stride
+                        << " buffer=" << map.size << " caps=" << capsText;
+        static std::mutex lastCapsMutex;
+        static std::string lastCapsSignature;
+        const std::string capsSignature = signatureStream.str();
+        {
+            std::lock_guard<std::mutex> lock(lastCapsMutex);
+            if (capsSignature != lastCapsSignature) {
+                LOG_INFO("Secondary camera appsink caps: " << capsSignature);
+                lastCapsSignature = capsSignature;
+            }
+        }
+
+        auto planeOffset = [meta](int plane) -> std::size_t {
+            return meta && plane < static_cast<int>(meta->n_planes) ? static_cast<std::size_t>(meta->offset[plane]) : 0U;
+        };
+        auto planeStride = [meta](int plane, std::size_t fallback) -> std::size_t {
+            return meta && plane < static_cast<int>(meta->n_planes) && meta->stride[plane] > 0
+                ? static_cast<std::size_t>(meta->stride[plane])
+                : fallback;
+        };
+        auto failBufferTooSmall = [&](std::size_t expected) {
+            std::ostringstream stream;
+            stream << "appsink buffer too small: " << map.size << "/" << expected << " caps=" << capsText;
+            error = stream.str();
+        };
+
+        if (sampleFormat == "NV12") {
+            if (width % 2 != 0 || height % 2 != 0) {
+                std::ostringstream stream;
+                stream << "NV12 appsink sample has odd size: " << width << "x" << height << " caps=" << capsText;
+                error = stream.str();
+                gst_buffer_unmap(buffer, &map);
+                return false;
+            }
+            const std::size_t yStride = planeStride(0, static_cast<std::size_t>(width));
+            const std::size_t uvStride = planeStride(1, static_cast<std::size_t>(width));
+            const std::size_t yOffset = planeOffset(0);
+            const std::size_t uvOffset = meta ? planeOffset(1) : yStride * static_cast<std::size_t>(height);
+            const std::size_t expected = uvOffset + uvStride * static_cast<std::size_t>(height / 2);
+            if (map.size < expected) {
+                failBufferTooSmall(expected);
+                gst_buffer_unmap(buffer, &map);
+                return false;
+            }
+            cv::Mat yPlane(height, width, CV_8UC1, map.data + yOffset, yStride);
+            cv::Mat uvPlane(height / 2, width / 2, CV_8UC2, map.data + uvOffset, uvStride);
+            cv::cvtColorTwoPlane(yPlane, uvPlane, frame, cv::COLOR_YUV2BGR_NV12);
+            gst_buffer_unmap(buffer, &map);
+            return true;
+        }
+
+        if (sampleFormat == "I420") {
+            if (width % 2 != 0 || height % 2 != 0) {
+                std::ostringstream stream;
+                stream << "I420 appsink sample has odd size: " << width << "x" << height << " caps=" << capsText;
+                error = stream.str();
+                gst_buffer_unmap(buffer, &map);
+                return false;
+            }
+            const std::size_t yStride = planeStride(0, static_cast<std::size_t>(width));
+            const std::size_t uStride = planeStride(1, static_cast<std::size_t>(width / 2));
+            const std::size_t vStride = planeStride(2, static_cast<std::size_t>(width / 2));
+            const std::size_t chromaWidth = static_cast<std::size_t>(width / 2);
+            const std::size_t chromaHeight = static_cast<std::size_t>(height / 2);
+            const std::size_t yOffset = planeOffset(0);
+            const std::size_t uOffset = meta ? planeOffset(1) : yStride * static_cast<std::size_t>(height);
+            const std::size_t vOffset = meta ? planeOffset(2) : uOffset + uStride * chromaHeight;
+            const std::size_t expected = vOffset + vStride * chromaHeight;
+            if (map.size < expected) {
+                failBufferTooSmall(expected);
+                gst_buffer_unmap(buffer, &map);
+                return false;
+            }
+            std::vector<unsigned char> tightData(static_cast<std::size_t>(width) * static_cast<std::size_t>(height) + 2U * chromaWidth * chromaHeight);
+            unsigned char* tight = tightData.data();
+            for (int row = 0; row < height; ++row) {
+                std::memcpy(tight + static_cast<std::size_t>(row) * static_cast<std::size_t>(width),
+                    map.data + yOffset + static_cast<std::size_t>(row) * yStride,
+                    static_cast<std::size_t>(width));
+            }
+            unsigned char* uDest = tight + static_cast<std::size_t>(width) * static_cast<std::size_t>(height);
+            unsigned char* vDest = uDest + chromaWidth * chromaHeight;
+            for (std::size_t row = 0; row < chromaHeight; ++row) {
+                std::memcpy(uDest + row * chromaWidth, map.data + uOffset + row * uStride, chromaWidth);
+            }
+            for (std::size_t row = 0; row < chromaHeight; ++row) {
+                std::memcpy(vDest + row * chromaWidth, map.data + vOffset + row * vStride, chromaWidth);
+            }
+            cv::Mat yuv(height + height / 2, width, CV_8UC1, tightData.data());
+            cv::cvtColor(yuv, frame, cv::COLOR_YUV2BGR_I420);
+            gst_buffer_unmap(buffer, &map);
+            return true;
+        }
+
+        if (channels == 0) {
+            gst_buffer_unmap(buffer, &map);
+            error = "appsink sample format is not BGR/RGB/BGRx/BGRA/RGBA/NV12/I420: ";
+            error += sampleFormat;
+            error += " caps=";
+            error += capsText;
+            return false;
+        }
+
         const std::size_t expected = stride * static_cast<std::size_t>(height - 1)
             + static_cast<std::size_t>(width) * static_cast<std::size_t>(channels);
         if (map.size < expected) {
+            failBufferTooSmall(expected);
             gst_buffer_unmap(buffer, &map);
-            std::ostringstream stream;
-            stream << "appsink buffer too small: " << map.size << "/" << expected;
-            error = stream.str();
             return false;
         }
 
@@ -412,6 +518,9 @@ struct PauseCameraSource {
             cv::Mat wrapped(height, width, CV_8UC3, map.data, stride);
             frame.create(height, width, CV_8UC3);
             cv::cvtColor(wrapped, frame, cv::COLOR_RGB2BGR);
+        } else if (sampleFormat == "RGBA") {
+            cv::Mat wrapped(height, width, CV_8UC4, map.data, stride);
+            cv::cvtColor(wrapped, frame, cv::COLOR_RGBA2BGR);
         } else {
             cv::Mat wrapped(height, width, CV_8UC4, map.data, stride);
             cv::cvtColor(wrapped, frame, cv::COLOR_BGRA2BGR);

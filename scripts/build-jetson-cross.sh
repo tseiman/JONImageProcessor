@@ -51,6 +51,11 @@ echo "[INFO] Container: $(cat /etc/os-release | grep '^PRETTY_NAME=' | cut -d= -
 
 if [[ "${INSTALL_WPE_DEV}" == "ON" ]]; then
     export DEBIAN_FRONTEND=noninteractive
+    rm -f /etc/apt/apt.conf.d/docker-clean
+    printf '%s\n' \
+        'Binary::apt::APT::Keep-Downloaded-Packages "true";' \
+        'APT::Keep-Downloaded-Packages "true";' \
+        > /etc/apt/apt.conf.d/01keep-debs
     apt-get update
     apt-get install -y --no-install-recommends libfreetype-dev
     if apt-cache show libwpewebkit-1.1-dev >/dev/null 2>&1; then
@@ -155,6 +160,7 @@ cmake --build "${BUILD_DIR_NAME}" -- -j"$(nproc)"
 
 if [[ -n "${HOST_UID:-}" && -n "${HOST_GID:-}" ]]; then
     chown -R "${HOST_UID}:${HOST_GID}" "${BUILD_DIR_NAME}" 2>/dev/null || true
+    chown -R "${HOST_UID}:${HOST_GID}" /var/cache/apt /var/lib/apt/lists 2>/dev/null || true
 fi
 
 if command -v file >/dev/null 2>&1; then
