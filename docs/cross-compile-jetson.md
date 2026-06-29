@@ -60,6 +60,7 @@ ENABLE_TENSORRT_MASK=ON ENABLE_DRM_DISPLAY=ON JETSON_SYSROOT="$HOME/sysroots/ori
 
 The script installs WPE development packages inside the container by default. CMake still uses only the AArch64 files from `JETSON_SYSROOT` for linking, so HTML support is enabled only when the synced Jetson sysroot contains WPE WebKit and WPEBackend-fdo target files.
 The script also installs FreeType headers in the container. TTF pause text is enabled only when the synced Jetson sysroot contains the AArch64 FreeType library.
+Container apt downloads are cached on the build host under `~/.cache/jonimageprocessor-cross` by default. Use `CROSS_BUILD_CACHE_DIR=/path/to/cache` to move the cache, or `CROSS_BUILD_CACHE_DIR= ./scripts/build-jetson-cross.sh` to disable it.
 
 The result is:
 

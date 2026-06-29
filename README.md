@@ -143,6 +143,8 @@ The cross-build script installs WPE development packages inside the container wh
 build-jetson-cross/JONImageProcessor
 ```
 
+Container apt downloads are cached on the build host under `~/.cache/jonimageprocessor-cross` by default. Use `CROSS_BUILD_CACHE_DIR=/path/to/cache` to move the cache, or `CROSS_BUILD_CACHE_DIR= ./scripts/build-jetson-cross.sh` to disable it.
+
 Verify the target architecture:
 
 ```bash

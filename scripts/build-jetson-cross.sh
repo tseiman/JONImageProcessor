@@ -10,6 +10,7 @@ BUILD_DIR_NAME="${BUILD_DIR_NAME:-build-jetson-cross}"
 ENABLE_TENSORRT_MASK="${ENABLE_TENSORRT_MASK:-ON}"
 ENABLE_DRM_DISPLAY="${ENABLE_DRM_DISPLAY:-ON}"
 INSTALL_WPE_DEV="${INSTALL_WPE_DEV:-ON}"
+CROSS_BUILD_CACHE_DIR="${CROSS_BUILD_CACHE_DIR:-${HOME}/.cache/jonimageprocessor-cross}"
 HOST_SYSROOT="${JETSON_SYSROOT:-}"
 CONTAINER_SYSROOT=""
 HOST_UID="$(id -u)"
@@ -23,6 +24,14 @@ DOCKER_ARGS=(
     -v "${REPO_ROOT}:/workspace/JONImageProcessor"
     -w /workspace/JONImageProcessor
 )
+
+if [[ -n "${CROSS_BUILD_CACHE_DIR}" ]]; then
+    mkdir -p "${CROSS_BUILD_CACHE_DIR}/apt-cache/archives/partial" "${CROSS_BUILD_CACHE_DIR}/apt-lists/partial"
+    DOCKER_ARGS+=(
+        -v "${CROSS_BUILD_CACHE_DIR}/apt-cache:/var/cache/apt"
+        -v "${CROSS_BUILD_CACHE_DIR}/apt-lists:/var/lib/apt/lists"
+    )
+fi
 
 if [[ -n "${HOST_SYSROOT}" ]]; then
     if [[ ! -d "${HOST_SYSROOT}" ]]; then
@@ -159,6 +168,11 @@ echo "[INFO] Build directory: ${BUILD_DIR_NAME}"
 echo "[INFO] TensorRT mask backend: ${ENABLE_TENSORRT_MASK}"
 echo "[INFO] DRM/KMS display backend: ${ENABLE_DRM_DISPLAY}"
 echo "[INFO] Install WPE dev packages in container: ${INSTALL_WPE_DEV}"
+if [[ -n "${CROSS_BUILD_CACHE_DIR}" ]]; then
+    echo "[INFO] Cross-build cache: ${CROSS_BUILD_CACHE_DIR}"
+else
+    echo "[INFO] Cross-build cache: disabled"
+fi
 echo "[INFO] Build host name: ${BUILD_HOST_NAME}"
 if [[ -n "${HOST_SYSROOT}" ]]; then
     echo "[INFO] Host sysroot: ${HOST_SYSROOT}"
