@@ -388,8 +388,11 @@ struct PauseCameraSource {
         double maxValue = 0.0;
         cv::cvtColor(frame, gray, cv::COLOR_BGR2GRAY);
         cv::minMaxLoc(gray, &minValue, &maxValue);
+        cv::Mat brightMask;
+        cv::threshold(gray, brightMask, 16.0, 255.0, cv::THRESH_BINARY);
+        const double brightRatio = static_cast<double>(cv::countNonZero(brightMask)) / static_cast<double>(gray.rows * gray.cols);
 
-        const bool isBlack = meanValue[0] < 3.0 && meanValue[1] < 3.0 && meanValue[2] < 3.0;
+        const bool isBlack = meanValue[0] < 8.0 && meanValue[1] < 8.0 && meanValue[2] < 8.0 && brightRatio < 0.03;
         bool dumpBlack = false;
         bool dumpOk = false;
         bool warnBlack = false;
@@ -414,7 +417,8 @@ struct PauseCameraSource {
                  << " stride=" << stride
                  << " buffer=" << bufferSize
                  << " mean_bgr=" << meanValue[0] << "," << meanValue[1] << "," << meanValue[2]
-                 << " gray_minmax=" << minValue << "," << maxValue);
+                 << " gray_minmax=" << minValue << "," << maxValue
+                 << " bright_ratio=" << brightRatio);
         if (warnBlack) {
             LOG_WARNING("Secondary camera frame content is black although caps are valid");
         }
