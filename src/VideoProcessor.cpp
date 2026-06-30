@@ -670,6 +670,10 @@ struct PauseCameraSource {
             std::string lastReadFailure;
             std::uint64_t frames = 0;
             auto statsStart = std::chrono::steady_clock::now();
+            bool inBlackStreak = false;
+            std::chrono::steady_clock::time_point firstBlackFrameAt;
+            std::chrono::steady_clock::time_point lastSkippedBlackLog;
+            constexpr auto blackStreakRestartThreshold = std::chrono::seconds(3);
 #else
             std::string lastOpenFailure;
 #endif
@@ -759,6 +763,9 @@ struct PauseCameraSource {
                     localPipeline = wantedPipeline;
                     lastOpenFailure.clear();
                     lastReadFailure.clear();
+                    inBlackStreak = false;
+                    firstBlackFrameAt = {};
+                    lastSkippedBlackLog = {};
                     frames = 0;
                     statsStart = std::chrono::steady_clock::now();
                     {
@@ -811,16 +818,46 @@ struct PauseCameraSource {
                 }
 
                 if (isNearlyBlackFrame(frame)) {
-                    static std::chrono::steady_clock::time_point lastSkippedBlackLog;
                     const auto now = std::chrono::steady_clock::now();
+                    if (!inBlackStreak) {
+                        inBlackStreak = true;
+                        firstBlackFrameAt = now;
+                        LOG_WARNING("Secondary camera black frame detected; keeping last valid frame");
+                    }
                     if (lastSkippedBlackLog.time_since_epoch().count() == 0
                         || now - lastSkippedBlackLog >= std::chrono::seconds(5)) {
                         LOG_WARNING("Ignoring black secondary camera frame; keeping last valid frame");
                         lastSkippedBlackLog = now;
                     }
+                    if (now - firstBlackFrameAt >= blackStreakRestartThreshold) {
+                        LOG_WARNING("Secondary camera black stream sustained >"
+                            << blackStreakRestartThreshold.count()
+                            << "s; restarting GStreamer pipeline");
+                        gst_element_set_state(pipeline.get(), GST_STATE_NULL);
+                        appSink.reset();
+                        bus.reset();
+                        pipeline.reset();
+                        localPipeline.clear();
+                        inBlackStreak = false;
+                        firstBlackFrameAt = {};
+                        lastSkippedBlackLog = {};
+                        frames = 0;
+                        statsStart = std::chrono::steady_clock::now();
+                        {
+                            std::lock_guard<std::mutex> lock(workerState->mutex);
+                            workerState->activePipeline.clear();
+                            workerState->lastFrame.release();
+                            workerState->hasFrame = false;
+                        }
+                        std::this_thread::sleep_for(std::chrono::seconds(2));
+                    }
                     continue;
                 }
 
+                inBlackStreak = false;
+                firstBlackFrameAt = {};
+                lastSkippedBlackLog = {};
+                lastReadFailure.clear();
                 frames++;
                 if (frames <= 5 || frames % 900 == 0) {
                     LOG_VERBOSE("Pause camera appsink frame received: " << frames);
@@ -1132,11 +1169,9 @@ cv::Mat makeStatusFrame(
                     }
                 }
                 frame = pauseFrame.clone();
-            } else if (config->pausePreserveAspectRatio) {
-                // AirPlay/UxPlay may deliver device-shaped frames. Letterbox only here so the appsink reader stays a pure pixel-format converter.
-                frame = letterboxPauseCameraFrame(pauseFrame, size);
             } else {
-                cv::resize(pauseFrame, frame, size, 0.0, 0.0, cv::INTER_LINEAR);
+                // AirPlay/UxPlay may deliver device-shaped frames. Always letterbox here so the appsink reader stays a pure pixel-format converter.
+                frame = letterboxPauseCameraFrame(pauseFrame, size);
             }
             if (config->pauseImageShowStatusText) {
                 const int marginX = size.width / 8;
