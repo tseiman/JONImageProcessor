@@ -675,6 +675,11 @@ struct PauseCameraSource {
             std::string cachedKeyframeSig;
             bool waitingForMatchingKeyframe = false;
             std::string targetCapsSig;
+            GstBuffer* pendingFallbackBuffer = nullptr;
+            GstCaps* pendingFallbackCaps = nullptr;
+            std::chrono::steady_clock::time_point waitingForKeyframeSince;
+            bool waitingForFirstFrame = false;
+            std::chrono::steady_clock::time_point fallbackStartedAt;
             int localRtpPort = 0;
             int lastOpenFailurePort = 0;
             std::string lastReadFailure;
@@ -684,6 +689,19 @@ struct PauseCameraSource {
             std::chrono::steady_clock::time_point firstBlackFrameAt;
             std::chrono::steady_clock::time_point lastSkippedBlackLog;
             constexpr auto blackStreakRestartThreshold = std::chrono::seconds(3);
+            constexpr auto idrWaitTimeout = std::chrono::milliseconds(750);
+            constexpr auto firstFrameWaitTimeout = std::chrono::seconds(2);
+
+            auto clearPendingFallback = [&]() {
+                if (pendingFallbackBuffer) {
+                    gst_buffer_unref(pendingFallbackBuffer);
+                    pendingFallbackBuffer = nullptr;
+                }
+                if (pendingFallbackCaps) {
+                    gst_caps_unref(pendingFallbackCaps);
+                    pendingFallbackCaps = nullptr;
+                }
+            };
 
             auto clearDecoderPipeline = [&]() {
                 if (decoderSrc) {
@@ -729,7 +747,11 @@ struct PauseCameraSource {
                 }
                 localRtpPort = 0;
                 waitingForMatchingKeyframe = false;
+                waitingForFirstFrame = false;
+                waitingForKeyframeSince = {};
+                fallbackStartedAt = {};
                 targetCapsSig.clear();
+                clearPendingFallback();
                 cachedKeyframeSig.clear();
                 if (cachedKeyframe) {
                     gst_buffer_unref(cachedKeyframe);
@@ -751,6 +773,7 @@ struct PauseCameraSource {
 
             auto buildDecoderPipeline = [&](const std::string& targetSig) -> bool {
                 clearDecoderPipeline();
+                targetCapsSig = targetSig;
                 GError* parseError = nullptr;
                 decoderPipeline = gst_parse_launch(
                     "appsrc name=decoder_src format=time is-live=true do-timestamp=true ! "
@@ -792,7 +815,6 @@ struct PauseCameraSource {
                     const GstFlowReturn ret = gst_app_src_push_buffer(decoderSrc, gst_buffer_copy(cachedKeyframe));
                     if (ret == GST_FLOW_OK) {
                         waitingForMatchingKeyframe = false;
-                        targetCapsSig.clear();
                         LOG_INFO("AirPlay decoder pipeline started, injected matching cached keyframe (" << cachedKeyframeSig << ")");
                     } else {
                         waitingForMatchingKeyframe = true;
@@ -958,8 +980,14 @@ struct PauseCameraSource {
                     }
                 }
                 if (needsRestart && !restartSig.empty()) {
-                    LOG_INFO("AirPlay caps changed, restarting decoder pipeline for " << restartSig);
-                    buildDecoderPipeline(restartSig);
+                    LOG_INFO("AirPlay caps changed, stopping decoder and waiting for matching IDR (" << restartSig << ")");
+                    clearDecoderPipeline();
+                    clearPendingFallback();
+                    waitingForMatchingKeyframe = true;
+                    waitingForFirstFrame = false;
+                    targetCapsSig = restartSig;
+                    waitingForKeyframeSince = std::chrono::steady_clock::now();
+                    fallbackStartedAt = {};
                     {
                         std::lock_guard<std::mutex> lock(workerState->mutex);
                         workerState->lastFrame.release();
@@ -979,8 +1007,20 @@ struct PauseCameraSource {
                                 std::lock_guard<std::mutex> lock(workerState->mutex);
                                 sig = workerState->lastCapsSignature;
                             }
-                            LOG_WARNING("AirPlay decoder pipeline error/EOS, rebuilding for " << sig);
-                            buildDecoderPipeline(sig);
+                            if (waitingForFirstFrame) {
+                                LOG_WARNING("AirPlay decoder pipeline error/EOS during first-frame wait; returning to WAIT_FOR_MATCHING_KEYFRAME");
+                                clearDecoderPipeline();
+                                clearPendingFallback();
+                                waitingForFirstFrame = false;
+                                waitingForMatchingKeyframe = true;
+                                if (targetCapsSig.empty()) {
+                                    targetCapsSig = sig;
+                                }
+                                waitingForKeyframeSince = std::chrono::steady_clock::now();
+                            } else {
+                                LOG_WARNING("AirPlay decoder pipeline error/EOS, rebuilding for " << sig);
+                                buildDecoderPipeline(sig);
+                            }
                             {
                                 std::lock_guard<std::mutex> lock(workerState->mutex);
                                 workerState->lastFrame.release();
@@ -1002,7 +1042,7 @@ struct PauseCameraSource {
                     continue;
                 }
                 const bool isKeyframe = !GST_BUFFER_FLAG_IS_SET(buffer, GST_BUFFER_FLAG_DELTA_UNIT);
-                const std::string bufferSig = isKeyframe ? capsSignature(caps) : "";
+                const std::string bufferSig = capsSignature(caps);
                 if (isKeyframe) {
                     if (cachedKeyframe) {
                         gst_buffer_unref(cachedKeyframe);
@@ -1017,27 +1057,88 @@ struct PauseCameraSource {
 
                     if (!decoderPipeline && !cachedKeyframeSig.empty()) {
                         LOG_INFO("AirPlay first matching IDR received, starting decoder pipeline (" << cachedKeyframeSig << ")");
-                        buildDecoderPipeline(cachedKeyframeSig);
+                        if (buildDecoderPipeline(cachedKeyframeSig)) {
+                            waitingForFirstFrame = true;
+                            fallbackStartedAt = std::chrono::steady_clock::now();
+                        }
                         continue;
                     }
-                    if (waitingForMatchingKeyframe && bufferSig == targetCapsSig && decoderSrc) {
-                        gst_app_src_set_caps(decoderSrc, cachedKeyframeCaps);
-                        const GstFlowReturn ret = gst_app_src_push_buffer(decoderSrc, gst_buffer_copy(cachedKeyframe));
-                        waitingForMatchingKeyframe = false;
-                        targetCapsSig.clear();
-                        LOG_INFO("AirPlay decoder pipeline: received matching IDR, resuming (" << bufferSig << ")");
-                        if (ret != GST_FLOW_OK && ret != GST_FLOW_FLUSHING) {
-                            LOG_WARNING("AirPlay appsrc matching IDR push failed: " << ret);
+                    if (waitingForMatchingKeyframe && bufferSig == targetCapsSig) {
+                        LOG_INFO("AirPlay: matching IDR received, starting decoder pipeline (" << bufferSig << ")");
+                        if (buildDecoderPipeline(targetCapsSig)) {
+                            waitingForMatchingKeyframe = false;
+                            waitingForFirstFrame = true;
+                            fallbackStartedAt = std::chrono::steady_clock::now();
+                            clearPendingFallback();
                         }
                         continue;
                     }
                 }
 
                 if (waitingForMatchingKeyframe) {
-                    continue;
+                    const auto now = std::chrono::steady_clock::now();
+                    if (bufferSig == targetCapsSig && !pendingFallbackBuffer) {
+                        pendingFallbackBuffer = gst_buffer_copy(buffer);
+                        pendingFallbackCaps = gst_caps_copy(caps);
+                        LOG_VERBOSE("AirPlay: first matching buffer cached as fallback ("
+                            << bufferSig << ", delta=" << (isKeyframe ? "no" : "yes") << ")");
+                    }
+                    if (waitingForKeyframeSince.time_since_epoch().count() == 0) {
+                        waitingForKeyframeSince = now;
+                    }
+                    if (now - waitingForKeyframeSince >= idrWaitTimeout && pendingFallbackBuffer && pendingFallbackCaps) {
+                        LOG_INFO("AirPlay: no matching IDR after "
+                            << std::chrono::duration_cast<std::chrono::milliseconds>(idrWaitTimeout).count()
+                            << "ms; trying decoder start from first matching buffer (" << targetCapsSig << ")");
+                        if (buildDecoderPipeline(targetCapsSig)) {
+                            waitingForMatchingKeyframe = false;
+                            waitingForFirstFrame = true;
+                            fallbackStartedAt = now;
+                            if (decoderSrc) {
+                                gst_app_src_set_caps(decoderSrc, pendingFallbackCaps);
+                                const GstFlowReturn ret = gst_app_src_push_buffer(decoderSrc, gst_buffer_copy(pendingFallbackBuffer));
+                                LOG_INFO("AirPlay decoder pipeline started from non-IDR fallback (" << targetCapsSig << ")");
+                                if (ret != GST_FLOW_OK && ret != GST_FLOW_FLUSHING) {
+                                    LOG_WARNING("AirPlay appsrc fallback push failed: " << ret);
+                                }
+                            }
+                            clearPendingFallback();
+                        }
+                        continue;
+                    } else {
+                        continue;
+                    }
+                }
+
+                if (waitingForFirstFrame) {
+                    const auto now = std::chrono::steady_clock::now();
+                    bool hasFrame = false;
+                    {
+                        std::lock_guard<std::mutex> lock(workerState->mutex);
+                        hasFrame = workerState->hasFrame;
+                    }
+                    if (hasFrame) {
+                        waitingForFirstFrame = false;
+                        LOG_INFO("AirPlay decoder pipeline: first frame received, RUNNING (" << targetCapsSig << ")");
+                        targetCapsSig.clear();
+                    } else if (fallbackStartedAt.time_since_epoch().count() != 0
+                        && now - fallbackStartedAt >= firstFrameWaitTimeout) {
+                        LOG_WARNING("AirPlay decoder pipeline: no frame after "
+                            << std::chrono::duration_cast<std::chrono::seconds>(firstFrameWaitTimeout).count()
+                            << "s; returning to WAIT_FOR_MATCHING_KEYFRAME");
+                        clearDecoderPipeline();
+                        clearPendingFallback();
+                        waitingForFirstFrame = false;
+                        waitingForMatchingKeyframe = true;
+                        waitingForKeyframeSince = now;
+                        continue;
+                    }
                 }
 
                 if (decoderSrc && decoderPipeline) {
+                    if (!targetCapsSig.empty() && bufferSig != targetCapsSig) {
+                        continue;
+                    }
                     gst_app_src_set_caps(decoderSrc, caps);
                     const GstFlowReturn ret = gst_app_src_push_buffer(decoderSrc, gst_buffer_copy(buffer));
                     if (ret != GST_FLOW_OK && ret != GST_FLOW_FLUSHING) {
