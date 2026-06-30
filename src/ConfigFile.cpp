@@ -423,8 +423,17 @@ bool applyConfig(const Json& root, ProcessorConfig& config, ConfigLoadResult& re
 
     if (const Json* secondaryCamera = objectChild(root, "secondaryCamera")) {
         if (secondaryCamera->type != Json::Type::Object) { error = "secondaryCamera must be an object"; return false; }
-        warnUnknownFields(*secondaryCamera, "secondaryCamera.", {"pipeline"});
+        warnUnknownFields(*secondaryCamera, "secondaryCamera.", {"pipeline", "rtpPort"});
         if (!readString(*secondaryCamera, "pipeline", config.secondaryCameraPipeline, error)) return false;
+        double rtpPort = static_cast<double>(config.secondaryCameraRtpPort);
+        if (!readNumber(*secondaryCamera, "rtpPort", rtpPort, error)) return false;
+        config.secondaryCameraRtpPort = static_cast<int>(rtpPort);
+        if (rtpPort != static_cast<double>(config.secondaryCameraRtpPort)
+            || config.secondaryCameraRtpPort < 1
+            || config.secondaryCameraRtpPort > 65535) {
+            error = "Invalid secondaryCamera.rtpPort";
+            return false;
+        }
     }
 
     if (const Json* processing = objectChild(root, "processing")) {

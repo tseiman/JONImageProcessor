@@ -23,6 +23,7 @@
 #if defined(JON_ENABLE_GSTREAMER_APP)
 #include <gst/gst.h>
 #include <gst/app/gstappsink.h>
+#include <gst/app/gstappsrc.h>
 #include <gst/video/video.h>
 #endif
 
@@ -294,12 +295,14 @@ struct PauseCameraSource {
     struct State {
         std::mutex mutex;
         std::thread worker;
-        std::string desiredPipeline;
-        std::string activePipeline;
         cv::Mat lastFrame;
         bool hasFrame = false;
         bool started = false;
         bool stop = false;
+        bool capsChanged = false;
+        int desiredRtpPort = 0;
+        int activeRtpPort = 0;
+        std::string lastCapsSignature;
     };
 
     std::shared_ptr<State> state = std::make_shared<State>();
@@ -315,9 +318,7 @@ struct PauseCameraSource {
         void operator()(GstMessage* message) const { if (message) gst_message_unref(message); }
     };
 
-    using GstElementPtr = std::unique_ptr<GstElement, GstObjectDeleter>;
     using GstSamplePtr = std::unique_ptr<GstSample, GstObjectDeleter>;
-    using GstBusPtr = std::unique_ptr<GstBus, GstObjectDeleter>;
     using GstMessagePtr = std::unique_ptr<GstMessage, GstObjectDeleter>;
 
     static void ensureGStreamerInitialized()
@@ -326,32 +327,6 @@ struct PauseCameraSource {
         std::call_once(once, []() {
             gst_init(nullptr, nullptr);
         });
-    }
-
-    static GstElement* findAppSink(GstElement* pipeline)
-    {
-        GstElement* namedSink = gst_bin_get_by_name(GST_BIN(pipeline), "airplay_sink");
-        if (namedSink && GST_IS_APP_SINK(namedSink)) {
-            return namedSink;
-        }
-        if (namedSink) {
-            gst_object_unref(namedSink);
-        }
-
-        GstIterator* iterator = gst_bin_iterate_sinks(GST_BIN(pipeline));
-        GValue value = G_VALUE_INIT;
-        while (gst_iterator_next(iterator, &value) == GST_ITERATOR_OK) {
-            auto* element = GST_ELEMENT(g_value_get_object(&value));
-            if (element && GST_IS_APP_SINK(element)) {
-                gst_object_ref(element);
-                g_value_unset(&value);
-                gst_iterator_free(iterator);
-                return element;
-            }
-            g_value_unset(&value);
-        }
-        gst_iterator_free(iterator);
-        return nullptr;
     }
 
     static void logFrameContentDiagnostics(const cv::Mat& frame, const std::string& sampleFormat, std::size_t stride, std::size_t bufferSize)
@@ -442,6 +417,30 @@ struct PauseCameraSource {
         cv::threshold(gray, brightMask, 16.0, 255.0, cv::THRESH_BINARY);
         const double brightRatio = static_cast<double>(cv::countNonZero(brightMask)) / static_cast<double>(gray.rows * gray.cols);
         return meanValue[0] < 8.0 && meanValue[1] < 8.0 && meanValue[2] < 8.0 && brightRatio < 0.03;
+    }
+
+    static std::string capsSignature(GstCaps* caps)
+    {
+        if (!caps || gst_caps_get_size(caps) == 0) {
+            return {};
+        }
+        GstStructure* structure = gst_caps_get_structure(caps, 0);
+        int width = 0;
+        int height = 0;
+        gst_structure_get_int(structure, "width", &width);
+        gst_structure_get_int(structure, "height", &height);
+        const char* profile = gst_structure_get_string(structure, "profile");
+        if (width > 0 && height > 0) {
+            std::ostringstream stream;
+            stream << width << "x" << height << "@" << (profile ? profile : "");
+            return stream.str();
+        }
+        gchar* capsTextRaw = gst_caps_to_string(caps);
+        const std::string fallback = capsTextRaw ? capsTextRaw : "";
+        if (capsTextRaw) {
+            g_free(capsTextRaw);
+        }
+        return fallback;
     }
 
     static bool sampleToBgrMat(GstSample* sample, cv::Mat& frame, std::string& error)
@@ -644,9 +643,11 @@ struct PauseCameraSource {
     void release()
     {
         std::lock_guard<std::mutex> lock(state->mutex);
-        if (!state->desiredPipeline.empty()) {
-            state->desiredPipeline.clear();
-            state->activePipeline.clear();
+        if (state->desiredRtpPort != 0) {
+            state->desiredRtpPort = 0;
+            state->activeRtpPort = 0;
+            state->lastCapsSignature.clear();
+            state->capsChanged = false;
             state->lastFrame.release();
             state->hasFrame = false;
         }
@@ -662,11 +663,20 @@ struct PauseCameraSource {
         workerState->worker = std::thread([workerState]() {
 #if defined(JON_ENABLE_GSTREAMER_APP)
             ensureGStreamerInitialized();
-            GstElementPtr pipeline;
-            GstElementPtr appSink;
-            GstBusPtr bus;
-            std::string localPipeline;
-            std::string lastOpenFailure;
+            GstElement* rtpPipeline = nullptr;
+            GstAppSink* rtpSink = nullptr;
+            GstBus* rtpBus = nullptr;
+            GstElement* decoderPipeline = nullptr;
+            GstAppSrc* decoderSrc = nullptr;
+            GstAppSink* airplaySink = nullptr;
+            GstBus* decoderBus = nullptr;
+            GstBuffer* cachedKeyframe = nullptr;
+            GstCaps* cachedKeyframeCaps = nullptr;
+            std::string cachedKeyframeSig;
+            bool waitingForMatchingKeyframe = false;
+            std::string targetCapsSig;
+            int localRtpPort = 0;
+            int lastOpenFailurePort = 0;
             std::string lastReadFailure;
             std::uint64_t frames = 0;
             auto statsStart = std::chrono::steady_clock::now();
@@ -674,51 +684,168 @@ struct PauseCameraSource {
             std::chrono::steady_clock::time_point firstBlackFrameAt;
             std::chrono::steady_clock::time_point lastSkippedBlackLog;
             constexpr auto blackStreakRestartThreshold = std::chrono::seconds(3);
+
+            auto clearDecoderPipeline = [&]() {
+                if (decoderSrc) {
+                    gst_app_src_end_of_stream(decoderSrc);
+                }
+                if (decoderPipeline) {
+                    gst_element_set_state(decoderPipeline, GST_STATE_NULL);
+                }
+                if (decoderBus) {
+                    gst_object_unref(decoderBus);
+                    decoderBus = nullptr;
+                }
+                if (decoderSrc) {
+                    gst_object_unref(decoderSrc);
+                    decoderSrc = nullptr;
+                }
+                if (airplaySink) {
+                    gst_object_unref(airplaySink);
+                    airplaySink = nullptr;
+                }
+                if (decoderPipeline) {
+                    gst_object_unref(decoderPipeline);
+                    decoderPipeline = nullptr;
+                }
+            };
+
+            auto clearRtpPipeline = [&]() {
+                clearDecoderPipeline();
+                if (rtpPipeline) {
+                    gst_element_set_state(rtpPipeline, GST_STATE_NULL);
+                }
+                if (rtpBus) {
+                    gst_object_unref(rtpBus);
+                    rtpBus = nullptr;
+                }
+                if (rtpSink) {
+                    gst_object_unref(rtpSink);
+                    rtpSink = nullptr;
+                }
+                if (rtpPipeline) {
+                    gst_object_unref(rtpPipeline);
+                    rtpPipeline = nullptr;
+                }
+                localRtpPort = 0;
+                waitingForMatchingKeyframe = false;
+                targetCapsSig.clear();
+                cachedKeyframeSig.clear();
+                if (cachedKeyframe) {
+                    gst_buffer_unref(cachedKeyframe);
+                    cachedKeyframe = nullptr;
+                }
+                if (cachedKeyframeCaps) {
+                    gst_caps_unref(cachedKeyframeCaps);
+                    cachedKeyframeCaps = nullptr;
+                }
+                {
+                    std::lock_guard<std::mutex> lock(workerState->mutex);
+                    workerState->activeRtpPort = 0;
+                    workerState->lastCapsSignature.clear();
+                    workerState->capsChanged = false;
+                    workerState->lastFrame.release();
+                    workerState->hasFrame = false;
+                }
+            };
+
+            auto buildDecoderPipeline = [&](const std::string& targetSig) -> bool {
+                clearDecoderPipeline();
+                GError* parseError = nullptr;
+                decoderPipeline = gst_parse_launch(
+                    "appsrc name=decoder_src format=time is-live=true do-timestamp=true ! "
+                    "h264parse ! nvv4l2decoder ! nvvidconv ! "
+                    "video/x-raw,format=I420 ! videoconvert ! video/x-raw,format=BGR ! "
+                    "appsink name=airplay_sink drop=true max-buffers=1 sync=false",
+                    &parseError);
+                if (!decoderPipeline) {
+                    LOG_ERROR("Cannot build AirPlay decoder pipeline: "
+                        << (parseError ? parseError->message : "unknown"));
+                    if (parseError) g_error_free(parseError);
+                    return false;
+                }
+                if (parseError) {
+                    LOG_WARNING("AirPlay decoder pipeline parse warning: " << parseError->message);
+                    g_error_free(parseError);
+                }
+
+                decoderSrc = GST_APP_SRC(gst_bin_get_by_name(GST_BIN(decoderPipeline), "decoder_src"));
+                airplaySink = GST_APP_SINK(gst_bin_get_by_name(GST_BIN(decoderPipeline), "airplay_sink"));
+                decoderBus = gst_element_get_bus(decoderPipeline);
+                if (!decoderSrc || !airplaySink) {
+                    LOG_ERROR("Cannot find appsrc/appsink in AirPlay decoder pipeline");
+                    clearDecoderPipeline();
+                    return false;
+                }
+                gst_app_src_set_max_bytes(decoderSrc, 4 * 1024 * 1024);
+                gst_app_sink_set_drop(airplaySink, TRUE);
+                gst_app_sink_set_max_buffers(airplaySink, 1);
+
+                if (gst_element_set_state(decoderPipeline, GST_STATE_PLAYING) == GST_STATE_CHANGE_FAILURE) {
+                    LOG_ERROR("Cannot start AirPlay decoder pipeline");
+                    clearDecoderPipeline();
+                    return false;
+                }
+
+                if (cachedKeyframe && cachedKeyframeCaps && cachedKeyframeSig == targetSig) {
+                    gst_app_src_set_caps(decoderSrc, cachedKeyframeCaps);
+                    const GstFlowReturn ret = gst_app_src_push_buffer(decoderSrc, gst_buffer_copy(cachedKeyframe));
+                    if (ret == GST_FLOW_OK) {
+                        waitingForMatchingKeyframe = false;
+                        targetCapsSig.clear();
+                        LOG_INFO("AirPlay decoder pipeline started, injected matching cached keyframe (" << cachedKeyframeSig << ")");
+                    } else {
+                        waitingForMatchingKeyframe = true;
+                        targetCapsSig = targetSig;
+                        LOG_WARNING("AirPlay decoder pipeline keyframe injection failed: " << ret);
+                    }
+                } else {
+                    waitingForMatchingKeyframe = true;
+                    targetCapsSig = targetSig;
+                    LOG_INFO("AirPlay decoder pipeline started, waiting for matching IDR ("
+                        << (cachedKeyframeSig.empty() ? "no cache" : cachedKeyframeSig)
+                        << " -> " << targetSig << ")");
+                }
+                return true;
+            };
 #else
-            std::string lastOpenFailure;
+            int lastOpenFailurePort = 0;
 #endif
 
             while (!workerState->stop) {
-                std::string wantedPipeline;
+                int wantedRtpPort = 0;
                 {
                     std::lock_guard<std::mutex> lock(workerState->mutex);
-                    wantedPipeline = workerState->desiredPipeline;
+                    wantedRtpPort = workerState->desiredRtpPort;
                 }
 
-                if (wantedPipeline.empty()) {
+                if (wantedRtpPort <= 0) {
 #if defined(JON_ENABLE_GSTREAMER_APP)
-                    if (pipeline) {
-                        gst_element_set_state(pipeline.get(), GST_STATE_NULL);
-                    }
-                    appSink.reset();
-                    bus.reset();
-                    pipeline.reset();
-                    localPipeline.clear();
+                    clearRtpPipeline();
 #endif
                     std::this_thread::sleep_for(std::chrono::milliseconds(100));
                     continue;
                 }
 
 #if defined(JON_ENABLE_GSTREAMER_APP)
-                if (!pipeline || !appSink || localPipeline != wantedPipeline) {
-                    if (pipeline) {
-                        gst_element_set_state(pipeline.get(), GST_STATE_NULL);
+                if (!rtpPipeline || !rtpSink || localRtpPort != wantedRtpPort) {
+                    clearRtpPipeline();
+                    if (lastOpenFailurePort != wantedRtpPort) {
+                        LOG_INFO("Opening AirPlay RTP secondary camera pipeline on UDP port " << wantedRtpPort);
                     }
-                    appSink.reset();
-                    bus.reset();
-                    pipeline.reset();
-                    localPipeline.clear();
-                    if (lastOpenFailure != wantedPipeline) {
-                        LOG_INFO("Opening pause camera GStreamer pipeline");
-                    }
-
+                    std::ostringstream pipelineStream;
+                    pipelineStream
+                        << "udpsrc port=" << wantedRtpPort
+                        << " caps=\"application/x-rtp,media=video,clock-rate=90000,encoding-name=H264,payload=96\" ! "
+                        << "rtph264depay ! h264parse name=rtp_parse ! "
+                        << "appsink name=rtp_sink emit-signals=false drop=false max-buffers=4 sync=false";
                     GError* parseError = nullptr;
-                    GstElement* rawPipeline = gst_parse_launch(wantedPipeline.c_str(), &parseError);
-                    if (!rawPipeline) {
-                        if (lastOpenFailure != wantedPipeline) {
-                            LOG_ERROR("Cannot parse secondary camera GStreamer pipeline: "
+                    rtpPipeline = gst_parse_launch(pipelineStream.str().c_str(), &parseError);
+                    if (!rtpPipeline) {
+                        if (lastOpenFailurePort != wantedRtpPort) {
+                            LOG_ERROR("Cannot parse AirPlay RTP GStreamer pipeline: "
                                 << (parseError ? parseError->message : "unknown"));
-                            lastOpenFailure = wantedPipeline;
+                            lastOpenFailurePort = wantedRtpPort;
                         }
                         if (parseError) g_error_free(parseError);
                         std::this_thread::sleep_for(std::chrono::seconds(2));
@@ -729,39 +856,65 @@ struct PauseCameraSource {
                         g_error_free(parseError);
                     }
 
-                    pipeline.reset(rawPipeline);
-                    appSink.reset(findAppSink(pipeline.get()));
-                    if (!appSink) {
-                        if (lastOpenFailure != wantedPipeline) {
-                            LOG_ERROR("Secondary camera pipeline does not contain an appsink");
-                            lastOpenFailure = wantedPipeline;
+                    GstElement* parseElem = gst_bin_get_by_name(GST_BIN(rtpPipeline), "rtp_parse");
+                    GstPad* parseSrcPad = parseElem ? gst_element_get_static_pad(parseElem, "src") : nullptr;
+                    if (parseSrcPad) {
+                        gst_pad_add_probe(parseSrcPad, GST_PAD_PROBE_TYPE_EVENT_DOWNSTREAM,
+                            [](GstPad*, GstPadProbeInfo* info, gpointer userData) -> GstPadProbeReturn {
+                                auto* currentState = static_cast<State*>(userData);
+                                GstEvent* event = GST_PAD_PROBE_INFO_EVENT(info);
+                                if (GST_EVENT_TYPE(event) != GST_EVENT_CAPS) {
+                                    return GST_PAD_PROBE_OK;
+                                }
+                                GstCaps* caps = nullptr;
+                                gst_event_parse_caps(event, &caps);
+                                const std::string signature = capsSignature(caps);
+                                std::lock_guard<std::mutex> lock(currentState->mutex);
+                                if (!signature.empty() && signature != currentState->lastCapsSignature) {
+                                    LOG_INFO("AirPlay h264parse caps changed: "
+                                        << (currentState->lastCapsSignature.empty() ? "<none>" : currentState->lastCapsSignature)
+                                        << " -> " << signature);
+                                    currentState->lastCapsSignature = signature;
+                                    currentState->capsChanged = true;
+                                }
+                                return GST_PAD_PROBE_OK;
+                            }, workerState.get(), nullptr);
+                        gst_object_unref(parseSrcPad);
+                    }
+                    if (parseElem) {
+                        gst_object_unref(parseElem);
+                    }
+
+                    GstElement* sinkElement = gst_bin_get_by_name(GST_BIN(rtpPipeline), "rtp_sink");
+                    if (!sinkElement || !GST_IS_APP_SINK(sinkElement)) {
+                        if (sinkElement) gst_object_unref(sinkElement);
+                        if (lastOpenFailurePort != wantedRtpPort) {
+                            LOG_ERROR("AirPlay RTP pipeline does not contain rtp_sink appsink");
+                            lastOpenFailurePort = wantedRtpPort;
                         }
-                        gst_element_set_state(pipeline.get(), GST_STATE_NULL);
-                        pipeline.reset();
+                        clearRtpPipeline();
                         std::this_thread::sleep_for(std::chrono::seconds(2));
                         continue;
                     }
-                    gst_app_sink_set_emit_signals(GST_APP_SINK(appSink.get()), FALSE);
-                    gst_app_sink_set_max_buffers(GST_APP_SINK(appSink.get()), 1);
-                    gst_app_sink_set_drop(GST_APP_SINK(appSink.get()), TRUE);
+                    rtpSink = GST_APP_SINK(sinkElement);
+                    gst_app_sink_set_emit_signals(rtpSink, FALSE);
+                    gst_app_sink_set_max_buffers(rtpSink, 4);
+                    gst_app_sink_set_drop(rtpSink, FALSE);
 
-                    bus.reset(gst_element_get_bus(pipeline.get()));
-                    const GstStateChangeReturn stateResult = gst_element_set_state(pipeline.get(), GST_STATE_PLAYING);
+                    rtpBus = gst_element_get_bus(rtpPipeline);
+                    const GstStateChangeReturn stateResult = gst_element_set_state(rtpPipeline, GST_STATE_PLAYING);
                     if (stateResult == GST_STATE_CHANGE_FAILURE) {
-                        if (lastOpenFailure != wantedPipeline) {
-                            LOG_ERROR("Cannot start secondary camera GStreamer pipeline");
-                            lastOpenFailure = wantedPipeline;
+                        if (lastOpenFailurePort != wantedRtpPort) {
+                            LOG_ERROR("Cannot start AirPlay RTP GStreamer pipeline");
+                            lastOpenFailurePort = wantedRtpPort;
                         }
-                        gst_element_set_state(pipeline.get(), GST_STATE_NULL);
-                        appSink.reset();
-                        bus.reset();
-                        pipeline.reset();
+                        clearRtpPipeline();
                         std::this_thread::sleep_for(std::chrono::seconds(2));
                         continue;
                     }
 
-                    localPipeline = wantedPipeline;
-                    lastOpenFailure.clear();
+                    localRtpPort = wantedRtpPort;
+                    lastOpenFailurePort = 0;
                     lastReadFailure.clear();
                     inBlackStreak = false;
                     firstBlackFrameAt = {};
@@ -770,49 +923,142 @@ struct PauseCameraSource {
                     statsStart = std::chrono::steady_clock::now();
                     {
                         std::lock_guard<std::mutex> lock(workerState->mutex);
-                        if (workerState->desiredPipeline == wantedPipeline) {
-                            workerState->activePipeline = wantedPipeline;
+                        if (workerState->desiredRtpPort == wantedRtpPort) {
+                            workerState->activeRtpPort = wantedRtpPort;
                         }
                     }
-                    LOG_INFO("Pause camera opened using GStreamer appsink pipeline");
+                    LOG_INFO("AirPlay RTP secondary camera pipeline opened on UDP port " << wantedRtpPort);
                 }
 
-                if (bus) {
-                    while (GstMessage* rawMessage = gst_bus_pop_filtered(bus.get(), static_cast<GstMessageType>(GST_MESSAGE_ERROR | GST_MESSAGE_WARNING | GST_MESSAGE_EOS))) {
+                if (rtpBus) {
+                    while (GstMessage* rawMessage = gst_bus_pop_filtered(rtpBus, static_cast<GstMessageType>(GST_MESSAGE_ERROR | GST_MESSAGE_WARNING | GST_MESSAGE_EOS))) {
                         GstMessagePtr message(rawMessage);
                         if (GST_MESSAGE_TYPE(rawMessage) == GST_MESSAGE_ERROR || GST_MESSAGE_TYPE(rawMessage) == GST_MESSAGE_WARNING) {
-                            logGStreamerMessage(rawMessage, localPipeline);
+                            logGStreamerMessage(rawMessage, "AirPlay RTP pipeline");
                         }
                         if (GST_MESSAGE_TYPE(rawMessage) == GST_MESSAGE_ERROR || GST_MESSAGE_TYPE(rawMessage) == GST_MESSAGE_EOS) {
-                            gst_element_set_state(pipeline.get(), GST_STATE_NULL);
-                            appSink.reset();
-                            bus.reset();
-                            pipeline.reset();
-                            localPipeline.clear();
-                            {
-                                std::lock_guard<std::mutex> lock(workerState->mutex);
-                                workerState->activePipeline.clear();
-                            }
+                            clearRtpPipeline();
                             std::this_thread::sleep_for(std::chrono::seconds(2));
                             break;
                         }
                     }
-                    if (!pipeline || !appSink) {
+                    if (!rtpPipeline || !rtpSink) {
                         continue;
                     }
                 }
 
-                GstSamplePtr sample(gst_app_sink_try_pull_sample(GST_APP_SINK(appSink.get()), 100 * GST_MSECOND));
+                bool needsRestart = false;
+                std::string restartSig;
+                {
+                    std::lock_guard<std::mutex> lock(workerState->mutex);
+                    if (workerState->capsChanged) {
+                        workerState->capsChanged = false;
+                        needsRestart = true;
+                        restartSig = workerState->lastCapsSignature;
+                    }
+                }
+                if (needsRestart && !restartSig.empty()) {
+                    LOG_INFO("AirPlay caps changed, restarting decoder pipeline for " << restartSig);
+                    buildDecoderPipeline(restartSig);
+                    {
+                        std::lock_guard<std::mutex> lock(workerState->mutex);
+                        workerState->lastFrame.release();
+                        workerState->hasFrame = false;
+                    }
+                }
+
+                if (decoderBus) {
+                    while (GstMessage* rawMessage = gst_bus_pop_filtered(decoderBus, static_cast<GstMessageType>(GST_MESSAGE_ERROR | GST_MESSAGE_WARNING | GST_MESSAGE_EOS))) {
+                        GstMessagePtr message(rawMessage);
+                        if (GST_MESSAGE_TYPE(rawMessage) == GST_MESSAGE_ERROR || GST_MESSAGE_TYPE(rawMessage) == GST_MESSAGE_WARNING) {
+                            logGStreamerMessage(rawMessage, "AirPlay decoder pipeline");
+                        }
+                        if (GST_MESSAGE_TYPE(rawMessage) == GST_MESSAGE_ERROR || GST_MESSAGE_TYPE(rawMessage) == GST_MESSAGE_EOS) {
+                            std::string sig;
+                            {
+                                std::lock_guard<std::mutex> lock(workerState->mutex);
+                                sig = workerState->lastCapsSignature;
+                            }
+                            LOG_WARNING("AirPlay decoder pipeline error/EOS, rebuilding for " << sig);
+                            buildDecoderPipeline(sig);
+                            {
+                                std::lock_guard<std::mutex> lock(workerState->mutex);
+                                workerState->lastFrame.release();
+                                workerState->hasFrame = false;
+                            }
+                            break;
+                        }
+                    }
+                }
+
+                GstSamplePtr sample(gst_app_sink_try_pull_sample(rtpSink, 100 * GST_MSECOND));
                 if (!sample) {
+                    continue;
+                }
+
+                GstBuffer* buffer = gst_sample_get_buffer(sample.get());
+                GstCaps* caps = gst_sample_get_caps(sample.get());
+                if (!buffer || !caps) {
+                    continue;
+                }
+                const bool isKeyframe = !GST_BUFFER_FLAG_IS_SET(buffer, GST_BUFFER_FLAG_DELTA_UNIT);
+                const std::string bufferSig = isKeyframe ? capsSignature(caps) : "";
+                if (isKeyframe) {
+                    if (cachedKeyframe) {
+                        gst_buffer_unref(cachedKeyframe);
+                    }
+                    if (cachedKeyframeCaps) {
+                        gst_caps_unref(cachedKeyframeCaps);
+                    }
+                    cachedKeyframe = gst_buffer_copy(buffer);
+                    cachedKeyframeCaps = gst_caps_copy(caps);
+                    cachedKeyframeSig = bufferSig;
+                    LOG_VERBOSE("AirPlay: cached IDR keyframe (" << cachedKeyframeSig << ")");
+
+                    if (!decoderPipeline && !cachedKeyframeSig.empty()) {
+                        LOG_INFO("AirPlay first matching IDR received, starting decoder pipeline (" << cachedKeyframeSig << ")");
+                        buildDecoderPipeline(cachedKeyframeSig);
+                        continue;
+                    }
+                    if (waitingForMatchingKeyframe && bufferSig == targetCapsSig && decoderSrc) {
+                        gst_app_src_set_caps(decoderSrc, cachedKeyframeCaps);
+                        const GstFlowReturn ret = gst_app_src_push_buffer(decoderSrc, gst_buffer_copy(cachedKeyframe));
+                        waitingForMatchingKeyframe = false;
+                        targetCapsSig.clear();
+                        LOG_INFO("AirPlay decoder pipeline: received matching IDR, resuming (" << bufferSig << ")");
+                        if (ret != GST_FLOW_OK && ret != GST_FLOW_FLUSHING) {
+                            LOG_WARNING("AirPlay appsrc matching IDR push failed: " << ret);
+                        }
+                        continue;
+                    }
+                }
+
+                if (waitingForMatchingKeyframe) {
+                    continue;
+                }
+
+                if (decoderSrc && decoderPipeline) {
+                    gst_app_src_set_caps(decoderSrc, caps);
+                    const GstFlowReturn ret = gst_app_src_push_buffer(decoderSrc, gst_buffer_copy(buffer));
+                    if (ret != GST_FLOW_OK && ret != GST_FLOW_FLUSHING) {
+                        LOG_WARNING("AirPlay appsrc push failed: " << ret);
+                    }
+                }
+
+                if (!airplaySink) {
+                    continue;
+                }
+                GstSamplePtr outSample(gst_app_sink_try_pull_sample(airplaySink, 0));
+                if (!outSample) {
                     continue;
                 }
 
                 cv::Mat frame;
                 std::string frameError;
-                if (!sampleToBgrMat(sample.get(), frame, frameError) || frame.empty()) {
-                    if (lastReadFailure != localPipeline) {
+                if (!sampleToBgrMat(outSample.get(), frame, frameError) || frame.empty()) {
+                    if (lastReadFailure != std::to_string(localRtpPort)) {
                         LOG_WARNING("Cannot read secondary camera appsink frame: " << frameError);
-                        lastReadFailure = localPipeline;
+                        lastReadFailure = std::to_string(localRtpPort);
                     }
                     continue;
                 }
@@ -832,23 +1078,20 @@ struct PauseCameraSource {
                     if (now - firstBlackFrameAt >= blackStreakRestartThreshold) {
                         LOG_WARNING("Secondary camera black stream sustained >"
                             << blackStreakRestartThreshold.count()
-                            << "s; restarting GStreamer pipeline");
-                        gst_element_set_state(pipeline.get(), GST_STATE_NULL);
-                        appSink.reset();
-                        bus.reset();
-                        pipeline.reset();
-                        localPipeline.clear();
+                            << "s; restarting AirPlay decoder pipeline");
+                        std::string sig;
+                        {
+                            std::lock_guard<std::mutex> lock(workerState->mutex);
+                            sig = workerState->lastCapsSignature;
+                            workerState->lastFrame.release();
+                            workerState->hasFrame = false;
+                        }
+                        buildDecoderPipeline(sig);
                         inBlackStreak = false;
                         firstBlackFrameAt = {};
                         lastSkippedBlackLog = {};
                         frames = 0;
                         statsStart = std::chrono::steady_clock::now();
-                        {
-                            std::lock_guard<std::mutex> lock(workerState->mutex);
-                            workerState->activePipeline.clear();
-                            workerState->lastFrame.release();
-                            workerState->hasFrame = false;
-                        }
                         std::this_thread::sleep_for(std::chrono::seconds(2));
                     }
                     continue;
@@ -864,7 +1107,7 @@ struct PauseCameraSource {
                 }
                 {
                     std::lock_guard<std::mutex> lock(workerState->mutex);
-                    if (workerState->desiredPipeline == localPipeline) {
+                    if (workerState->desiredRtpPort == localRtpPort) {
                         workerState->lastFrame = frame;
                         workerState->hasFrame = true;
                     }
@@ -878,38 +1121,45 @@ struct PauseCameraSource {
                     statsStart = now;
                 }
 #else
-                if (lastOpenFailure != wantedPipeline) {
+                if (lastOpenFailurePort != wantedRtpPort) {
                     LOG_ERROR("Secondary camera requires a build with GStreamer appsink support");
-                    lastOpenFailure = wantedPipeline;
+                    lastOpenFailurePort = wantedRtpPort;
                 }
                 std::this_thread::sleep_for(std::chrono::seconds(2));
 #endif
             }
 #if defined(JON_ENABLE_GSTREAMER_APP)
-            if (pipeline) {
-                gst_element_set_state(pipeline.get(), GST_STATE_NULL);
+            clearRtpPipeline();
+            if (cachedKeyframe) {
+                gst_buffer_unref(cachedKeyframe);
+            }
+            if (cachedKeyframeCaps) {
+                gst_caps_unref(cachedKeyframeCaps);
             }
 #endif
         });
         workerState->worker.detach();
     }
 
-    bool ensureOpened(const std::string& nextPipeline)
+    bool ensureOpened(int rtpPort)
     {
-        if (nextPipeline.empty()) {
+        if (rtpPort <= 0 || rtpPort > 65535) {
             release();
-            if (warnedOpenFailurePipeline != "<empty>") {
-                LOG_ERROR("Secondary camera pipeline is empty");
-                warnedOpenFailurePipeline = "<empty>";
+            const std::string invalidPort = std::to_string(rtpPort);
+            if (warnedOpenFailurePipeline != invalidPort) {
+                LOG_ERROR("Secondary camera RTP port is invalid: " << rtpPort);
+                warnedOpenFailurePipeline = invalidPort;
             }
             return false;
         }
         ensureWorkerStarted();
         {
             std::lock_guard<std::mutex> lock(state->mutex);
-            if (state->desiredPipeline != nextPipeline) {
-                state->desiredPipeline = nextPipeline;
-                state->activePipeline.clear();
+            if (state->desiredRtpPort != rtpPort) {
+                state->desiredRtpPort = rtpPort;
+                state->activeRtpPort = 0;
+                state->lastCapsSignature.clear();
+                state->capsChanged = false;
                 state->lastFrame.release();
                 state->hasFrame = false;
             }
@@ -1154,7 +1404,7 @@ cv::Mat makeStatusFrame(
         buffers->pauseMedia.release();
         cv::Mat pauseFrame;
         const cv::Size captureSize(config->width, config->height);
-        if (buffers->pauseCamera.ensureOpened(config->secondaryCameraPipeline)
+        if (buffers->pauseCamera.ensureOpened(config->secondaryCameraRtpPort)
             && buffers->pauseCamera.read(pauseFrame, captureSize) && !pauseFrame.empty()) {
             cv::Mat frame;
             if (pauseFrame.size() == size) {
@@ -1673,7 +1923,7 @@ void logStartupInfo(const ProcessorConfig& config, const ScreenInfo& screenInfo)
     LOG_VERBOSE("Background loop if video: " << (config.backgroundLoopIfVideo ? "true" : "false"));
     LOG_VERBOSE("Pause image enabled: " << (config.pauseImageEnabled ? "true" : "false"));
     LOG_VERBOSE("Pause source: " << pauseSourceToString(config.pauseSource));
-    LOG_VERBOSE("Secondary camera pipeline: " << (config.secondaryCameraPipeline.empty() ? "none" : config.secondaryCameraPipeline));
+    LOG_VERBOSE("Secondary camera RTP port: " << config.secondaryCameraRtpPort);
     LOG_VERBOSE("Pause image: " << (config.pauseImagePath.empty() ? "none" : config.pauseImagePath));
     LOG_VERBOSE("Pause image folder: " << config.pauseImageFolder);
     LOG_VERBOSE("Pause loop if video: " << (config.pauseLoopIfVideo ? "true" : "false"));

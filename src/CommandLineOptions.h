@@ -83,6 +83,7 @@ struct ProcessorConfig {
     std::string pauseImagePath;
     std::string pauseImageFolder = ".";
     std::string secondaryCameraPipeline;
+    int secondaryCameraRtpPort = 5004;
     std::string pauseImageFont = "simplex";
     std::string pauseImageFontDirectory = ".";
     std::string ipcSocketPath = "/tmp/jonimageprocessor.sock";

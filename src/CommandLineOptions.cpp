@@ -41,6 +41,7 @@ enum OptionId {
     OptionBackgroundLoopIfVideo,
     OptionPauseSource,
     OptionSecondaryCameraPipeline,
+    OptionSecondaryCameraRtpPort,
     OptionPauseImage,
     OptionPauseImageFolder,
     OptionPauseLoopIfVideo,
@@ -100,7 +101,8 @@ const std::vector<OptionDefinition>& optionDefinitions()
         {OptionBackgroundImageFolder, 0, "background-image-folder", required_argument, "path", "Base folder for background images set through IPC", "."},
         {OptionBackgroundLoopIfVideo, 0, "background-loop-if-video", required_argument, "true|false", "Loop background file when it is a video", "false"},
         {OptionPauseSource, 0, "pause-source", required_argument, "image|camera", "Pause source: image media or secondary camera", "image"},
-        {OptionSecondaryCameraPipeline, 0, "secondary-camera-pipeline", required_argument, "pipeline", "GStreamer pipeline for secondary camera; must end in BGR appsink", ""},
+        {OptionSecondaryCameraPipeline, 0, "secondary-camera-pipeline", required_argument, "pipeline", "Legacy secondary camera GStreamer pipeline; ignored by AirPlay RTP mode", ""},
+        {OptionSecondaryCameraRtpPort, 0, "secondary-camera-rtp-port", required_argument, "port", "UDP RTP port for AirPlay secondary camera input", "5004"},
         {OptionPauseImage, 0, "pause-image", required_argument, "path", "Image/video/html file for camera status screens", ""},
         {OptionPauseImageFolder, 0, "pause-image-folder", required_argument, "path", "Base folder for pause images set through IPC", "."},
         {OptionPauseLoopIfVideo, 0, "pause-loop-if-video", required_argument, "true|false", "Loop pause file when it is a video", "false"},
@@ -365,8 +367,9 @@ void warnMissingConfiguredFiles(const ProcessorConfig& config)
         LOG_WARNING("Configured pause HTML media is not supported in this build: " << pausePath);
     }
 #endif
-    if (config.pauseImageEnabled && config.pauseSource == PauseSource::Camera && config.secondaryCameraPipeline.empty()) {
-        LOG_WARNING("Configured secondary camera pipeline is empty");
+    if (config.pauseImageEnabled && config.pauseSource == PauseSource::Camera
+        && (config.secondaryCameraRtpPort < 1 || config.secondaryCameraRtpPort > 65535)) {
+        LOG_WARNING("Configured secondary camera RTP port is invalid: " << config.secondaryCameraRtpPort);
     }
     if (!directoryExists(config.pauseImageFolder)) {
         LOG_WARNING("Configured pause image folder does not exist: " << config.pauseImageFolder);
@@ -812,6 +815,9 @@ bool parseCommandLine(int argc, char** argv, CommandLineResult& result, std::str
                 error = "--secondary-camera-pipeline must not be empty.";
                 return false;
             }
+            break;
+        case OptionSecondaryCameraRtpPort:
+            if (!parseRangedInteger(optarg, "--secondary-camera-rtp-port", 1, 65535, result.config.secondaryCameraRtpPort, error)) return false;
             break;
         case OptionPauseImage:
             result.config.pauseImagePath = optarg;

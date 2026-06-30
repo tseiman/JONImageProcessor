@@ -7,7 +7,7 @@
     "connectTimeoutSeconds": 10
   },
   "secondaryCamera": {
-    "pipeline": "tcpclientsrc host=127.0.0.1 port=5000 ! gdpdepay ! queue leaky=downstream max-size-buffers=1 ! appsink name=airplay_sink drop=true max-buffers=1 sync=false"
+    "rtpPort": 5004
   },
   "processing": {
     "size": "1280x720"
