@@ -16,7 +16,6 @@ if (PkgConfig_FOUND)
     pkg_check_modules(GSTREAMER_APP QUIET
         gstreamer-1.0
         gstreamer-app-1.0
-        gstreamer-allocators-1.0
         gstreamer-video-1.0
     )
     pkg_check_modules(WPE_HTML_RENDERER_11 QUIET
