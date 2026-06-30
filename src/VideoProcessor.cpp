@@ -26,10 +26,6 @@
 #include <gst/video/video.h>
 #endif
 
-#if defined(JON_ENABLE_NVBUFSURFACE)
-#include <nvbufsurface.h>
-#endif
-
 #if defined(JON_ENABLE_FREETYPE_TEXT)
 #include <ft2build.h>
 #include FT_FREETYPE_H
@@ -448,110 +444,6 @@ struct PauseCameraSource {
         return meanValue[0] < 8.0 && meanValue[1] < 8.0 && meanValue[2] < 8.0 && brightRatio < 0.03;
     }
 
-#if defined(JON_ENABLE_NVBUFSURFACE)
-    static bool tryNvBufSurfaceToBgrMat(GstSample* sample, cv::Mat& frame, std::string& error)
-    {
-        GstCaps* caps = gst_sample_get_caps(sample);
-        GstBuffer* buffer = gst_sample_get_buffer(sample);
-        if (!caps || !buffer || gst_caps_get_size(caps) < 1) {
-            return false;
-        }
-
-        GstStructure* structure = gst_caps_get_structure(caps, 0);
-        const char* memoryType = gst_structure_get_string(structure, "nvbuf-memory-type");
-        if (!memoryType) {
-            return false;
-        }
-
-        const char* format = gst_structure_get_string(structure, "format");
-        const std::string sampleFormat(format ? format : "");
-        const bool isPackedRgb = sampleFormat == "BGR" || sampleFormat == "RGB"
-            || sampleFormat == "BGRx" || sampleFormat == "BGRA" || sampleFormat == "RGBA";
-        if (!isPackedRgb) {
-            std::ostringstream stream;
-            stream << "NvBufSurface: unsupported NVMM appsink format: " << sampleFormat;
-            error = stream.str();
-            return true;
-        }
-
-        GstMapInfo map {};
-        if (!gst_buffer_map(buffer, &map, GST_MAP_READ)) {
-            error = "NvBufSurface: cannot map GstBuffer";
-            return true;
-        }
-
-        auto unmapGstAndReturn = [&](bool handled) {
-            gst_buffer_unmap(buffer, &map);
-            return handled;
-        };
-
-        if (map.size < sizeof(NvBufSurface)) {
-            std::ostringstream stream;
-            stream << "NvBufSurface: GstBuffer too small for NvBufSurface struct: "
-                   << map.size << "/" << sizeof(NvBufSurface);
-            error = stream.str();
-            return unmapGstAndReturn(true);
-        }
-
-        auto* surface = reinterpret_cast<NvBufSurface*>(map.data);
-        if (!surface || surface->numFilled == 0 || surface->surfaceList == nullptr) {
-            error = "NvBufSurface: surface is null or empty";
-            return unmapGstAndReturn(true);
-        }
-
-        if (NvBufSurfaceMap(surface, 0, 0, NVBUF_MAP_READ) != 0) {
-            error = "NvBufSurface: NvBufSurfaceMap() failed";
-            return unmapGstAndReturn(true);
-        }
-
-        auto unmapSurfaceAndGstAndReturn = [&](bool handled) {
-            NvBufSurfaceUnMap(surface, 0, 0);
-            gst_buffer_unmap(buffer, &map);
-            return handled;
-        };
-
-        if (NvBufSurfaceSyncForCpu(surface, 0, 0) != 0) {
-            error = "NvBufSurface: NvBufSurfaceSyncForCpu() failed";
-            return unmapSurfaceAndGstAndReturn(true);
-        }
-
-        NvBufSurfaceParams& params = surface->surfaceList[0];
-        const int width = static_cast<int>(params.width);
-        const int height = static_cast<int>(params.height);
-        const std::size_t stride = static_cast<std::size_t>(params.planeParams.pitch[0] > 0 ? params.planeParams.pitch[0] : params.pitch);
-        auto* data = static_cast<std::uint8_t*>(params.mappedAddr.addr[0]);
-        if (!data || width <= 0 || height <= 0 || stride == 0) {
-            error = "NvBufSurface: invalid mapped address or dimensions";
-            return unmapSurfaceAndGstAndReturn(true);
-        }
-
-        static std::once_flag nvPathLogFlag;
-        std::call_once(nvPathLogFlag, [&]() {
-            LOG_INFO("Secondary camera using NvBufSurface CPU mapping"
-                << " memory=" << memoryType
-                << " format=" << sampleFormat
-                << " size=" << width << "x" << height
-                << " stride=" << stride);
-        });
-
-        const int channels = (sampleFormat == "BGR" || sampleFormat == "RGB") ? 3 : 4;
-        cv::Mat wrapped(height, width, channels == 3 ? CV_8UC3 : CV_8UC4, data, stride);
-        if (sampleFormat == "BGR") {
-            frame = wrapped.clone();
-        } else if (sampleFormat == "RGB") {
-            cv::cvtColor(wrapped, frame, cv::COLOR_RGB2BGR);
-        } else if (sampleFormat == "RGBA") {
-            cv::cvtColor(wrapped, frame, cv::COLOR_RGBA2BGR);
-        } else {
-            frame.create(height, width, CV_8UC3);
-            cv::cvtColor(wrapped, frame, cv::COLOR_BGRA2BGR);
-        }
-
-        logFrameContentDiagnostics(frame, sampleFormat, stride, static_cast<std::size_t>(params.dataSize));
-        return unmapSurfaceAndGstAndReturn(true);
-    }
-#endif
-
     static bool sampleToBgrMat(GstSample* sample, cv::Mat& frame, std::string& error)
     {
         GstCaps* caps = gst_sample_get_caps(sample);
@@ -571,12 +463,6 @@ struct PauseCameraSource {
             return false;
         }
         const std::string sampleFormat(format);
-
-#if defined(JON_ENABLE_NVBUFSURFACE)
-        if (tryNvBufSurfaceToBgrMat(sample, frame, error)) {
-            return error.empty() && !frame.empty();
-        }
-#endif
 
         GstMapInfo map {};
         if (!gst_buffer_map(buffer, &map, GST_MAP_READ)) {
