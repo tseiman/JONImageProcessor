@@ -23,6 +23,7 @@
 #if defined(JON_ENABLE_GSTREAMER_APP)
 #include <gst/gst.h>
 #include <gst/app/gstappsink.h>
+#include <gst/allocators/gstdmabuf.h>
 #include <gst/video/video.h>
 #endif
 
@@ -474,45 +475,45 @@ struct PauseCameraSource {
             return true;
         }
 
-        GstMapInfo map {};
-        if (!gst_buffer_map(buffer, &map, GST_MAP_READ)) {
-            error = "NvBufSurface: cannot map GstBuffer";
+        int dmabufFd = -1;
+        const guint memoryCount = gst_buffer_n_memory(buffer);
+        for (guint i = 0; i < memoryCount; ++i) {
+            GstMemory* memory = gst_buffer_peek_memory(buffer, i);
+            if (memory && gst_is_dmabuf_memory(memory)) {
+                dmabufFd = gst_dmabuf_memory_get_fd(memory);
+                break;
+            }
+        }
+        if (dmabufFd < 0) {
+            error = "NvBufSurface: NVMM caps present, but GstBuffer has no DMABUF memory";
             return true;
         }
 
-        auto unmapGstAndReturn = [&](bool handled) {
-            gst_buffer_unmap(buffer, &map);
-            return handled;
-        };
-
-        if (map.size < sizeof(NvBufSurface)) {
-            std::ostringstream stream;
-            stream << "NvBufSurface: GstBuffer too small for NvBufSurface struct: "
-                   << map.size << "/" << sizeof(NvBufSurface);
-            error = stream.str();
-            return unmapGstAndReturn(true);
+        void* rawSurface = nullptr;
+        if (NvBufSurfaceFromFd(dmabufFd, &rawSurface) != 0 || rawSurface == nullptr) {
+            error = "NvBufSurface: NvBufSurfaceFromFd() failed";
+            return true;
         }
 
-        auto* surface = reinterpret_cast<NvBufSurface*>(map.data);
-        if (!surface || surface->numFilled == 0 || surface->surfaceList == nullptr) {
+        auto* surface = static_cast<NvBufSurface*>(rawSurface);
+        if (surface->numFilled == 0 || surface->surfaceList == nullptr) {
             error = "NvBufSurface: surface is null or empty";
-            return unmapGstAndReturn(true);
+            return true;
         }
 
         if (NvBufSurfaceMap(surface, 0, 0, NVBUF_MAP_READ) != 0) {
             error = "NvBufSurface: NvBufSurfaceMap() failed";
-            return unmapGstAndReturn(true);
+            return true;
         }
 
-        auto unmapSurfaceAndGstAndReturn = [&](bool handled) {
+        auto unmapSurfaceAndReturn = [&](bool handled) {
             NvBufSurfaceUnMap(surface, 0, 0);
-            gst_buffer_unmap(buffer, &map);
             return handled;
         };
 
         if (NvBufSurfaceSyncForCpu(surface, 0, 0) != 0) {
             error = "NvBufSurface: NvBufSurfaceSyncForCpu() failed";
-            return unmapSurfaceAndGstAndReturn(true);
+            return unmapSurfaceAndReturn(true);
         }
 
         NvBufSurfaceParams& params = surface->surfaceList[0];
@@ -522,7 +523,7 @@ struct PauseCameraSource {
         auto* data = static_cast<std::uint8_t*>(params.mappedAddr.addr[0]);
         if (!data || width <= 0 || height <= 0 || stride == 0) {
             error = "NvBufSurface: invalid mapped address or dimensions";
-            return unmapSurfaceAndGstAndReturn(true);
+            return unmapSurfaceAndReturn(true);
         }
 
         static std::once_flag nvPathLogFlag;
@@ -530,6 +531,7 @@ struct PauseCameraSource {
             LOG_INFO("Secondary camera using NvBufSurface CPU mapping"
                 << " memory=" << memoryType
                 << " format=" << sampleFormat
+                << " fd=" << dmabufFd
                 << " size=" << width << "x" << height
                 << " stride=" << stride);
         });
@@ -548,7 +550,7 @@ struct PauseCameraSource {
         }
 
         logFrameContentDiagnostics(frame, sampleFormat, stride, static_cast<std::size_t>(params.dataSize));
-        return unmapSurfaceAndGstAndReturn(true);
+        return unmapSurfaceAndReturn(true);
     }
 #endif
 
