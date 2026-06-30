@@ -92,6 +92,20 @@ else()
     message(STATUS "FreeType development files not found; pause text is limited to built-in Hershey fonts")
 endif()
 
+find_path(NVBUFSURFACE_INCLUDE_DIR
+    NAMES nvbufsurface.h
+    PATHS /usr/src/jetson_multimedia_api/include /usr/local/include /usr/include
+)
+find_library(NVBUFSURFACE_LIBRARY
+    NAMES nvbufsurface
+    PATHS /usr/lib/aarch64-linux-gnu/nvidia /lib/aarch64-linux-gnu/nvidia /usr/lib/aarch64-linux-gnu /usr/local/lib /usr/lib
+)
+if (NVBUFSURFACE_INCLUDE_DIR AND NVBUFSURFACE_LIBRARY)
+    message(STATUS "Jetson NvBufSurface secondary camera mapping enabled: ${NVBUFSURFACE_LIBRARY}")
+else()
+    message(STATUS "Jetson NvBufSurface not found; NVMM secondary camera mapping disabled")
+endif()
+
 option(JON_ENABLE_TENSORRT_MASK "Enable generic TensorRT/ONNX mask backend" OFF)
 option(JON_ENABLE_DRM_DISPLAY "Enable Linux DRM/KMS display backend" OFF)
 set(JON_IMAGE_PROCESSOR_BUILD_HOST_OVERRIDE "" CACHE STRING "Optional build host name override, useful for containerized cross builds")
@@ -170,6 +184,12 @@ if (GSTREAMER_APP_FOUND)
     target_include_directories(JONImageProcessor PRIVATE ${GSTREAMER_APP_INCLUDE_DIRS})
     target_link_directories(JONImageProcessor PRIVATE ${GSTREAMER_APP_LIBRARY_DIRS})
     target_link_libraries(JONImageProcessor PRIVATE ${GSTREAMER_APP_LIBRARIES})
+endif()
+
+if (NVBUFSURFACE_INCLUDE_DIR AND NVBUFSURFACE_LIBRARY)
+    target_compile_definitions(JONImageProcessor PRIVATE JON_ENABLE_NVBUFSURFACE=1)
+    target_include_directories(JONImageProcessor PRIVATE ${NVBUFSURFACE_INCLUDE_DIR})
+    target_link_libraries(JONImageProcessor PRIVATE ${NVBUFSURFACE_LIBRARY})
 endif()
 
 if (WPE_HTML_RENDERER_FOUND)
