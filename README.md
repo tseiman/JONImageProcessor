@@ -318,8 +318,7 @@ journalctl -u JONImageProcessor.service -f
 - `--background-image-folder <path>`: base folder for background images selected through IPC. Default: `.`.
 - `--background-loop-if-video <true|false>`: loop the background media when it is a video. Default: `false`.
 - `--pause-source <image|camera>`: pause media source. `image` uses `--pause-image`; `camera` uses the AirPlay RTP secondary camera input. Default: `image`.
-- `--secondary-camera-rtp-port <port>`: UDP RTP port for AirPlay secondary camera input. Default: `5004`. Run uxplay with `/usr/local/bin/uxplay -nc -n "JONImageProcessor v9" -fps 20 -vrtp "config-interval=1 ! udpsink host=127.0.0.1 port=5004" -as 0 -reset 0 -nohold`.
-- `--secondary-camera-pipeline <pipeline>`: legacy option retained for compatibility; ignored by the AirPlay RTP secondary camera mode.
+- `--secondary-camera-rtp-port <port>`: UDP RTP port for AirPlay secondary camera input. Default: `5004`. Run uxplay with `/usr/local/bin/uxplay -nc -n "JONImageProcessor v9" -fps 20 -vrtp "config-interval=-1 ! udpsink host=127.0.0.1 port=5004" -as 0 -reset 0 -nohold`.
 - `--pause-image <path>`: image, video, or HTML file used for camera status screens when `--pause-image-enabled true` is set. JPEG/PNG are loaded as static images; video files are decoded with OpenCV; HTML/CSS/JavaScript is rendered through WPE WebKit when the binary was built with WPE support.
 - `--pause-image-folder <path>`: base folder for pause images selected through IPC. Default: `.`.
 - `--pause-loop-if-video <true|false>`: loop the pause media when it is a video. Default: `false`.
@@ -438,11 +437,87 @@ Supported JSON groups:
 }
 ```
 
-All fields are optional. Unknown JSON fields log warnings and are ignored. Invalid JSON, invalid types, and invalid values stop startup with an error. JSON syntax errors include line and column information where possible. `--test-config` warns about missing referenced files. Normal startup fails if an active segmentation model, background media, pause media, background image folder, pause image folder, or configured TTF pause font does not exist. Runtime IPC updates for image paths validate that the file can be read and return a JSON error if not. IPC only accepts relative image names under `background.folder` or `pause.folder`; absolute paths and `..` traversal are rejected. `configDirectory` is only loaded from the main JSON configuration and is read-only through IPC. It points to a directory that contains runtime overlay configuration files. Overlay files are optional; running without an active overlay is valid. Overlay files use the same grouped JSON shape, are named `<name>.json`, and can be applied live with IPC key `config` while the process is running; accepted values replace the current runtime configuration immediately without restarting the service. If an IPC `config` value points to a missing or invalid overlay file, the IPC response is `{"ok":false,...}` and the current runtime configuration remains unchanged. The IPC `config` name is a safe base name only: letters, digits, `_`, and `-` are accepted; slashes, dots, absolute paths, and traversal sequences are rejected. `configDirectory` inside overlay files is ignored. Startup-only values in an overlay may be parsed but do not reinitialize already-created components such as the display backend, TensorRT model, IPC socket, processing size, primary camera device path, or secondary camera RTP port. `camera.enabled` is the JSON equivalent of IPC key `camera.enabled`; `camera.enable` is also accepted as a compatibility spelling. `pause.source=image` keeps the existing pause image/video/HTML behavior; `pause.source=camera` uses the AirPlay RTP input on `secondaryCamera.rtpPort`. JONImageProcessor keeps the UDP/RTP receive and H264 parse pipeline running, then rebuilds only the NVIDIA decoder pipeline on H264 caps changes and resumes from a matching cached IDR keyframe. Run uxplay with `/usr/local/bin/uxplay -nc -n "JONImageProcessor v9" -fps 20 -vrtp "config-interval=1 ! udpsink host=127.0.0.1 port=5004" -as 0 -reset 0 -nohold`. Secondary camera pause frames whose size differs from the output canvas are scaled with black letterbox bars instead of stretched. If the binary was built without `gstreamer-app-1.0` development files, or if the RTP input cannot be opened or decoded, the generated `Camera 2. DISCONNECTED` status screen is shown and repeated status-image log messages are rate-limited. `background.loopIfVideo` and `pause.loopIfVideo` loop media files when OpenCV detects them as video. HTML media files are detected from file content. They require a binary built with WPE WebKit and WPEBackend-fdo support; otherwise startup, `--test-config`, and IPC updates reject them clearly. `camera.connectTimeoutSeconds` controls how long `Camera connecting...` is shown after runtime camera re-enable before falling back to `Camera DISCONNECTED`. `pause.enabled` switches camera status screens from the generated pattern to `pause.image` or the secondary camera while the camera is off, connecting, or disconnected; it does not replace a live camera frame. `pause.showStatusText` controls whether the status label is rendered over that image. `pause.textColor` uses `RRGGBBAA` hex, for example `ffffff0a`. `pause.textPosition` uses `XxY` or `auto`; `pause.textSize` controls the rendered text scale. `pause.font` accepts the built-in OpenCV Hershey font names or a safe TTF base name. TTF names must not contain `/`, `\`, or `..`; `<name>.ttf` is loaded from `pause.fontDirectory` when FreeType support was available at build time. `pause.fontAlign` controls multiline text alignment with values `left`, `center`, or `right`. `diagnostics.benchmark` enables benchmark collection for IPC without passing `--benchmark`.
+All fields are optional. CLI options override JSON values.
+
+Validation rules:
+
+- Unknown JSON fields log warnings and are ignored.
+- Invalid JSON, invalid types, and invalid values stop startup.
+- JSON syntax errors include line and column information where possible.
+- `--test-config` warns about missing referenced files.
+- Normal startup fails when an active model, media file, media folder, or configured TTF pause font is missing.
+
+Runtime media paths:
+
+- IPC image updates must be relative names under `background.folder` or `pause.folder`.
+- Absolute paths and `..` traversal are rejected.
+- IPC image updates validate readability and return `{"ok":false,...}` on failure.
+- `background.loopIfVideo` and `pause.loopIfVideo` loop OpenCV-detected video files.
+- HTML media is detected from file content and requires a WPE-enabled build.
+
+Runtime overlays:
+
+- `configDirectory` is read only through IPC and is loaded only from the main JSON file.
+- Overlay files are optional, use the same grouped JSON shape, and are named `<name>.json`.
+- IPC key `config` applies an overlay live without restarting the service.
+- Valid config names contain only letters, digits, `_`, and `-`.
+- Invalid or missing overlay files leave the current runtime configuration unchanged.
+- Startup-only values in overlays are parsed but do not reinitialize display, TensorRT, IPC, processing size, camera device, or secondary camera RTP port.
+
+Pause and AirPlay behavior:
+
+- `camera.enabled` is the JSON equivalent of IPC key `camera.enabled`; `camera.enable` is accepted as a compatibility spelling.
+- `pause.source=image` uses the configured pause image/video/HTML media.
+- `pause.source=camera` uses AirPlay RTP from `secondaryCamera.rtpPort`.
+- Run uxplay with:
+
+```bash
+/usr/local/bin/uxplay -nc -n "JONImageProcessor v9" -fps 20 \
+  -vrtp "config-interval=-1 ! udpsink host=127.0.0.1 port=5004" \
+  -as 0 -reset 0 -nohold
+```
+
+The AirPlay worker keeps UDP/RTP reception and H264 parsing alive. It rebuilds only
+the NVIDIA decoder pipeline on H264 caps changes, resumes from cached IDR keyframes,
+and can restart the decoder on matching IDR frames while running. If AirPlay cannot
+be opened or decoded, `Camera 2. DISCONNECTED` is shown and repeated status logs are
+rate-limited. Secondary camera frames are letterboxed when their aspect ratio differs
+from the output canvas.
+
+Pause text:
+
+- `pause.enabled` switches camera status screens from the generated pattern to `pause.image` or AirPlay camera.
+- `pause.showStatusText` controls whether the status label is rendered over pause media.
+- `pause.textColor` uses `RRGGBBAA` hex, for example `ffffff0a`.
+- `pause.textPosition` uses `XxY` or `auto`; `pause.textSize` controls scale.
+- `pause.font` accepts built-in OpenCV Hershey names or a safe TTF base name.
+- TTF names must not contain `/`, `\`, or `..`; `<name>.ttf` is loaded from `pause.fontDirectory` when FreeType support is available.
+- `pause.fontAlign` accepts `left`, `center`, or `right`.
+
+`diagnostics.benchmark` enables benchmark collection for IPC without passing `--benchmark`.
 
 ## Runtime Behavior
 
-Camera input always uses V4L2 and low-latency capture. The capture thread keeps only the newest frame, so old frames are overwritten instead of queued. If the USB camera disappears, JONImageProcessor closes the broken capture path, renders `Camera DISCONNECTED`, and periodically retries the configured device after the device node has been visible for a short settle period. Reconnect is accepted after the reopened V4L2 device delivers a valid frame. If `camera.enabled` is set to false through IPC while the camera is open, JONImageProcessor keeps the V4L2 device and capture thread alive, drains camera frames, and renders `Camera OFF` instead of processing the live frame. This avoids a USB/V4L2 close/reopen cycle for normal runtime pauses. When camera input is enabled again, the already-open stream is used immediately when possible; if the device was unavailable, `Camera connecting...` is shown while the camera is being reopened, and only if `/dev/video0` is still unavailable after `camera.connectTimeoutSeconds` does the status change to `Camera DISCONNECTED`. These camera status screens use the generated test pattern when `pause.enabled=false`; they use `pause.image` when `pause.enabled=true` and a pause image is configured. If the Jetson kernel does not recreate `/dev/video0` after a USB reconnect, JONImageProcessor continues showing `Camera DISCONNECTED`; a USB/controller reset or service restart may still be required.
+Camera input:
+
+- The live camera path always uses V4L2 and low-latency capture.
+- The capture thread keeps only the newest frame; old frames are overwritten, not queued.
+- If the USB camera disappears, the broken capture path is closed and `Camera DISCONNECTED` is rendered.
+- Reconnect is retried after the device node has been visible for a short settle period.
+- Reconnect is accepted only after the reopened V4L2 device delivers a valid frame.
+
+Runtime pause:
+
+- Setting `camera.enabled=false` keeps an already-open V4L2 device alive and drains frames.
+- The pipeline renders `Camera OFF` instead of processing the live frame.
+- Re-enabling the camera reuses the open stream when possible.
+- If the device was unavailable, `Camera connecting...` is shown until reconnect succeeds or `camera.connectTimeoutSeconds` expires.
+
+Status screens:
+
+- With `pause.enabled=false`, camera status screens use the generated test pattern.
+- With `pause.enabled=true`, status screens use `pause.image` or AirPlay camera depending on `pause.source`.
+- If the Jetson kernel does not recreate `/dev/video0` after USB reconnect, JONImageProcessor keeps showing `Camera DISCONNECTED`; a USB/controller reset or service restart may still be required.
 
 Video file input uses OpenCV file capture and processes frames sequentially.
 
@@ -510,7 +585,6 @@ Read-only key:
 - `configDirectory`: directory containing IPC-selectable overlay configuration files.
 - `system.configDirectory`: same value as grouped system field.
 - `system.version`: current binary version string.
-- `secondaryCamera.pipeline`: legacy read-only value; ignored by the AirPlay RTP secondary camera mode.
 - `secondaryCamera.rtpPort`: read-only UDP RTP port used by the AirPlay RTP secondary camera mode.
 - `benchmark`: current benchmark snapshot. This key is available only when benchmark mode is enabled with `--benchmark` or `diagnostics.benchmark`.
 

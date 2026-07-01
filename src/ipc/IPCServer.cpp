@@ -375,7 +375,6 @@ std::string valueJson(const ProcessorConfig& c, const std::string& key, const Be
     if (key == "blur_strength" || key == "background.blurStrength") return std::to_string(c.blurStrength);
     if (key == "pause.enabled") return c.pauseImageEnabled ? "true" : "false";
     if (key == "pause.source") return "\"" + pauseSourceToString(c.pauseSource) + "\"";
-    if (key == "secondaryCamera.pipeline") return "\"" + escapeJson(c.secondaryCameraPipeline) + "\"";
     if (key == "secondaryCamera.rtpPort") return std::to_string(c.secondaryCameraRtpPort);
     if (key == "pause.image") return "\"" + escapeJson(c.pauseImagePath) + "\"";
     if (key == "pause.folder") return "\"" + escapeJson(c.pauseImageFolder) + "\"";
@@ -412,7 +411,7 @@ bool knownKey(const std::string& key)
         || key == "pause.textPosition" || key == "pause.textSize" || key == "pause.font"
         || key == "pause.fontDirectory" || key == "pause.fontAlign" || key == "pause.preserveAspectRatio"
         || key == "runtime.noMask" || key == "runtime.noOverlay" || key == "camera.enabled"
-        || key == "secondaryCamera.pipeline" || key == "secondaryCamera.rtpPort"
+        || key == "secondaryCamera.rtpPort"
         || key == "version" || key == "system.version" || key == "configDirectory"
         || key == "system.configDirectory" || key == "config";
 }
@@ -549,8 +548,7 @@ std::string IPCServer::handleLine(const std::string& line)
         std::ostringstream out;
         out << "{\"ok\":true,\"values\":{"
             << "\"camera\":{\"enabled\":" << (current.cameraEnabled ? "true" : "false") << "}"
-            << ",\"secondaryCamera\":{\"pipeline\":\"" << escapeJson(current.secondaryCameraPipeline)
-            << "\",\"rtpPort\":" << current.secondaryCameraRtpPort << "}"
+            << ",\"secondaryCamera\":{\"rtpPort\":" << current.secondaryCameraRtpPort << "}"
             << ",\"segmentation\":{\"threshold\":" << current.maskThreshold
             << ",\"smoothing\":" << current.maskSmoothing
             << ",\"morphology\":\"" << maskMorphologyModeToString(current.maskMorphology) << "\"}"
@@ -610,7 +608,7 @@ std::string IPCServer::handleLine(const std::string& line)
     }
     if (key == "configDirectory" || key == "system.configDirectory"
         || key == "background.folder" || key == "pause.folder" || key == "pause.fontDirectory"
-        || key == "secondaryCamera.pipeline" || key == "secondaryCamera.rtpPort") {
+        || key == "secondaryCamera.rtpPort") {
         return loggedErrorResponse(key + " is read-only");
     }
     if (!knownKey(key)) {

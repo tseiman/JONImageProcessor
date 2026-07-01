@@ -9,9 +9,9 @@ kernel: usb 2-2: Device not responding to setup address.
 kernel: usb 2-2: device not accepting address 3, error -71
 ```
 
-`error -71` is `EPROTO` — a USB protocol error. Once the kernel gives up on a device, it does not retry automatically. A physical reconnect (unplug/replug) recovers the camera, as does a software USB port reset via sysfs.
+`error -71` is `EPROTO` — a USB protocol error. Once the kernel gives up on a device, it does not retry automatically. A physical reconnect (unplug/replug) recovers the camera, as does a software USB port power-cycle through `uhubctl`.
 
-The fix is a one-shot startup script that checks whether the camera device is present before the main service starts, and performs a single USB reset if it is not. The reset is not retried in a loop — if the camera is genuinely absent, the main service starts anyway and reports the error through its own logging.
+The fix is a one-shot startup script that checks whether the camera device is present before the main service starts, and power-cycles the known USB hub port if it is not. The reset is not retried in a loop; if the camera is genuinely absent, the main service starts anyway and reports the error through its own logging.
 
 ---
 
@@ -24,7 +24,7 @@ etc/
         ├── brio-startup-check.service   ← one-shot pre-check service
         └── jon-image-processor.service  ← main application service
 scripts/
-└── brio-startup-check.sh               ← USB reset script
+└── brio-startup-check.sh               ← USB power-cycle script
 ```
 
 ---
@@ -48,6 +48,12 @@ sudo cp scripts/brio-startup-check.sh /usr/local/bin/brio-startup-check.sh
 sudo chmod +x /usr/local/bin/brio-startup-check.sh
 ```
 
+The script uses `uhubctl`, so install it if it is not already present:
+
+```bash
+sudo apt-get install uhubctl
+```
+
 ### 3. Enable the services
 
 ```bash
@@ -67,8 +73,10 @@ jon.target
     │       └── /usr/local/bin/brio-startup-check.sh
     │               ├── /dev/video0 present?  ──► exit 0 (skip)
     │               └── not present?
-    │                       ├── BRIO found on USB bus?  ──► reset, wait, exit 0
-    │                       └── BRIO not on bus at all? ──► exit 0 (not connected)
+    │                       ├── locate BRIO by VID:PID with uhubctl
+    │                       ├── otherwise use cached hub location/port
+    │                       ├── otherwise use hardcoded fallback
+    │                       └── power-cycle port, wait, exit 0
     │
     └── jon-image-processor.service  (starts after brio-startup-check completes)
 ```
@@ -87,38 +95,64 @@ VENDOR="046d"
 PRODUCT="085e"
 VIDEO_DEV="/dev/video0"
 WAIT_AFTER_RESET=5
+CACHE_FILE="/opt/JONImageProcessor/var/last_brio_port"
+DEFAULT_LOCATION="2-1"   # Fallback, falls noch nie erkannt
+DEFAULT_PORT="3"
+
+mkdir -p "$(dirname "$CACHE_FILE")"
 
 if [ -e "$VIDEO_DEV" ]; then
     echo "Camera device $VIDEO_DEV already present, skipping reset"
     exit 0
 fi
 
-echo "Camera device $VIDEO_DEV not found, attempting USB reset..."
+echo "Camera device $VIDEO_DEV not found, trying to locate BRIO..."
 
-FOUND=0
-for dev in /sys/bus/usb/devices/*/; do
-    if [ -f "${dev}idVendor" ] && [ -f "${dev}idProduct" ]; then
-        if [ "$(cat ${dev}idVendor)" = "$VENDOR" ] && \
-           [ "$(cat ${dev}idProduct)" = "$PRODUCT" ]; then
-            echo "Found BRIO at ${dev}, resetting..."
-            echo 0 > "${dev}authorized"
-            sleep 2
-            echo 1 > "${dev}authorized"
-            sleep $WAIT_AFTER_RESET
-            FOUND=1
-            break
-        fi
+# 1. Versuch: dynamisch über VID:PID finden (klappt nur wenn Kamera sauber enumeriert hat)
+LOCATION_PORT=$(uhubctl 2>/dev/null | awk -v vid="$VENDOR" -v pid="$PRODUCT" '
+  /^Current status for hub/ {
+      loc=$5; gsub(/\[.*/,"",loc)
+  }
+  $0 ~ vid":"pid {
+      match($0,/^  Port ([0-9]+):/,m)
+      print loc":"m[1]
+  }
+')
+
+if [ -n "$LOCATION_PORT" ]; then
+    echo "BRIO found via VID:PID at $LOCATION_PORT"
+    echo "$LOCATION_PORT" > "$CACHE_FILE"
+else
+    # 2. Versuch: gecachte Position vom letzten erfolgreichen Mal
+    if [ -f "$CACHE_FILE" ]; then
+        LOCATION_PORT=$(cat "$CACHE_FILE")
+        echo "BRIO not enumerated (boot problem) - falling back to cached position $LOCATION_PORT"
+    else
+        # 3. Letzter Ausweg: fester Default
+        LOCATION_PORT="${DEFAULT_LOCATION}:${DEFAULT_PORT}"
+        echo "No cache available - falling back to hardcoded default $LOCATION_PORT"
     fi
-done
+fi
 
-if [ $FOUND -eq 0 ]; then
-    echo "BRIO not found on USB bus - camera probably not connected"
+HUB_LOCATION="${LOCATION_PORT%%:*}"
+HUB_PORT="${LOCATION_PORT##*:}"
+
+if [ -z "$HUB_LOCATION" ] || [ -z "$HUB_PORT" ]; then
+    echo "Could not determine hub location/port - giving up"
     exit 0
 fi
+
+echo "Power-cycling USB port $HUB_LOCATION:$HUB_PORT..."
+uhubctl -l "$HUB_LOCATION" -p "$HUB_PORT" -a off
+sleep 2
+uhubctl -l "$HUB_LOCATION" -p "$HUB_PORT" -a on
+sleep "$WAIT_AFTER_RESET"
 
 for i in $(seq 1 10); do
     if [ -e "$VIDEO_DEV" ]; then
         echo "Camera device $VIDEO_DEV appeared after reset"
+        # Position bestätigt sich als korrekt -> nochmal sichern
+        echo "${HUB_LOCATION}:${HUB_PORT}" > "$CACHE_FILE"
         exit 0
     fi
     sleep 1
@@ -183,8 +217,19 @@ journalctl -u brio-startup-check.service
 Expected output when the reset was needed and succeeded:
 
 ```
-Camera device /dev/video0 not found, attempting USB reset...
-Found BRIO at /sys/bus/usb/devices/2-2/, resetting...
+Camera device /dev/video0 not found, trying to locate BRIO...
+BRIO found via VID:PID at 2-1:3
+Power-cycling USB port 2-1:3...
+Camera device /dev/video0 appeared after reset
+```
+
+Expected output when the cold-start failure prevents VID:PID enumeration but a
+cached port is available:
+
+```
+Camera device /dev/video0 not found, trying to locate BRIO...
+BRIO not enumerated (boot problem) - falling back to cached position 2-1:3
+Power-cycling USB port 2-1:3...
 Camera device /dev/video0 appeared after reset
 ```
 
@@ -199,8 +244,11 @@ systemctl status jon-image-processor.service
 
 ## Notes
 
-- The script identifies the BRIO by USB Vendor ID `046d` / Product ID `085e`. If you use a different camera, adjust these values. Find them with `lsusb`.
-- The USB reset is performed **once only**. If the camera is missing or unplugged later, JONImageProcessor shows a `Camera DISCONNECTED` test image and periodically tries to reopen the configured camera device after it has been visible for a short settle period. Reconnect is accepted after the reopened V4L2 device delivers a valid frame.
+- The script first identifies the BRIO by USB Vendor ID `046d` / Product ID `085e` through `uhubctl`.
+- On successful detection it caches the hub location/port in `/opt/JONImageProcessor/var/last_brio_port`.
+- If the camera is in the cold-start failure state and cannot enumerate, the script uses the cached port. If no cache exists, it falls back to `DEFAULT_LOCATION` and `DEFAULT_PORT`.
+- The USB power-cycle is performed **once only**. If the camera is missing or unplugged later, JONImageProcessor shows a `Camera DISCONNECTED` test image and periodically tries to reopen the configured camera device after it has been visible for a short settle period. Reconnect is accepted after the reopened V4L2 device delivers a valid frame.
+- If you use a different camera or hub port, adjust `VENDOR`, `PRODUCT`, `DEFAULT_LOCATION`, and `DEFAULT_PORT`. Find vendor/product with `lsusb`; inspect controllable hub locations with `uhubctl`.
 - If the Jetson kernel does not recreate `/dev/video0` after a USB reconnect, JONImageProcessor cannot recover the device by itself and keeps showing `Camera DISCONNECTED`.
 - This issue is observed on NVIDIA Jetson (Tegra) hardware with a 3 m USB 3 cable. A shorter cable or an active (powered) USB extension may reduce the frequency of the problem at the hardware level.
 - JONImageProcessor runs as a normal foreground process by default, which is the correct mode for systemd `Type=simple`.

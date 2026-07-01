@@ -40,7 +40,6 @@ enum OptionId {
     OptionBackgroundImageFolder,
     OptionBackgroundLoopIfVideo,
     OptionPauseSource,
-    OptionSecondaryCameraPipeline,
     OptionSecondaryCameraRtpPort,
     OptionPauseImage,
     OptionPauseImageFolder,
@@ -101,7 +100,6 @@ const std::vector<OptionDefinition>& optionDefinitions()
         {OptionBackgroundImageFolder, 0, "background-image-folder", required_argument, "path", "Base folder for background images set through IPC", "."},
         {OptionBackgroundLoopIfVideo, 0, "background-loop-if-video", required_argument, "true|false", "Loop background file when it is a video", "false"},
         {OptionPauseSource, 0, "pause-source", required_argument, "image|camera", "Pause source: image media or secondary camera", "image"},
-        {OptionSecondaryCameraPipeline, 0, "secondary-camera-pipeline", required_argument, "pipeline", "Legacy secondary camera GStreamer pipeline; ignored by AirPlay RTP mode", ""},
         {OptionSecondaryCameraRtpPort, 0, "secondary-camera-rtp-port", required_argument, "port", "UDP RTP port for AirPlay secondary camera input", "5004"},
         {OptionPauseImage, 0, "pause-image", required_argument, "path", "Image/video/html file for camera status screens", ""},
         {OptionPauseImageFolder, 0, "pause-image-folder", required_argument, "path", "Base folder for pause images set through IPC", "."},
@@ -808,13 +806,6 @@ bool parseCommandLine(int argc, char** argv, CommandLineResult& result, std::str
             break;
         case OptionPauseSource:
             if (!parsePauseSource(optarg, result.config.pauseSource, error)) return false;
-            break;
-        case OptionSecondaryCameraPipeline:
-            result.config.secondaryCameraPipeline = optarg;
-            if (result.config.secondaryCameraPipeline.empty()) {
-                error = "--secondary-camera-pipeline must not be empty.";
-                return false;
-            }
             break;
         case OptionSecondaryCameraRtpPort:
             if (!parseRangedInteger(optarg, "--secondary-camera-rtp-port", 1, 65535, result.config.secondaryCameraRtpPort, error)) return false;
