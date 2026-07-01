@@ -926,6 +926,7 @@ struct PauseCameraSource {
                     pipelineStream
                         << "udpsrc port=" << wantedRtpPort
                         << " caps=\"application/x-rtp,media=video,clock-rate=90000,encoding-name=H264,payload=96\" ! "
+                        << "rtpjitterbuffer latency=200 drop-on-latency=false do-lost=true ! "
                         << "rtph264depay ! h264parse name=rtp_parse config-interval=-1 ! "
                         << "video/x-h264,stream-format=byte-stream,alignment=au ! tee name=rtp_tee ! "
                         << "queue ! appsink name=rtp_sink emit-signals=false drop=false max-buffers=4 sync=false "
