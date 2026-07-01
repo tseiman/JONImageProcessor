@@ -681,6 +681,7 @@ struct PauseCameraSource {
             std::chrono::steady_clock::time_point waitingForKeyframeSince;
             bool waitingForFirstFrame = false;
             std::chrono::steady_clock::time_point fallbackStartedAt;
+            std::chrono::steady_clock::time_point lastIDRRestartAt;
             auto lastSampleAt = std::chrono::steady_clock::now();
             std::chrono::steady_clock::time_point lastNoSampleLog;
             int localRtpPort = 0;
@@ -693,6 +694,7 @@ struct PauseCameraSource {
             std::chrono::steady_clock::time_point lastSkippedBlackLog;
             constexpr auto blackStreakRestartThreshold = std::chrono::seconds(3);
             constexpr auto idrWaitTimeout = std::chrono::milliseconds(750);
+            constexpr auto idrRestartRateLimit = std::chrono::seconds(10);
             constexpr auto firstFrameWaitTimeout = std::chrono::seconds(2);
             constexpr auto noSampleLogTimeout = std::chrono::seconds(15);
 
@@ -761,6 +763,7 @@ struct PauseCameraSource {
                 waitingForFirstFrame = false;
                 waitingForKeyframeSince = {};
                 fallbackStartedAt = {};
+                lastIDRRestartAt = {};
                 targetCapsSig.clear();
                 runningCapsSig.clear();
                 lastSampleAt = std::chrono::steady_clock::now();
@@ -873,7 +876,7 @@ struct PauseCameraSource {
                     std::ostringstream pipelineStream;
                     pipelineStream
                         << "udpsrc port=" << wantedRtpPort
-                        << " buffer-size=2097152"
+                        << " buffer-size=8388608"
                         << " caps=\"application/x-rtp,media=video,clock-rate=90000,encoding-name=H264,payload=96\" ! "
                         << "rtpjitterbuffer latency=500 drop-on-latency=false do-lost=true ! "
                         << "rtph264depay ! h264parse name=rtp_parse config-interval=-1 ! "
@@ -1124,6 +1127,26 @@ struct PauseCameraSource {
                             clearPendingFallback();
                         }
                         continue;
+                    }
+                    if (decoderPipeline
+                        && !waitingForMatchingKeyframe
+                        && !waitingForFirstFrame
+                        && !bufferSig.empty()
+                        && (runningCapsSig.empty() || bufferSig == runningCapsSig)) {
+                        const auto now = std::chrono::steady_clock::now();
+                        const bool rateLimitOk = lastIDRRestartAt.time_since_epoch().count() == 0
+                            || now - lastIDRRestartAt >= idrRestartRateLimit;
+                        if (rateLimitOk) {
+                            LOG_INFO("AirPlay: IDR received while RUNNING, restarting decoder for clean state ("
+                                << bufferSig << ")");
+                            const DecoderStartResult result = buildDecoderPipeline(bufferSig);
+                            if (result != DecoderStartResult::Failed) {
+                                waitingForFirstFrame = true;
+                                fallbackStartedAt = now;
+                                lastIDRRestartAt = now;
+                            }
+                            continue;
+                        }
                     }
                 }
 
