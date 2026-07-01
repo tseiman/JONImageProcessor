@@ -63,7 +63,6 @@ constexpr int ExitRuntimeError = 2;
 constexpr auto CameraReconnectInterval = std::chrono::seconds(5);
 constexpr auto CameraReconnectSettleTime = std::chrono::seconds(3);
 constexpr auto DisplayReconnectInterval = std::chrono::seconds(3);
-constexpr int kDebugDumpEveryNFrames = 30;
 
 std::time_t fileMtime(const std::string& path);
 
@@ -666,12 +665,10 @@ struct PauseCameraSource {
             ensureGStreamerInitialized();
             GstElement* rtpPipeline = nullptr;
             GstAppSink* rtpSink = nullptr;
-            GstAppSink* debugSinkA = nullptr;
             GstBus* rtpBus = nullptr;
             GstElement* decoderPipeline = nullptr;
             GstAppSrc* decoderSrc = nullptr;
             GstAppSink* airplaySink = nullptr;
-            GstAppSink* debugSinkB = nullptr;
             GstBus* decoderBus = nullptr;
             GstBuffer* cachedKeyframe = nullptr;
             GstCaps* cachedKeyframeCaps = nullptr;
@@ -694,9 +691,6 @@ struct PauseCameraSource {
             bool inBlackStreak = false;
             std::chrono::steady_clock::time_point firstBlackFrameAt;
             std::chrono::steady_clock::time_point lastSkippedBlackLog;
-            std::uint64_t dumpACounter = 0;
-            std::uint64_t dumpBCounter = 0;
-            std::uint64_t dumpCCounter = 0;
             constexpr auto blackStreakRestartThreshold = std::chrono::seconds(3);
             constexpr auto idrWaitTimeout = std::chrono::milliseconds(750);
             constexpr auto firstFrameWaitTimeout = std::chrono::seconds(2);
@@ -719,38 +713,6 @@ struct PauseCameraSource {
                 }
             };
 
-            auto dumpFrame = [](const std::string& stage, std::uint64_t counter, const cv::Mat& frame) {
-                if (frame.empty()) {
-                    return;
-                }
-                const std::string path = "/tmp/jon-stage-" + stage + "-" + std::to_string(counter) + ".jpg";
-                cv::imwrite(path, frame);
-            };
-
-            auto dumpRawSample = [](const std::string& stage, std::uint64_t counter, GstSample* sample) {
-                GstBuffer* buffer = gst_sample_get_buffer(sample);
-                GstMapInfo map {};
-                if (!buffer || !gst_buffer_map(buffer, &map, GST_MAP_READ)) {
-                    return;
-                }
-                const std::string path = "/tmp/jon-stage-" + stage + "-raw-" + std::to_string(counter) + ".bin";
-                std::ofstream file(path, std::ios::binary);
-                if (file) {
-                    file.write(reinterpret_cast<const char*>(map.data), static_cast<std::streamsize>(map.size));
-                }
-                gst_buffer_unmap(buffer, &map);
-            };
-
-            auto dumpSampleFrame = [&](const std::string& stage, std::uint64_t counter, GstSample* sample, bool dumpRawOnFailure) {
-                cv::Mat debugFrame;
-                std::string debugError;
-                if (sampleToBgrMat(sample, debugFrame, debugError) && !debugFrame.empty()) {
-                    dumpFrame(stage, counter, debugFrame);
-                } else if (dumpRawOnFailure) {
-                    dumpRawSample(stage, counter, sample);
-                }
-            };
-
             auto clearDecoderPipeline = [&]() {
                 if (decoderSrc) {
                     gst_app_src_end_of_stream(decoderSrc);
@@ -769,10 +731,6 @@ struct PauseCameraSource {
                 if (airplaySink) {
                     gst_object_unref(airplaySink);
                     airplaySink = nullptr;
-                }
-                if (debugSinkB) {
-                    gst_object_unref(debugSinkB);
-                    debugSinkB = nullptr;
                 }
                 if (decoderPipeline) {
                     gst_object_unref(decoderPipeline);
@@ -793,10 +751,6 @@ struct PauseCameraSource {
                 if (rtpSink) {
                     gst_object_unref(rtpSink);
                     rtpSink = nullptr;
-                }
-                if (debugSinkA) {
-                    gst_object_unref(debugSinkA);
-                    debugSinkA = nullptr;
                 }
                 if (rtpPipeline) {
                     gst_object_unref(rtpPipeline);
@@ -837,10 +791,9 @@ struct PauseCameraSource {
                 GError* parseError = nullptr;
                 decoderPipeline = gst_parse_launch(
                     "appsrc name=decoder_src format=time is-live=true do-timestamp=true ! "
-                    "h264parse ! nvv4l2decoder ! tee name=decoder_tee ! queue ! nvvidconv ! "
+                    "h264parse ! nvv4l2decoder ! nvvidconv ! "
                     "video/x-raw,format=I420 ! videoconvert ! video/x-raw,format=BGR ! "
-                    "appsink name=airplay_sink drop=true max-buffers=1 sync=false "
-                    "decoder_tee. ! queue ! appsink name=debug_sink_b emit-signals=false drop=true max-buffers=1 sync=false",
+                    "appsink name=airplay_sink drop=true max-buffers=1 sync=false",
                     &parseError);
                 if (!decoderPipeline) {
                     LOG_ERROR("Cannot build AirPlay decoder pipeline: "
@@ -855,7 +808,6 @@ struct PauseCameraSource {
 
                 decoderSrc = GST_APP_SRC(gst_bin_get_by_name(GST_BIN(decoderPipeline), "decoder_src"));
                 airplaySink = GST_APP_SINK(gst_bin_get_by_name(GST_BIN(decoderPipeline), "airplay_sink"));
-                debugSinkB = GST_APP_SINK(gst_bin_get_by_name(GST_BIN(decoderPipeline), "debug_sink_b"));
                 decoderBus = gst_element_get_bus(decoderPipeline);
                 if (!decoderSrc || !airplaySink) {
                     LOG_ERROR("Cannot find appsrc/appsink in AirPlay decoder pipeline");
@@ -865,10 +817,6 @@ struct PauseCameraSource {
                 gst_app_src_set_max_bytes(decoderSrc, 4 * 1024 * 1024);
                 gst_app_sink_set_drop(airplaySink, TRUE);
                 gst_app_sink_set_max_buffers(airplaySink, 1);
-                if (debugSinkB) {
-                    gst_app_sink_set_drop(debugSinkB, TRUE);
-                    gst_app_sink_set_max_buffers(debugSinkB, 1);
-                }
 
                 if (gst_element_set_state(decoderPipeline, GST_STATE_PLAYING) == GST_STATE_CHANGE_FAILURE) {
                     LOG_ERROR("Cannot start AirPlay decoder pipeline");
@@ -925,13 +873,12 @@ struct PauseCameraSource {
                     std::ostringstream pipelineStream;
                     pipelineStream
                         << "udpsrc port=" << wantedRtpPort
+                        << " buffer-size=2097152"
                         << " caps=\"application/x-rtp,media=video,clock-rate=90000,encoding-name=H264,payload=96\" ! "
-                        << "rtpjitterbuffer latency=200 drop-on-latency=false do-lost=true ! "
+                        << "rtpjitterbuffer latency=500 drop-on-latency=false do-lost=true ! "
                         << "rtph264depay ! h264parse name=rtp_parse config-interval=-1 ! "
                         << "video/x-h264,stream-format=byte-stream,alignment=au ! tee name=rtp_tee ! "
                         << "queue ! appsink name=rtp_sink emit-signals=false drop=false max-buffers=4 sync=false "
-                        << "rtp_tee. ! queue ! avdec_h264 ! videoconvert ! video/x-raw,format=BGR ! "
-                        << "appsink name=debug_sink_a emit-signals=false drop=true max-buffers=1 sync=false "
                         << "rtp_tee. ! queue ! filesink location=/tmp/jon-airplay-debug.h264 sync=false";
                     GError* parseError = nullptr;
                     rtpPipeline = gst_parse_launch(pipelineStream.str().c_str(), &parseError);
@@ -994,14 +941,6 @@ struct PauseCameraSource {
                     gst_app_sink_set_emit_signals(rtpSink, FALSE);
                     gst_app_sink_set_max_buffers(rtpSink, 4);
                     gst_app_sink_set_drop(rtpSink, FALSE);
-                    GstElement* debugSinkAElement = gst_bin_get_by_name(GST_BIN(rtpPipeline), "debug_sink_a");
-                    if (debugSinkAElement && GST_IS_APP_SINK(debugSinkAElement)) {
-                        debugSinkA = GST_APP_SINK(debugSinkAElement);
-                        gst_app_sink_set_drop(debugSinkA, TRUE);
-                        gst_app_sink_set_max_buffers(debugSinkA, 1);
-                    } else if (debugSinkAElement) {
-                        gst_object_unref(debugSinkAElement);
-                    }
 
                     rtpBus = gst_element_get_bus(rtpPipeline);
                     const GstStateChangeReturn stateResult = gst_element_set_state(rtpPipeline, GST_STATE_PLAYING);
@@ -1148,17 +1087,6 @@ struct PauseCameraSource {
                 }
                 lastSampleAt = std::chrono::steady_clock::now();
                 lastNoSampleLog = {};
-                if constexpr (kDebugDumpEveryNFrames > 0) {
-                    if (debugSinkA) {
-                        GstSamplePtr debugASample(gst_app_sink_try_pull_sample(debugSinkA, 0));
-                        if (debugASample) {
-                            dumpACounter++;
-                            if (dumpACounter % kDebugDumpEveryNFrames == 0) {
-                                dumpSampleFrame("a", dumpACounter, debugASample.get(), false);
-                            }
-                        }
-                    }
-                }
 
                 GstBuffer* buffer = gst_sample_get_buffer(sample.get());
                 GstCaps* caps = gst_sample_get_caps(sample.get());
@@ -1277,17 +1205,6 @@ struct PauseCameraSource {
                 if (!airplaySink) {
                     continue;
                 }
-                if constexpr (kDebugDumpEveryNFrames > 0) {
-                    if (debugSinkB) {
-                        GstSamplePtr debugBSample(gst_app_sink_try_pull_sample(debugSinkB, 0));
-                        if (debugBSample) {
-                            dumpBCounter++;
-                            if (dumpBCounter % kDebugDumpEveryNFrames == 0) {
-                                dumpSampleFrame("b", dumpBCounter, debugBSample.get(), true);
-                            }
-                        }
-                    }
-                }
                 GstSamplePtr outSample(gst_app_sink_try_pull_sample(airplaySink, 0));
                 if (!outSample) {
                     continue;
@@ -1301,12 +1218,6 @@ struct PauseCameraSource {
                         lastReadFailure = std::to_string(localRtpPort);
                     }
                     continue;
-                }
-                if constexpr (kDebugDumpEveryNFrames > 0) {
-                    dumpCCounter++;
-                    if (dumpCCounter % kDebugDumpEveryNFrames == 0) {
-                        dumpFrame("c", dumpCCounter, frame);
-                    }
                 }
 
                 if (isNearlyBlackFrame(frame)) {
