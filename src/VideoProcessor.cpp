@@ -331,6 +331,9 @@ struct PauseCameraSource {
 
     static void logFrameContentDiagnostics(const cv::Mat& frame, const std::string& sampleFormat, std::size_t stride, std::size_t bufferSize)
     {
+        if (!Logger::isVerbose()) {
+            return;
+        }
         if (frame.empty()) {
             return;
         }
@@ -387,13 +390,13 @@ struct PauseCameraSource {
             }
         }
 
-        LOG_INFO("Secondary camera frame content: size=" << frame.cols << "x" << frame.rows
-                 << " format=" << sampleFormat
-                 << " stride=" << stride
-                 << " buffer=" << bufferSize
-                 << " mean_bgr=" << meanValue[0] << "," << meanValue[1] << "," << meanValue[2]
-                 << " gray_minmax=" << minValue << "," << maxValue
-                 << " bright_ratio=" << brightRatio);
+        LOG_VERBOSE("Secondary camera frame content: size=" << frame.cols << "x" << frame.rows
+                    << " format=" << sampleFormat
+                    << " stride=" << stride
+                    << " buffer=" << bufferSize
+                    << " mean_bgr=" << meanValue[0] << "," << meanValue[1] << "," << meanValue[2]
+                    << " gray_minmax=" << minValue << "," << maxValue
+                    << " bright_ratio=" << brightRatio);
         if (warnBlack) {
             LOG_WARNING("Secondary camera frame content is black although caps are valid");
         }
@@ -411,12 +414,7 @@ struct PauseCameraSource {
             return true;
         }
         const cv::Scalar meanValue = cv::mean(frame);
-        cv::Mat gray;
-        cv::cvtColor(frame, gray, cv::COLOR_BGR2GRAY);
-        cv::Mat brightMask;
-        cv::threshold(gray, brightMask, 16.0, 255.0, cv::THRESH_BINARY);
-        const double brightRatio = static_cast<double>(cv::countNonZero(brightMask)) / static_cast<double>(gray.rows * gray.cols);
-        return meanValue[0] < 8.0 && meanValue[1] < 8.0 && meanValue[2] < 8.0 && brightRatio < 0.03;
+        return meanValue[0] < 8.0 && meanValue[1] < 8.0 && meanValue[2] < 8.0;
     }
 
     static std::string capsSignature(GstCaps* caps)
@@ -692,11 +690,13 @@ struct PauseCameraSource {
             bool inBlackStreak = false;
             std::chrono::steady_clock::time_point firstBlackFrameAt;
             std::chrono::steady_clock::time_point lastSkippedBlackLog;
+            std::uint64_t blackCheckCounter = 0;
             constexpr auto blackStreakRestartThreshold = std::chrono::seconds(3);
             constexpr auto idrWaitTimeout = std::chrono::milliseconds(750);
             constexpr auto idrRestartRateLimit = std::chrono::seconds(10);
             constexpr auto firstFrameWaitTimeout = std::chrono::seconds(2);
             constexpr auto noSampleLogTimeout = std::chrono::seconds(15);
+            constexpr std::uint64_t blackCheckFrameInterval = 10;
 
             enum class DecoderStartResult {
                 Failed,
@@ -963,6 +963,7 @@ struct PauseCameraSource {
                     inBlackStreak = false;
                     firstBlackFrameAt = {};
                     lastSkippedBlackLog = {};
+                    blackCheckCounter = 0;
                     lastSampleAt = std::chrono::steady_clock::now();
                     lastNoSampleLog = {};
                     frames = 0;
@@ -1243,7 +1244,15 @@ struct PauseCameraSource {
                     continue;
                 }
 
-                if (isNearlyBlackFrame(frame)) {
+                bool hasValidFrame = false;
+                {
+                    std::lock_guard<std::mutex> lock(workerState->mutex);
+                    hasValidFrame = workerState->hasFrame;
+                }
+                const bool shouldCheckBlackFrame = inBlackStreak || !hasValidFrame
+                    || (++blackCheckCounter % blackCheckFrameInterval == 0);
+
+                if (shouldCheckBlackFrame && isNearlyBlackFrame(frame)) {
                     const auto now = std::chrono::steady_clock::now();
                     if (!inBlackStreak) {
                         inBlackStreak = true;
@@ -1277,9 +1286,11 @@ struct PauseCameraSource {
                     continue;
                 }
 
-                inBlackStreak = false;
-                firstBlackFrameAt = {};
-                lastSkippedBlackLog = {};
+                if (shouldCheckBlackFrame) {
+                    inBlackStreak = false;
+                    firstBlackFrameAt = {};
+                    lastSkippedBlackLog = {};
+                }
                 lastReadFailure.clear();
                 frames++;
                 if (frames <= 5 || frames % 900 == 0) {
