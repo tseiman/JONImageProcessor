@@ -675,11 +675,14 @@ struct PauseCameraSource {
             std::string cachedKeyframeSig;
             bool waitingForMatchingKeyframe = false;
             std::string targetCapsSig;
+            std::string runningCapsSig;
             GstBuffer* pendingFallbackBuffer = nullptr;
             GstCaps* pendingFallbackCaps = nullptr;
             std::chrono::steady_clock::time_point waitingForKeyframeSince;
             bool waitingForFirstFrame = false;
             std::chrono::steady_clock::time_point fallbackStartedAt;
+            auto lastSampleAt = std::chrono::steady_clock::now();
+            std::chrono::steady_clock::time_point lastNoSampleLog;
             int localRtpPort = 0;
             int lastOpenFailurePort = 0;
             std::string lastReadFailure;
@@ -726,6 +729,7 @@ struct PauseCameraSource {
                     gst_object_unref(decoderPipeline);
                     decoderPipeline = nullptr;
                 }
+                runningCapsSig.clear();
             };
 
             auto clearRtpPipeline = [&]() {
@@ -751,6 +755,9 @@ struct PauseCameraSource {
                 waitingForKeyframeSince = {};
                 fallbackStartedAt = {};
                 targetCapsSig.clear();
+                runningCapsSig.clear();
+                lastSampleAt = std::chrono::steady_clock::now();
+                lastNoSampleLog = {};
                 clearPendingFallback();
                 cachedKeyframeSig.clear();
                 if (cachedKeyframe) {
@@ -941,6 +948,8 @@ struct PauseCameraSource {
                     inBlackStreak = false;
                     firstBlackFrameAt = {};
                     lastSkippedBlackLog = {};
+                    lastSampleAt = std::chrono::steady_clock::now();
+                    lastNoSampleLog = {};
                     frames = 0;
                     statsStart = std::chrono::steady_clock::now();
                     {
@@ -980,18 +989,30 @@ struct PauseCameraSource {
                     }
                 }
                 if (needsRestart && !restartSig.empty()) {
-                    LOG_INFO("AirPlay caps changed, stopping decoder and waiting for matching IDR (" << restartSig << ")");
-                    clearDecoderPipeline();
-                    clearPendingFallback();
-                    waitingForMatchingKeyframe = true;
-                    waitingForFirstFrame = false;
-                    targetCapsSig = restartSig;
-                    waitingForKeyframeSince = std::chrono::steady_clock::now();
-                    fallbackStartedAt = {};
-                    {
-                        std::lock_guard<std::mutex> lock(workerState->mutex);
-                        workerState->lastFrame.release();
-                        workerState->hasFrame = false;
+                    const bool alreadyHandlingSameSig =
+                        restartSig == targetCapsSig
+                        && (decoderPipeline || waitingForMatchingKeyframe || waitingForFirstFrame);
+                    const bool alreadyRunningSameSig =
+                        decoderPipeline
+                        && !waitingForMatchingKeyframe
+                        && restartSig == runningCapsSig;
+                    if (alreadyHandlingSameSig || alreadyRunningSameSig) {
+                        LOG_INFO("AirPlay caps changed to same sig as active decoder, ignoring (" << restartSig << ")");
+                    } else {
+                        LOG_INFO("AirPlay caps changed, stopping decoder and waiting for matching IDR (" << restartSig << ")");
+                        clearDecoderPipeline();
+                        clearPendingFallback();
+                        waitingForMatchingKeyframe = true;
+                        waitingForFirstFrame = false;
+                        targetCapsSig = restartSig;
+                        runningCapsSig.clear();
+                        waitingForKeyframeSince = std::chrono::steady_clock::now();
+                        fallbackStartedAt = {};
+                        {
+                            std::lock_guard<std::mutex> lock(workerState->mutex);
+                            workerState->lastFrame.release();
+                            workerState->hasFrame = false;
+                        }
                     }
                 }
 
@@ -1033,8 +1054,24 @@ struct PauseCameraSource {
 
                 GstSamplePtr sample(gst_app_sink_try_pull_sample(rtpSink, 100 * GST_MSECOND));
                 if (!sample) {
+                    const auto now = std::chrono::steady_clock::now();
+                    if (now - lastSampleAt > std::chrono::seconds(5)) {
+                        std::lock_guard<std::mutex> lock(workerState->mutex);
+                        if (workerState->hasFrame) {
+                            LOG_INFO("AirPlay RTP: no sample for 5s, session ended or paused");
+                            workerState->lastFrame.release();
+                            workerState->hasFrame = false;
+                            lastNoSampleLog = now;
+                        } else if (lastNoSampleLog.time_since_epoch().count() == 0
+                            || now - lastNoSampleLog >= std::chrono::seconds(30)) {
+                            LOG_INFO("AirPlay RTP: waiting for samples on UDP port " << localRtpPort);
+                            lastNoSampleLog = now;
+                        }
+                    }
                     continue;
                 }
+                lastSampleAt = std::chrono::steady_clock::now();
+                lastNoSampleLog = {};
 
                 GstBuffer* buffer = gst_sample_get_buffer(sample.get());
                 GstCaps* caps = gst_sample_get_caps(sample.get());
@@ -1120,6 +1157,7 @@ struct PauseCameraSource {
                     if (hasFrame) {
                         waitingForFirstFrame = false;
                         LOG_INFO("AirPlay decoder pipeline: first frame received, RUNNING (" << targetCapsSig << ")");
+                        runningCapsSig = targetCapsSig;
                         targetCapsSig.clear();
                     } else if (fallbackStartedAt.time_since_epoch().count() != 0
                         && now - fallbackStartedAt >= firstFrameWaitTimeout) {
