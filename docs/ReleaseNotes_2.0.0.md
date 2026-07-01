@@ -1,6 +1,14 @@
-# JONImageProcessor – AirPlay Integration: Status Checkpoint
+# JONImageProcessor – Release Notes 2.0.0
 
-## Datum: 1. Juli 2026, git=8f6d7ae
+## Datum: 1. Juli 2026
+
+Release: `2.0.0`
+
+Funktionierender Code-Checkpoint: `8f6d7ae`
+
+Hinweis: Der Git-Tag `2.0.0` zeigt auf den Release-Notes-Commit. Der funktionierende
+AirPlay-Code-Stand ist `8f6d7ae`; die späteren Commits bis zum Tag ändern nur die
+Release-Dokumentation.
 
 ## Was funktioniert
 
@@ -35,7 +43,8 @@ Statusbild. Akzeptables Verhalten, kein echter Bug.
 
 ## Aktueller Git-Stand
 
-Commit: nach IDR-Recovery + UDP-Buffer 8MB Patch
+Release-Tag: `2.0.0`
+Code-Checkpoint: `8f6d7ae` nach IDR-Recovery + UDP-Buffer 8MB Patch
 Branch: main
 
 ## uxplay-Konfiguration (produktiv)
