@@ -129,6 +129,12 @@ cmake --build build
 
 Without `-DJON_ENABLE_TENSORRT_MASK=ON`, the binary can show help/version and run diagnostics with `--no-mask`, but TensorRT masking is not available.
 
+Optional AirPlay diagnostics:
+
+- `-DJON_ENABLE_AIRPLAY_H264_DEBUG_DUMP=ON` adds a debug branch to the AirPlay RTP pipeline and writes `/tmp/jon-airplay-debug.h264`.
+- The option is `OFF` by default so normal builds do not pay the extra `tee/filesink` overhead.
+- For cross builds, set `ENABLE_AIRPLAY_H264_DEBUG_DUMP=ON` before `scripts/build-jetson-cross.sh`.
+
 ### Jetson Cross Build
 
 Build the AArch64 Jetson binary from the build host:

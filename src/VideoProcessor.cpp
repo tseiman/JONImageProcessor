@@ -880,9 +880,16 @@ struct PauseCameraSource {
                         << " caps=\"application/x-rtp,media=video,clock-rate=90000,encoding-name=H264,payload=96\" ! "
                         << "rtpjitterbuffer latency=500 drop-on-latency=false do-lost=true ! "
                         << "rtph264depay ! h264parse name=rtp_parse config-interval=-1 ! "
-                        << "video/x-h264,stream-format=byte-stream,alignment=au ! tee name=rtp_tee ! "
+                        << "video/x-h264,stream-format=byte-stream,alignment=au ! ";
+#if defined(JON_ENABLE_AIRPLAY_H264_DEBUG_DUMP)
+                    pipelineStream
+                        << "tee name=rtp_tee ! "
                         << "queue ! appsink name=rtp_sink emit-signals=false drop=false max-buffers=4 sync=false "
                         << "rtp_tee. ! queue ! filesink location=/tmp/jon-airplay-debug.h264 sync=false";
+#else
+                    pipelineStream
+                        << "appsink name=rtp_sink emit-signals=false drop=false max-buffers=4 sync=false";
+#endif
                     GError* parseError = nullptr;
                     rtpPipeline = gst_parse_launch(pipelineStream.str().c_str(), &parseError);
                     if (!rtpPipeline) {

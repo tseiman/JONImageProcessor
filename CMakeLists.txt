@@ -94,6 +94,7 @@ endif()
 
 option(JON_ENABLE_TENSORRT_MASK "Enable generic TensorRT/ONNX mask backend" OFF)
 option(JON_ENABLE_DRM_DISPLAY "Enable Linux DRM/KMS display backend" OFF)
+option(JON_ENABLE_AIRPLAY_H264_DEBUG_DUMP "Write AirPlay RTP H264 debug stream to /tmp/jon-airplay-debug.h264" OFF)
 set(JON_IMAGE_PROCESSOR_BUILD_HOST_OVERRIDE "" CACHE STRING "Optional build host name override, useful for containerized cross builds")
 
 execute_process(
@@ -167,6 +168,9 @@ target_link_libraries(JONImageProcessor PRIVATE ${OpenCV_LIBS})
 
 if (GSTREAMER_APP_FOUND)
     target_compile_definitions(JONImageProcessor PRIVATE JON_ENABLE_GSTREAMER_APP=1)
+    if (JON_ENABLE_AIRPLAY_H264_DEBUG_DUMP)
+        target_compile_definitions(JONImageProcessor PRIVATE JON_ENABLE_AIRPLAY_H264_DEBUG_DUMP=1)
+    endif()
     target_include_directories(JONImageProcessor PRIVATE ${GSTREAMER_APP_INCLUDE_DIRS})
     target_link_directories(JONImageProcessor PRIVATE ${GSTREAMER_APP_LIBRARY_DIRS})
     target_link_libraries(JONImageProcessor PRIVATE ${GSTREAMER_APP_LIBRARIES})
