@@ -300,7 +300,6 @@ struct PauseCameraSource {
         bool started = false;
         bool stop = false;
         bool capsChanged = false;
-        int airPlayEndMarkerNalType = 0;
         int desiredRtpPort = 0;
         int activeRtpPort = 0;
         std::string lastCapsSignature;
@@ -442,16 +441,20 @@ struct PauseCameraSource {
         return fallback;
     }
 
-    static int h264EndMarkerNalTypeFromData(const std::uint8_t* data, std::size_t size)
+    static int h264EndMarkerNalType(GstBuffer* buffer)
     {
-        if (!data || size == 0) {
+        if (!buffer) {
             return 0;
         }
 
-        const int rawNalType = data[0] & 0x1f;
-        if (rawNalType == 10 || rawNalType == 11) {
-            return rawNalType;
+        GstMapInfo map {};
+        if (!gst_buffer_map(buffer, &map, GST_MAP_READ)) {
+            return 0;
         }
+
+        const auto* data = static_cast<const std::uint8_t*>(map.data);
+        const std::size_t size = map.size;
+        int endMarkerNalType = 0;
 
         for (std::size_t i = 0; i + 3 < size;) {
             std::size_t startCodeSize = 0;
@@ -473,44 +476,11 @@ struct PauseCameraSource {
 
             const int nalType = data[nalHeaderOffset] & 0x1f;
             if (nalType == 10 || nalType == 11) {
-                return nalType;
+                endMarkerNalType = nalType;
+                break;
             }
             i = nalHeaderOffset + 1;
         }
-
-        for (std::size_t i = 0; i + 4 < size;) {
-            const std::uint32_t nalSize =
-                (static_cast<std::uint32_t>(data[i]) << 24)
-                | (static_cast<std::uint32_t>(data[i + 1]) << 16)
-                | (static_cast<std::uint32_t>(data[i + 2]) << 8)
-                | static_cast<std::uint32_t>(data[i + 3]);
-            if (nalSize == 0 || i + 4 + nalSize > size) {
-                break;
-            }
-            const int nalType = data[i + 4] & 0x1f;
-            if (nalType == 10 || nalType == 11) {
-                return nalType;
-            }
-            i += 4 + nalSize;
-        }
-
-        return 0;
-    }
-
-    static int h264EndMarkerNalType(GstBuffer* buffer)
-    {
-        if (!buffer) {
-            return 0;
-        }
-
-        GstMapInfo map {};
-        if (!gst_buffer_map(buffer, &map, GST_MAP_READ)) {
-            return 0;
-        }
-
-        const int endMarkerNalType = h264EndMarkerNalTypeFromData(
-            static_cast<const std::uint8_t*>(map.data),
-            map.size);
 
         gst_buffer_unmap(buffer, &map);
         return endMarkerNalType;
@@ -843,7 +813,6 @@ struct PauseCameraSource {
                 {
                     std::lock_guard<std::mutex> lock(workerState->mutex);
                     workerState->capsChanged = false;
-                    workerState->airPlayEndMarkerNalType = 0;
                     workerState->lastFrame.release();
                     workerState->hasFrame = false;
                 }
@@ -891,7 +860,6 @@ struct PauseCameraSource {
                     workerState->activeRtpPort = 0;
                     workerState->lastCapsSignature.clear();
                     workerState->capsChanged = false;
-                    workerState->airPlayEndMarkerNalType = 0;
                     workerState->lastFrame.release();
                     workerState->hasFrame = false;
                 }
@@ -988,7 +956,7 @@ struct PauseCameraSource {
                         << " buffer-size=8388608"
                         << " caps=\"application/x-rtp,media=video,clock-rate=90000,encoding-name=H264,payload=96\" ! "
                         << "rtpjitterbuffer latency=500 drop-on-latency=false do-lost=true ! "
-                        << "rtph264depay name=rtp_depay ! h264parse name=rtp_parse config-interval=-1 ! "
+                        << "rtph264depay ! h264parse name=rtp_parse config-interval=-1 ! "
                         << "video/x-h264,stream-format=byte-stream,alignment=au ! ";
 #if defined(JON_ENABLE_AIRPLAY_H264_DEBUG_DUMP)
                     pipelineStream
@@ -1043,27 +1011,6 @@ struct PauseCameraSource {
                     }
                     if (parseElem) {
                         gst_object_unref(parseElem);
-                    }
-
-                    GstElement* depayElem = gst_bin_get_by_name(GST_BIN(rtpPipeline), "rtp_depay");
-                    GstPad* depaySrcPad = depayElem ? gst_element_get_static_pad(depayElem, "src") : nullptr;
-                    if (depaySrcPad) {
-                        gst_pad_add_probe(depaySrcPad, GST_PAD_PROBE_TYPE_BUFFER,
-                            [](GstPad*, GstPadProbeInfo* info, gpointer userData) -> GstPadProbeReturn {
-                                auto* currentState = static_cast<State*>(userData);
-                                GstBuffer* probeBuffer = GST_PAD_PROBE_INFO_BUFFER(info);
-                                const int nalType = h264EndMarkerNalType(probeBuffer);
-                                if (nalType == 10 || nalType == 11) {
-                                    std::lock_guard<std::mutex> lock(currentState->mutex);
-                                    currentState->airPlayEndMarkerNalType = nalType;
-                                    return GST_PAD_PROBE_DROP;
-                                }
-                                return GST_PAD_PROBE_OK;
-                            }, workerState.get(), nullptr);
-                        gst_object_unref(depaySrcPad);
-                    }
-                    if (depayElem) {
-                        gst_object_unref(depayElem);
                     }
 
                     GstElement* sinkElement = gst_bin_get_by_name(GST_BIN(rtpPipeline), "rtp_sink");
@@ -1203,19 +1150,6 @@ struct PauseCameraSource {
                             break;
                         }
                     }
-                }
-
-                int pendingEndMarkerNalType = 0;
-                {
-                    std::lock_guard<std::mutex> lock(workerState->mutex);
-                    pendingEndMarkerNalType = workerState->airPlayEndMarkerNalType;
-                    workerState->airPlayEndMarkerNalType = 0;
-                }
-                if (pendingEndMarkerNalType == 10 || pendingEndMarkerNalType == 11) {
-                    LOG_INFO("AirPlay RTP: received H.264 end marker NAL type "
-                        << pendingEndMarkerNalType << ", showing Camera 2. DISCONNECTED");
-                    clearAirPlaySessionState();
-                    continue;
                 }
 
                 GstSamplePtr sample(gst_app_sink_try_pull_sample(rtpSink, 100 * GST_MSECOND));
