@@ -441,6 +441,51 @@ struct PauseCameraSource {
         return fallback;
     }
 
+    static int h264EndMarkerNalType(GstBuffer* buffer)
+    {
+        if (!buffer) {
+            return 0;
+        }
+
+        GstMapInfo map {};
+        if (!gst_buffer_map(buffer, &map, GST_MAP_READ)) {
+            return 0;
+        }
+
+        const auto* data = static_cast<const std::uint8_t*>(map.data);
+        const std::size_t size = map.size;
+        int endMarkerNalType = 0;
+
+        for (std::size_t i = 0; i + 3 < size;) {
+            std::size_t startCodeSize = 0;
+            if (i + 4 < size && data[i] == 0 && data[i + 1] == 0 && data[i + 2] == 0 && data[i + 3] == 1) {
+                startCodeSize = 4;
+            } else if (data[i] == 0 && data[i + 1] == 0 && data[i + 2] == 1) {
+                startCodeSize = 3;
+            }
+
+            if (startCodeSize == 0) {
+                ++i;
+                continue;
+            }
+
+            const std::size_t nalHeaderOffset = i + startCodeSize;
+            if (nalHeaderOffset >= size) {
+                break;
+            }
+
+            const int nalType = data[nalHeaderOffset] & 0x1f;
+            if (nalType == 10 || nalType == 11) {
+                endMarkerNalType = nalType;
+                break;
+            }
+            i = nalHeaderOffset + 1;
+        }
+
+        gst_buffer_unmap(buffer, &map);
+        return endMarkerNalType;
+    }
+
     static bool sampleToBgrMat(GstSample* sample, cv::Mat& frame, std::string& error)
     {
         GstCaps* caps = gst_sample_get_caps(sample);
@@ -739,6 +784,38 @@ struct PauseCameraSource {
                     decoderPipeline = nullptr;
                 }
                 runningCapsSig.clear();
+            };
+
+            auto clearAirPlaySessionState = [&]() {
+                clearDecoderPipeline();
+                clearPendingFallback();
+                waitingForMatchingKeyframe = false;
+                waitingForFirstFrame = false;
+                waitingForKeyframeSince = {};
+                fallbackStartedAt = {};
+                lastIDRRestartAt = {};
+                targetCapsSig.clear();
+                runningCapsSig.clear();
+                lastReadFailure.clear();
+                inBlackStreak = false;
+                firstBlackFrameAt = {};
+                lastSkippedBlackLog = {};
+                blackCheckCounter = 0;
+                cachedKeyframeSig.clear();
+                if (cachedKeyframe) {
+                    gst_buffer_unref(cachedKeyframe);
+                    cachedKeyframe = nullptr;
+                }
+                if (cachedKeyframeCaps) {
+                    gst_caps_unref(cachedKeyframeCaps);
+                    cachedKeyframeCaps = nullptr;
+                }
+                {
+                    std::lock_guard<std::mutex> lock(workerState->mutex);
+                    workerState->capsChanged = false;
+                    workerState->lastFrame.release();
+                    workerState->hasFrame = false;
+                }
             };
 
             auto clearRtpPipeline = [&]() {
@@ -1102,6 +1179,13 @@ struct PauseCameraSource {
                 GstBuffer* buffer = gst_sample_get_buffer(sample.get());
                 GstCaps* caps = gst_sample_get_caps(sample.get());
                 if (!buffer || !caps) {
+                    continue;
+                }
+                const int endMarkerNalType = h264EndMarkerNalType(buffer);
+                if (endMarkerNalType == 10 || endMarkerNalType == 11) {
+                    LOG_INFO("AirPlay RTP: received H.264 end marker NAL type "
+                        << endMarkerNalType << ", showing Camera 2. DISCONNECTED");
+                    clearAirPlaySessionState();
                     continue;
                 }
                 const bool isKeyframe = !GST_BUFFER_FLAG_IS_SET(buffer, GST_BUFFER_FLAG_DELTA_UNIT);
