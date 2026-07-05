@@ -532,7 +532,7 @@ Display mode is fixed to fill. The image fills the output canvas while preservin
 
 ## Benchmarking
 
-Use `--benchmark` to collect timing statistics for capture, resize, TensorRT preprocessing, TensorRT inference, postprocessing, mask upscale, background effect, display, and total frame time. The values can be read through IPC. Add `--verbose` when benchmark progress and shutdown summaries should be written to the log.
+Use `--benchmark` to collect timing statistics for capture, resize, TensorRT preprocessing, TensorRT inference, postprocessing, mask upscale, background effect, display, total frame time, process CPU, and process memory. The values can be read through IPC. Add `--verbose` when benchmark progress and shutdown summaries should be written to the log.
 
 TensorRT segmentation preprocessing preserves the source aspect ratio with letterboxing instead of stretching the camera frame into the model input. The RGB input is normalized to `[-1..1]`, matching MODNet-style matting models. The padding is removed from the model output before the mask is composited back onto the processed frame. This keeps body proportions closer to the camera image at `384x384` model sizes.
 
@@ -593,7 +593,7 @@ Read-only key:
 - `system.configDirectory`: same value as grouped system field.
 - `system.version`: current binary version string.
 - `secondaryCamera.rtpPort`: read-only UDP RTP port used by the AirPlay RTP secondary camera mode for pause or background camera effects.
-- `benchmark`: current benchmark snapshot. This key is available only when benchmark mode is enabled with `--benchmark` or `diagnostics.benchmark`.
+- `benchmark`: current benchmark snapshot. This key is available only when benchmark mode is enabled with `--benchmark` or `diagnostics.benchmark`. It includes frame counters/timing, accumulated process CPU (`cpu_total_seconds`, `cpu_percent`) and process RSS (`memory_rss_bytes`, `memory_peak_rss_bytes`).
 
 Examples:
 

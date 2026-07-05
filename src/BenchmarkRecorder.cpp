@@ -3,8 +3,12 @@
 #include "Logger.h"
 
 #include <algorithm>
+#include <cstdint>
+#include <fstream>
 #include <iomanip>
 #include <sstream>
+#include <sys/resource.h>
+#include <unistd.h>
 
 namespace {
 
@@ -87,12 +91,42 @@ void logDistributionLine(const std::string& label, double percent)
     LOG_BENCH(stream.str());
 }
 
+double secondsFromTimeval(const timeval& value)
+{
+    return static_cast<double>(value.tv_sec) + static_cast<double>(value.tv_usec) / 1000000.0;
+}
+
+std::size_t currentResidentSetBytes()
+{
+    std::ifstream statm("/proc/self/statm");
+    std::uint64_t totalPages = 0;
+    std::uint64_t residentPages = 0;
+    if (!(statm >> totalPages >> residentPages)) {
+        return 0;
+    }
+
+    const long pageSize = ::sysconf(_SC_PAGESIZE);
+    if (pageSize <= 0) {
+        return 0;
+    }
+    return static_cast<std::size_t>(residentPages) * static_cast<std::size_t>(pageSize);
+}
+
+std::size_t peakResidentSetBytes(const rusage& usage)
+{
+    // Linux reports ru_maxrss in KiB.
+    return usage.ru_maxrss > 0
+        ? static_cast<std::size_t>(usage.ru_maxrss) * 1024U
+        : 0U;
+}
+
 } // namespace
 
 BenchmarkRecorder::BenchmarkRecorder(bool enabled, bool logEnabled)
     : enabled_(enabled)
     , logEnabled_(logEnabled)
-    , lastProgressLog_(std::chrono::steady_clock::now())
+    , startedAt_(std::chrono::steady_clock::now())
+    , lastProgressLog_(startedAt_)
 {
 }
 
@@ -212,6 +246,15 @@ BenchmarkSnapshot BenchmarkRecorder::snapshot() const
     snapshot.fps = snapshot.avgFrameMs > 0.0 ? 1000.0 / snapshot.avgFrameMs : 0.0;
     snapshot.processingTotalMs = averageMilliseconds(BenchmarkStage::ProcessingTotal);
     snapshot.pipelineTotalMs = averageMilliseconds(BenchmarkStage::PipelineTotal);
+
+    rusage usage {};
+    if (::getrusage(RUSAGE_SELF, &usage) == 0) {
+        snapshot.cpuTotalSeconds = secondsFromTimeval(usage.ru_utime) + secondsFromTimeval(usage.ru_stime);
+        const double elapsedSeconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - startedAt_).count();
+        snapshot.cpuPercent = elapsedSeconds > 0.0 ? (snapshot.cpuTotalSeconds / elapsedSeconds) * 100.0 : 0.0;
+        snapshot.memoryPeakRssBytes = peakResidentSetBytes(usage);
+    }
+    snapshot.memoryRssBytes = currentResidentSetBytes();
     return snapshot;
 }
 

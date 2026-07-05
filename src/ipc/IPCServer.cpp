@@ -358,6 +358,10 @@ std::string benchmarkJson(const BenchmarkSnapshot& b)
         << ",\"avg_frame_ms\":" << b.avgFrameMs
         << ",\"processing_total_ms\":" << b.processingTotalMs
         << ",\"pipeline_total_ms\":" << b.pipelineTotalMs
+        << ",\"cpu_total_seconds\":" << b.cpuTotalSeconds
+        << ",\"cpu_percent\":" << b.cpuPercent
+        << ",\"memory_rss_bytes\":" << b.memoryRssBytes
+        << ",\"memory_peak_rss_bytes\":" << b.memoryPeakRssBytes
         << "}";
     return out.str();
 }

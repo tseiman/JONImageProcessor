@@ -10,6 +10,10 @@ struct BenchmarkSnapshot {
     double avgFrameMs = 0.0;
     double processingTotalMs = 0.0;
     double pipelineTotalMs = 0.0;
+    double cpuTotalSeconds = 0.0;
+    double cpuPercent = 0.0;
+    std::size_t memoryRssBytes = 0;
+    std::size_t memoryPeakRssBytes = 0;
 };
 
 class RuntimeState {
