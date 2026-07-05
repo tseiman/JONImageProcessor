@@ -1574,7 +1574,7 @@ struct StatusFrameBuffers {
 bool usesSecondaryCamera(const ProcessorConfig& config)
 {
     return (config.pauseImageEnabled && config.pauseSource == PauseSource::Camera)
-        || config.backgroundEffect == BackgroundEffect::Camera;
+        || (config.backgroundEffect == BackgroundEffect::Camera && !config.noOverlay && !config.noMask);
 }
 
 std::time_t fileMtime(const std::string& path)
@@ -2127,7 +2127,11 @@ cv::Mat applyBackgroundImage(
         return frame;
     }
 
-    cv::resize(backgroundImage, buffers.scaledBackgroundImage, frame.size(), 0.0, 0.0, cv::INTER_LINEAR);
+    if (backgroundImage.size() == frame.size()) {
+        buffers.scaledBackgroundImage = backgroundImage;
+    } else {
+        cv::resize(backgroundImage, buffers.scaledBackgroundImage, frame.size(), 0.0, 0.0, cv::INTER_LINEAR);
+    }
 
     buffers.result.create(frame.size(), frame.type());
 
