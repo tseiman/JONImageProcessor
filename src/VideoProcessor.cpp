@@ -1571,6 +1571,12 @@ struct StatusFrameBuffers {
 #endif
 };
 
+bool usesSecondaryCamera(const ProcessorConfig& config)
+{
+    return (config.pauseImageEnabled && config.pauseSource == PauseSource::Camera)
+        || config.backgroundEffect == BackgroundEffect::Camera;
+}
+
 std::time_t fileMtime(const std::string& path)
 {
     struct stat statBuffer {};
@@ -1811,7 +1817,9 @@ cv::Mat makeStatusFrame(
         logGeneratedStatusReason("pause camera unavailable");
         return makeStatusFrame(size, "Camera 2. DISCONNECTED");
     } else if (config != nullptr && buffers != nullptr && config->pauseImageEnabled && !config->pauseImagePath.empty()) {
-        buffers->pauseCamera.release();
+        if (!usesSecondaryCamera(*config)) {
+            buffers->pauseCamera.release();
+        }
         const std::string resolvedPath = mediaPath(config->pauseImageFolder, config->pauseImagePath);
         if (!buffers->pauseMedia.ensureLoaded(resolvedPath, config->pauseLoopIfVideo, size, "pause")) {
             buffers->scaledPauseImage.release();
@@ -1848,12 +1856,16 @@ cv::Mat makeStatusFrame(
         }
     } else if (config != nullptr && !config->pauseImageEnabled) {
         if (buffers != nullptr) {
-            buffers->pauseCamera.release();
+            if (!usesSecondaryCamera(*config)) {
+                buffers->pauseCamera.release();
+            }
         }
         logGeneratedStatusReason("pause.enabled=false");
     } else if (config != nullptr && config->pauseImagePath.empty()) {
         if (buffers != nullptr) {
-            buffers->pauseCamera.release();
+            if (!usesSecondaryCamera(*config)) {
+                buffers->pauseCamera.release();
+            }
         }
         logGeneratedStatusReason("pause.image is empty");
     } else {
@@ -2533,7 +2545,7 @@ int VideoProcessor::run()
             std::this_thread::sleep_for(std::chrono::milliseconds(33));
             readOk = true;
         } else if (lowLatencyMode) {
-            if (runtimeConfig.pauseSource != PauseSource::Camera) {
+            if (!usesSecondaryCamera(runtimeConfig)) {
                 statusFrameBuffers.pauseCamera.release();
             }
             if (cameraRuntimePaused) {
@@ -2604,7 +2616,7 @@ int VideoProcessor::run()
                 std::chrono::steady_clock::duration frameHandover {};
                 readOk = lowLatencyCapture.waitForLatestFrame(frame, captureWait, frameHandover);
                 if (readOk) {
-                    if (runtimeConfig.pauseSource != PauseSource::Camera) {
+                    if (!usesSecondaryCamera(runtimeConfig)) {
                         statusFrameBuffers.pauseCamera.release();
                     }
                     benchmark.add(BenchmarkStage::CaptureWait, captureWait);
@@ -2723,6 +2735,28 @@ int VideoProcessor::run()
                     backgroundFrame,
                     backgroundEffectBuffers);
                 if (!hasBackgroundFrame) {
+                    outputFrame = resized;
+                }
+            } else if (runtimeConfig.backgroundEffect == BackgroundEffect::Camera) {
+                cv::Mat backgroundFrame;
+                cv::Mat airPlayFrame;
+                const bool hasAirPlayFrame = statusFrameBuffers.pauseCamera.ensureOpened(runtimeConfig.secondaryCameraRtpPort)
+                    && statusFrameBuffers.pauseCamera.read(airPlayFrame, resized.size())
+                    && !airPlayFrame.empty();
+                if (hasAirPlayFrame) {
+                    if (airPlayFrame.size() == resized.size()) {
+                        backgroundFrame = airPlayFrame;
+                    } else {
+                        backgroundFrame = letterboxPauseCameraFrame(airPlayFrame, resized.size());
+                    }
+                    BenchmarkScope timer(benchmark, BenchmarkStage::Overlay);
+                    outputFrame = applyBackgroundImage(
+                        resized,
+                        outputMask,
+                        backgroundFrame,
+                        backgroundEffectBuffers);
+                } else {
+                    backgroundEffectBuffers.scaledBackgroundImage.release();
                     outputFrame = resized;
                 }
             } else if (runtimeConfig.backgroundEffect == BackgroundEffect::Color) {

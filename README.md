@@ -319,7 +319,7 @@ journalctl -u JONImageProcessor.service -f
 - `--mask-threshold <0.0..1.0>`: foreground threshold. A lower internal hysteresis threshold is used to keep weak person regions from disappearing immediately. Default: `0.5`.
 - `--mask-smoothing <0.0..1.0>`: temporal mask smoothing. Default: `0.65`.
 - `--mask-morphology <off|light|strong>`: mask cleanup mode. `light` and `strong` grow and feather the foreground mask to reduce over-cut body edges. Default: `light`.
-- `--background-effect <none|color|blur|image>`: background effect. `none` passes the camera frame through without background replacement. Default: `color`.
+- `--background-effect <none|color|blur|image|camera>`: background effect. `none` passes the camera frame through without background replacement. `camera` uses the AirPlay/secondary-camera RTP input as an aspect-ratio-preserved replacement background. Default: `color`.
 - `--background-image <path>`: image, video, or HTML file used by `--background-effect image`. JPEG/PNG are loaded as static images; video files are decoded with OpenCV; HTML/CSS/JavaScript is rendered through WPE WebKit when the binary was built with WPE support.
 - `--background-image-folder <path>`: base folder for background images selected through IPC. Default: `.`.
 - `--background-loop-if-video <true|false>`: loop the background media when it is a video. Default: `false`.
@@ -337,8 +337,8 @@ journalctl -u JONImageProcessor.service -f
 - `--pause-image-font-directory <path>`: directory for TTF pause image fonts. Default: `.`.
 - `--pause-image-font-align <left|center|right>`: status text alignment. The configured X position is interpreted as the left edge, center, or right edge. Default: `left`.
 - `--pause-preserve-aspect-ratio <true|false>`: letterbox secondary camera pause frames instead of stretching them. Default: `true`.
-- `--background-overlay-color <R,G,B>`: color used by `--background-effect color`. Ignored for none/blur/image. Default: `0,255,0`.
-- `--background-overlay-alpha <0.0..1.0>`: alpha used by `--background-effect color`. Ignored for none/blur/image. Default: `0.35`.
+- `--background-overlay-color <R,G,B>`: color used by `--background-effect color`. Ignored for none/blur/image/camera. Default: `0,255,0`.
+- `--background-overlay-alpha <0.0..1.0>`: alpha used by `--background-effect color`. Ignored for none/blur/image/camera. Default: `0.35`.
 - `--blur-strength <1..100>`: blur strength used by `--background-effect blur`. Default: `15`.
 - `--display-backend <highgui|drm>`: display backend. Default: `highgui`.
 - `--fullscreen`: request fullscreen display output.
@@ -475,6 +475,7 @@ Pause and AirPlay behavior:
 - `camera.enabled` is the JSON equivalent of IPC key `camera.enabled`; `camera.enable` is accepted as a compatibility spelling.
 - `pause.source=image` uses the configured pause image/video/HTML media.
 - `pause.source=camera` uses AirPlay RTP from `secondaryCamera.rtpPort`.
+- `background.effect=camera` uses the same AirPlay RTP input as an aspect-ratio-preserved replacement background behind the masked primary camera foreground.
 - Run uxplay with:
 
 ```bash
@@ -559,7 +560,7 @@ Runtime keys:
 - `camera.enabled`: boolean. When false, live camera processing is paused and a `Camera OFF` status screen is rendered. If the camera is already open, the V4L2 device remains open to avoid a close/reopen cycle.
 - `pause.enabled`: boolean. When true, camera status screens use `pause.image`; when false, they use the generated test pattern.
 - `pause.source`: `image` or `camera`.
-- `secondaryCamera.rtpPort`: read-only UDP RTP port used when `pause.source=camera`.
+- `secondaryCamera.rtpPort`: read-only UDP RTP port used when `pause.source=camera` or `background.effect=camera`.
 - `pause.image`: relative image name under `pause.folder` when set through IPC.
 - `pause.folder`: read-only base folder used when `pause.image` is set through IPC.
 - `pause.loopIfVideo`: boolean. Loop `pause.image` when OpenCV detects it as video.
@@ -574,7 +575,7 @@ Runtime keys:
 - `segmentation.threshold`: float `0.0..1.0`
 - `segmentation.smoothing`: float `0.0..1.0`
 - `segmentation.morphology`: `off`, `light`, `strong`
-- `background.effect`: `none`, `color`, `blur`, `image`
+- `background.effect`: `none`, `color`, `blur`, `image`, `camera`
 - `background.image`: relative image name under `background.folder` when set through IPC.
 - `background.folder`: read-only base folder used when `background.image` is set through IPC.
 - `background.loopIfVideo`: boolean. Loop `background.image` when OpenCV detects it as video.
@@ -591,7 +592,7 @@ Read-only key:
 - `configDirectory`: directory containing IPC-selectable overlay configuration files.
 - `system.configDirectory`: same value as grouped system field.
 - `system.version`: current binary version string.
-- `secondaryCamera.rtpPort`: read-only UDP RTP port used by the AirPlay RTP secondary camera mode.
+- `secondaryCamera.rtpPort`: read-only UDP RTP port used by the AirPlay RTP secondary camera mode for pause or background camera effects.
 - `benchmark`: current benchmark snapshot. This key is available only when benchmark mode is enabled with `--benchmark` or `diagnostics.benchmark`.
 
 Examples:

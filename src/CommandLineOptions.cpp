@@ -95,7 +95,7 @@ const std::vector<OptionDefinition>& optionDefinitions()
         {OptionMaskMorphology, 0, "mask-morphology", required_argument, "mode", "Mask morphology: off, light, or strong", "light"},
         {OptionCameraFormat, 0, "camera-format", required_argument, "format", "Camera pixel format: MJPG or YUYV", "MJPG"},
         {OptionCameraConnectTimeout, 0, "camera-connect-timeout", required_argument, "seconds", "Seconds to show Camera connecting before disconnected status", "10"},
-        {OptionBackgroundEffect, 0, "background-effect", required_argument, "effect", "Background effect: none, color, blur, or image", "color"},
+        {OptionBackgroundEffect, 0, "background-effect", required_argument, "effect", "Background effect: none, color, blur, image, or camera", "color"},
         {OptionBackgroundImage, 0, "background-image", required_argument, "path", "Image/video/html file for --background-effect image", ""},
         {OptionBackgroundImageFolder, 0, "background-image-folder", required_argument, "path", "Base folder for background images set through IPC", "."},
         {OptionBackgroundLoopIfVideo, 0, "background-loop-if-video", required_argument, "true|false", "Loop background file when it is a video", "false"},
@@ -113,8 +113,8 @@ const std::vector<OptionDefinition>& optionDefinitions()
         {OptionPauseImageFontDirectory, 0, "pause-image-font-directory", required_argument, "path", "Directory for TTF pause image fonts", "."},
         {OptionPauseImageFontAlign, 0, "pause-image-font-align", required_argument, "left|center|right", "Pause image status text alignment", "left"},
         {OptionPausePreserveAspectRatio, 0, "pause-preserve-aspect-ratio", required_argument, "true|false", "Letterbox secondary camera pause frames instead of stretching", "true"},
-        {OptionBackgroundOverlayColor, 0, "background-overlay-color", required_argument, "R,G,B", "Background color for --background-effect color; ignored for none/blur/image", "0,255,0"},
-        {OptionBackgroundOverlayAlpha, 0, "background-overlay-alpha", required_argument, "0.0..1.0", "Background alpha for --background-effect color; ignored for none/blur/image", "0.35"},
+        {OptionBackgroundOverlayColor, 0, "background-overlay-color", required_argument, "R,G,B", "Background color for --background-effect color; ignored for none/blur/image/camera", "0,255,0"},
+        {OptionBackgroundOverlayAlpha, 0, "background-overlay-alpha", required_argument, "0.0..1.0", "Background alpha for --background-effect color; ignored for none/blur/image/camera", "0.35"},
         {OptionBlurStrength, 0, "blur-strength", required_argument, "value", "Blur strength for --background-effect blur", "15"},
         {OptionDisplayBackend, 0, "display-backend", required_argument, "backend", "Display backend: highgui or drm", "highgui"},
         {OptionIpcSocket, 0, "ipc-socket", required_argument, "path", "Unix domain socket path, or 'none' to disable IPC", "/tmp/jonimageprocessor.sock"},
@@ -365,7 +365,8 @@ void warnMissingConfiguredFiles(const ProcessorConfig& config)
         LOG_WARNING("Configured pause HTML media is not supported in this build: " << pausePath);
     }
 #endif
-    if (config.pauseImageEnabled && config.pauseSource == PauseSource::Camera
+    if (((config.pauseImageEnabled && config.pauseSource == PauseSource::Camera)
+            || config.backgroundEffect == BackgroundEffect::Camera)
         && (config.secondaryCameraRtpPort < 1 || config.secondaryCameraRtpPort > 65535)) {
         LOG_WARNING("Configured secondary camera RTP port is invalid: " << config.secondaryCameraRtpPort);
     }
@@ -514,7 +515,11 @@ bool parseBackgroundEffect(const char* value, BackgroundEffect& effect, std::str
         effect = BackgroundEffect::Image;
         return true;
     }
-    error = "Invalid background effect: " + parsed + " (allowed: none, color, blur, image)";
+    if (parsed == "camera") {
+        effect = BackgroundEffect::Camera;
+        return true;
+    }
+    error = "Invalid background effect: " + parsed + " (allowed: none, color, blur, image, camera)";
     return false;
 }
 
@@ -1025,6 +1030,8 @@ std::string backgroundEffectToString(BackgroundEffect effect)
         return "blur";
     case BackgroundEffect::Image:
         return "image";
+    case BackgroundEffect::Camera:
+        return "camera";
     }
     return "unknown";
 }

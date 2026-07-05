@@ -28,7 +28,8 @@ enum class BackgroundEffect {
     None,
     Color,
     Blur,
-    Image
+    Image,
+    Camera
 };
 
 enum class PauseFontAlign {

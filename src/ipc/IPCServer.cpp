@@ -337,6 +337,7 @@ bool setStringEnum(const std::string& value, ProcessorConfig& config, const std:
         else if (value == "color") config.backgroundEffect = BackgroundEffect::Color;
         else if (value == "blur") config.backgroundEffect = BackgroundEffect::Blur;
         else if (value == "image") config.backgroundEffect = BackgroundEffect::Image;
+        else if (value == "camera") config.backgroundEffect = BackgroundEffect::Camera;
         else return false;
         return true;
     }

@@ -472,6 +472,7 @@ bool applyConfig(const Json& root, ProcessorConfig& config, ConfigLoadResult& re
             else if (effect == "color") config.backgroundEffect = BackgroundEffect::Color;
             else if (effect == "blur") config.backgroundEffect = BackgroundEffect::Blur;
             else if (effect == "image") config.backgroundEffect = BackgroundEffect::Image;
+            else if (effect == "camera") config.backgroundEffect = BackgroundEffect::Camera;
             else { error = "Invalid background.effect"; return false; }
         }
         if (!readString(*background, "image", config.backgroundImagePath, error)) return false;
