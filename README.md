@@ -532,7 +532,19 @@ Display mode is fixed to fill. The image fills the output canvas while preservin
 
 ## Benchmarking
 
-Use `--benchmark` to collect timing statistics for capture, resize, TensorRT preprocessing, TensorRT inference, postprocessing, mask upscale, background effect, display, total frame time, process CPU, and process memory. The values can be read through IPC. Add `--verbose` when benchmark progress and shutdown summaries should be written to the log.
+Use `--benchmark` or `diagnostics.benchmark=true` to collect runtime statistics for IPC. Add `--verbose` when benchmark progress and shutdown summaries should also be written to the log.
+
+The IPC `benchmark` snapshot includes:
+
+- `frames_processed`: processed frame count since startup.
+- `fps`: effective processing FPS derived from average pipeline time.
+- `avg_frame_ms`: average full pipeline time per processed frame.
+- `processing_total_ms`: average processing time after frame capture.
+- `pipeline_total_ms`: average end-to-end loop time per processed frame.
+- `cpu_total_seconds`: accumulated process CPU time, user plus system.
+- `cpu_percent`: average process CPU use since startup. This can exceed `100` when multiple threads are active.
+- `memory_rss_bytes`: current resident memory size.
+- `memory_peak_rss_bytes`: peak resident memory size reported by the OS.
 
 TensorRT segmentation preprocessing preserves the source aspect ratio with letterboxing instead of stretching the camera frame into the model input. The RGB input is normalized to `[-1..1]`, matching MODNet-style matting models. The padding is removed from the model output before the mask is composited back onto the processed frame. This keeps body proportions closer to the camera image at `384x384` model sizes.
 
@@ -611,6 +623,26 @@ echo '{"cmd":"list"}' | socat - UNIX-CONNECT:/tmp/jonimageprocessor.sock
 
 ```bash
 echo '{"cmd":"get","key":"benchmark"}' | socat - UNIX-CONNECT:/tmp/jonimageprocessor.sock
+```
+
+Example response:
+
+```json
+{
+  "ok": true,
+  "key": "benchmark",
+  "value": {
+    "frames_processed": 9124,
+    "fps": 24.8,
+    "avg_frame_ms": 40.3,
+    "processing_total_ms": 39.8,
+    "pipeline_total_ms": 40.3,
+    "cpu_total_seconds": 184.2,
+    "cpu_percent": 156.7,
+    "memory_rss_bytes": 812345678,
+    "memory_peak_rss_bytes": 845678901
+  }
+}
 ```
 
 ```bash
