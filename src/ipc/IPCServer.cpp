@@ -355,11 +355,13 @@ std::string benchmarkJson(const BenchmarkSnapshot& b)
     std::ostringstream out;
     out << "{\"frames_processed\":" << b.framesProcessed
         << ",\"fps\":" << b.fps
+        << ",\"current_fps\":" << b.currentFps
         << ",\"avg_frame_ms\":" << b.avgFrameMs
         << ",\"processing_total_ms\":" << b.processingTotalMs
         << ",\"pipeline_total_ms\":" << b.pipelineTotalMs
         << ",\"cpu_total_seconds\":" << b.cpuTotalSeconds
         << ",\"cpu_percent\":" << b.cpuPercent
+        << ",\"cpu_current_percent\":" << b.cpuCurrentPercent
         << ",\"memory_rss_bytes\":" << b.memoryRssBytes
         << ",\"memory_peak_rss_bytes\":" << b.memoryPeakRssBytes
         << "}";

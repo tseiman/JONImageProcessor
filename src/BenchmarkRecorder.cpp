@@ -13,6 +13,7 @@
 namespace {
 
 constexpr std::chrono::seconds ProgressInterval(1);
+constexpr std::chrono::seconds SnapshotInterval(1);
 
 std::size_t stageIndex(BenchmarkStage stage)
 {
@@ -96,6 +97,18 @@ double secondsFromTimeval(const timeval& value)
     return static_cast<double>(value.tv_sec) + static_cast<double>(value.tv_usec) / 1000000.0;
 }
 
+double currentProcessCpuSeconds(rusage* outUsage = nullptr)
+{
+    rusage usage {};
+    if (::getrusage(RUSAGE_SELF, &usage) != 0) {
+        return 0.0;
+    }
+    if (outUsage) {
+        *outUsage = usage;
+    }
+    return secondsFromTimeval(usage.ru_utime) + secondsFromTimeval(usage.ru_stime);
+}
+
 std::size_t currentResidentSetBytes()
 {
     std::ifstream statm("/proc/self/statm");
@@ -127,6 +140,8 @@ BenchmarkRecorder::BenchmarkRecorder(bool enabled, bool logEnabled)
     , logEnabled_(logEnabled)
     , startedAt_(std::chrono::steady_clock::now())
     , lastProgressLog_(startedAt_)
+    , intervalStartedAt_(startedAt_)
+    , intervalStartCpuSeconds_(currentProcessCpuSeconds())
 {
 }
 
@@ -148,6 +163,20 @@ void BenchmarkRecorder::frameCompleted()
 {
     if (enabled_) {
         ++frames_;
+        const auto now = std::chrono::steady_clock::now();
+        if (now - intervalStartedAt_ >= SnapshotInterval) {
+            const double elapsedSeconds = std::chrono::duration<double>(now - intervalStartedAt_).count();
+            const double cpuSeconds = currentProcessCpuSeconds();
+            currentFps_ = elapsedSeconds > 0.0
+                ? static_cast<double>(frames_ - intervalStartFrames_) / elapsedSeconds
+                : 0.0;
+            cpuCurrentPercent_ = elapsedSeconds > 0.0
+                ? ((cpuSeconds - intervalStartCpuSeconds_) / elapsedSeconds) * 100.0
+                : 0.0;
+            intervalStartFrames_ = frames_;
+            intervalStartedAt_ = now;
+            intervalStartCpuSeconds_ = cpuSeconds;
+        }
     }
 }
 
@@ -244,14 +273,24 @@ BenchmarkSnapshot BenchmarkRecorder::snapshot() const
     snapshot.framesProcessed = frames_;
     snapshot.avgFrameMs = pipelineAverageMilliseconds();
     snapshot.fps = snapshot.avgFrameMs > 0.0 ? 1000.0 / snapshot.avgFrameMs : 0.0;
+    const auto now = std::chrono::steady_clock::now();
+    const double intervalElapsedSeconds = std::chrono::duration<double>(now - intervalStartedAt_).count();
+    const double intervalCpuSeconds = currentProcessCpuSeconds();
+    const std::size_t intervalFrames = frames_ - intervalStartFrames_;
+    snapshot.currentFps = intervalElapsedSeconds > 0.0 && intervalFrames > 0
+        ? static_cast<double>(intervalFrames) / intervalElapsedSeconds
+        : currentFps_;
     snapshot.processingTotalMs = averageMilliseconds(BenchmarkStage::ProcessingTotal);
     snapshot.pipelineTotalMs = averageMilliseconds(BenchmarkStage::PipelineTotal);
 
     rusage usage {};
-    if (::getrusage(RUSAGE_SELF, &usage) == 0) {
-        snapshot.cpuTotalSeconds = secondsFromTimeval(usage.ru_utime) + secondsFromTimeval(usage.ru_stime);
-        const double elapsedSeconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - startedAt_).count();
+    snapshot.cpuTotalSeconds = currentProcessCpuSeconds(&usage);
+    if (snapshot.cpuTotalSeconds > 0.0) {
+        const double elapsedSeconds = std::chrono::duration<double>(now - startedAt_).count();
         snapshot.cpuPercent = elapsedSeconds > 0.0 ? (snapshot.cpuTotalSeconds / elapsedSeconds) * 100.0 : 0.0;
+        snapshot.cpuCurrentPercent = intervalElapsedSeconds > 0.0 && intervalFrames > 0
+            ? ((intervalCpuSeconds - intervalStartCpuSeconds_) / intervalElapsedSeconds) * 100.0
+            : cpuCurrentPercent_;
         snapshot.memoryPeakRssBytes = peakResidentSetBytes(usage);
     }
     snapshot.memoryRssBytes = currentResidentSetBytes();

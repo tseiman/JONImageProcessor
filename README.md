@@ -542,11 +542,13 @@ The IPC `benchmark` snapshot includes:
 
 - `frames_processed`: processed frame count since startup.
 - `fps`: effective processing FPS derived from average pipeline time.
+- `current_fps`: current processing FPS over the recent interval, approximately one second. UI clients should prefer this for live status and fall back to `fps` when it is unavailable.
 - `avg_frame_ms`: average full pipeline time per processed frame.
 - `processing_total_ms`: average processing time after frame capture.
 - `pipeline_total_ms`: average end-to-end loop time per processed frame.
 - `cpu_total_seconds`: accumulated process CPU time, user plus system.
 - `cpu_percent`: average process CPU use since startup. This can exceed `100` when multiple threads are active.
+- `cpu_current_percent`: current process CPU use over the recent interval, approximately one second. This can also exceed `100`; UI clients should prefer it for live load and fall back to `cpu_percent` when it is unavailable.
 - `memory_rss_bytes`: current resident memory size.
 - `memory_peak_rss_bytes`: peak resident memory size reported by the OS.
 
@@ -611,7 +613,7 @@ Read-only key:
 - `system.version`: current binary version string.
 - `secondaryCamera.rtpPort`: read-only UDP RTP port used by the AirPlay RTP secondary camera mode for pause or background camera effects.
 - `display.secondScreenAvailable`: read-only second display detection status.
-- `benchmark`: current benchmark snapshot. This key is available only when benchmark mode is enabled with `--benchmark` or `diagnostics.benchmark`. It includes frame counters/timing, accumulated process CPU (`cpu_total_seconds`, `cpu_percent`) and process RSS (`memory_rss_bytes`, `memory_peak_rss_bytes`).
+- `benchmark`: current benchmark snapshot. This key is available only when benchmark mode is enabled with `--benchmark` or `diagnostics.benchmark`. It includes frame counters/timing, current interval values (`current_fps`, `cpu_current_percent`), accumulated process CPU (`cpu_total_seconds`, `cpu_percent`) and process RSS (`memory_rss_bytes`, `memory_peak_rss_bytes`).
 
 Examples:
 
@@ -640,11 +642,13 @@ Example response:
   "value": {
     "frames_processed": 9124,
     "fps": 24.8,
+    "current_fps": 25.3,
     "avg_frame_ms": 40.3,
     "processing_total_ms": 39.8,
     "pipeline_total_ms": 40.3,
     "cpu_total_seconds": 184.2,
     "cpu_percent": 156.7,
+    "cpu_current_percent": 182.4,
     "memory_rss_bytes": 812345678,
     "memory_peak_rss_bytes": 845678901
   }

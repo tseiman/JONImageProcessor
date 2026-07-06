@@ -53,12 +53,17 @@ private:
     bool enabled_ = false;
     bool logEnabled_ = false;
     std::size_t frames_ = 0;
+    std::size_t intervalStartFrames_ = 0;
     std::size_t capturedFrames_ = 0;
     std::size_t droppedFrames_ = 0;
     std::chrono::steady_clock::duration captureElapsed_ {};
     StageStats stages_[static_cast<std::size_t>(BenchmarkStage::Count)];
     std::chrono::steady_clock::time_point startedAt_;
     std::chrono::steady_clock::time_point lastProgressLog_;
+    std::chrono::steady_clock::time_point intervalStartedAt_;
+    double intervalStartCpuSeconds_ = 0.0;
+    double currentFps_ = 0.0;
+    double cpuCurrentPercent_ = 0.0;
 };
 
 class BenchmarkScope {
