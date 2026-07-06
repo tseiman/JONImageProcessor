@@ -548,7 +548,7 @@ bool applyConfig(const Json& root, ProcessorConfig& config, ConfigLoadResult& re
     if (const Json* display = objectChild(root, "display")) {
         result.displayConfigured = true;
         if (display->type != Json::Type::Object) { error = "display must be an object"; return false; }
-        warnUnknownFields(*display, "display.", {"backend", "mode"});
+        warnUnknownFields(*display, "display.", {"backend", "mode", "secondScreen"});
         std::string backend;
         if (!readString(*display, "backend", backend, error)) return false;
         if (!backend.empty()) {
@@ -560,6 +560,7 @@ bool applyConfig(const Json& root, ProcessorConfig& config, ConfigLoadResult& re
         if (!readString(*display, "mode", mode, error)) return false;
         if (mode == "fullscreen") config.fullscreen = true;
         else if (!mode.empty()) LOG_WARNING("Ignoring unsupported JSON config field value: display.mode=" << mode);
+        if (!readBoolean(*display, "secondScreen", config.displaySecondScreen, error)) return false;
     }
 
     if (const Json* diagnostics = objectChild(root, "diagnostics")) {

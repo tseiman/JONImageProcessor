@@ -98,6 +98,8 @@ struct ProcessorConfig {
     double pauseImageTextSize = 1.6;
     int blurStrength = 15;
     bool fullscreen = false;
+    bool displaySecondScreen = false;
+    bool displaySecondScreenAvailable = false;
     bool verbose = false;
     bool benchmark = false;
     bool noDisplay = false;

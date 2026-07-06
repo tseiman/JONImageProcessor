@@ -381,6 +381,7 @@ std::string valueJson(const ProcessorConfig& c, const std::string& key, const Be
     if (key == "pause.enabled") return c.pauseImageEnabled ? "true" : "false";
     if (key == "pause.source") return "\"" + pauseSourceToString(c.pauseSource) + "\"";
     if (key == "secondaryCamera.rtpPort") return std::to_string(c.secondaryCameraRtpPort);
+    if (key == "display.secondScreenAvailable") return c.displaySecondScreenAvailable ? "true" : "false";
     if (key == "pause.image") return "\"" + escapeJson(c.pauseImagePath) + "\"";
     if (key == "pause.folder") return "\"" + escapeJson(c.pauseImageFolder) + "\"";
     if (key == "pause.loopIfVideo") return c.pauseLoopIfVideo ? "true" : "false";
@@ -417,6 +418,7 @@ bool knownKey(const std::string& key)
         || key == "pause.fontDirectory" || key == "pause.fontAlign" || key == "pause.preserveAspectRatio"
         || key == "runtime.noMask" || key == "runtime.noOverlay" || key == "camera.enabled"
         || key == "secondaryCamera.rtpPort"
+        || key == "display.secondScreenAvailable"
         || key == "version" || key == "system.version" || key == "configDirectory"
         || key == "system.configDirectory" || key == "config";
 }
@@ -579,6 +581,7 @@ std::string IPCServer::handleLine(const std::string& line)
             << "\",\"preserveAspectRatio\":" << (current.pausePreserveAspectRatio ? "true" : "false") << "}"
             << ",\"runtime\":{\"noMask\":" << (current.noMask ? "true" : "false")
             << ",\"noOverlay\":" << (current.noOverlay ? "true" : "false") << "}"
+            << ",\"display\":{\"secondScreenAvailable\":" << (current.displaySecondScreenAvailable ? "true" : "false") << "}"
             << ",\"system\":{\"version\":\"" << escapeJson(jonImageProcessorVersionText())
             << "\",\"configDirectory\":\"" << escapeJson(current.configDirectory) << "\"}"
             << ",\"config\":\"" << escapeJson(current.activeConfigName) << "\"";
@@ -614,6 +617,9 @@ std::string IPCServer::handleLine(const std::string& line)
     if (key == "configDirectory" || key == "system.configDirectory"
         || key == "background.folder" || key == "pause.folder" || key == "pause.fontDirectory"
         || key == "secondaryCamera.rtpPort") {
+        return loggedErrorResponse(key + " is read-only");
+    }
+    if (key == "display.secondScreenAvailable") {
         return loggedErrorResponse(key + " is read-only");
     }
     if (!knownKey(key)) {

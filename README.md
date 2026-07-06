@@ -341,6 +341,7 @@ journalctl -u JONImageProcessor.service -f
 - `--background-overlay-alpha <0.0..1.0>`: alpha used by `--background-effect color`. Ignored for none/blur/image/camera. Default: `0.35`.
 - `--blur-strength <1..100>`: blur strength used by `--background-effect blur`. Default: `15`.
 - `--display-backend <highgui|drm>`: display backend. Default: `highgui`.
+- `--display-second-screen <true|false>`: with the DRM backend, render the pause screen permanently on the second connected display output. Default: `false`.
 - `--fullscreen`: request fullscreen display output.
 - `--benchmark`: collect benchmark statistics for IPC. Benchmark log output is only written when `--verbose` is also enabled.
 - `--no-display`: disable display output.
@@ -435,7 +436,8 @@ Supported JSON groups:
   },
   "display": {
     "backend": "drm",
-    "mode": "fullscreen"
+    "mode": "fullscreen",
+    "secondScreen": false
   },
   "diagnostics": {
     "benchmark": false
@@ -468,7 +470,7 @@ Runtime overlays:
 - IPC key `config` applies an overlay live without restarting the service.
 - Valid config names contain only letters, digits, `_`, and `-`.
 - Invalid or missing overlay files leave the current runtime configuration unchanged.
-- Startup-only values in overlays are parsed but do not reinitialize display, TensorRT, IPC, processing size, camera device, or secondary camera RTP port.
+- Startup-only values in overlays are parsed but do not reinitialize display, TensorRT, IPC, processing size, camera device, secondary camera RTP port, or the second display output.
 
 Pause and AirPlay behavior:
 
@@ -528,7 +530,9 @@ Status screens:
 
 Video file input uses OpenCV file capture and processes frames sequentially.
 
-Display mode is fixed to fill. The image fills the output canvas while preserving aspect ratio. Cropping is allowed; stretching is not used. If the DRM/KMS display is not connected during service startup, JONImageProcessor stays alive and retries display initialization periodically. Camera capture is not started while the display is unavailable.
+Display mode is fixed to fill. The image fills the output canvas while preserving aspect ratio. Cropping is allowed; stretching is not used. If the DRM/KMS display is not connected during service startup, JONImageProcessor stays alive and retries display initialization periodically. Camera capture is not started while the primary display is unavailable.
+
+With `display.secondScreen=true` or `--display-second-screen true`, the DRM backend also opens the second connected DRM/KMS output and renders the configured pause screen there on every frame. This does not create a second AirPlay decoder; if the pause source is AirPlay camera, the same secondary-camera frame provider is shared. If fewer than two DRM outputs are connected, the option is ignored and `display.secondScreenAvailable` reports `false` through IPC.
 
 ## Benchmarking
 
@@ -573,6 +577,7 @@ Runtime keys:
 - `pause.enabled`: boolean. When true, camera status screens use `pause.image`; when false, they use the generated test pattern.
 - `pause.source`: `image` or `camera`.
 - `secondaryCamera.rtpPort`: read-only UDP RTP port used when `pause.source=camera` or `background.effect=camera`.
+- `display.secondScreenAvailable`: read-only boolean showing whether at least two DRM/KMS display outputs were detected at startup.
 - `pause.image`: relative image name under `pause.folder` when set through IPC.
 - `pause.folder`: read-only base folder used when `pause.image` is set through IPC.
 - `pause.loopIfVideo`: boolean. Loop `pause.image` when OpenCV detects it as video.
@@ -605,6 +610,7 @@ Read-only key:
 - `system.configDirectory`: same value as grouped system field.
 - `system.version`: current binary version string.
 - `secondaryCamera.rtpPort`: read-only UDP RTP port used by the AirPlay RTP secondary camera mode for pause or background camera effects.
+- `display.secondScreenAvailable`: read-only second display detection status.
 - `benchmark`: current benchmark snapshot. This key is available only when benchmark mode is enabled with `--benchmark` or `diagnostics.benchmark`. It includes frame counters/timing, accumulated process CPU (`cpu_total_seconds`, `cpu_percent`) and process RSS (`memory_rss_bytes`, `memory_peak_rss_bytes`).
 
 Examples:

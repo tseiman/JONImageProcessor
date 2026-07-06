@@ -8,3 +8,4 @@ struct ScreenInfo {
 };
 
 ScreenInfo detectPrimaryScreen();
+int detectConnectedDrmDisplayCount();

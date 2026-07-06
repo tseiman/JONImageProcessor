@@ -36,6 +36,7 @@ private:
 
     bool openDrmDevice();
     bool initializeDrmMode();
+    bool chooseCrtcForConnector(drmModeRes* resources, drmModeConnector* connector, drmModeEncoder* encoder);
     bool initializeEgl();
     bool initializeGl();
     bool initializeDumbBuffers();

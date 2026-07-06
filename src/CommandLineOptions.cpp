@@ -57,6 +57,7 @@ enum OptionId {
     OptionBackgroundOverlayAlpha,
     OptionBlurStrength,
     OptionFullscreen,
+    OptionDisplaySecondScreen,
     OptionDisplayBackend,
     OptionIpcSocket,
     OptionBenchmark,
@@ -117,6 +118,7 @@ const std::vector<OptionDefinition>& optionDefinitions()
         {OptionBackgroundOverlayAlpha, 0, "background-overlay-alpha", required_argument, "0.0..1.0", "Background alpha for --background-effect color; ignored for none/blur/image/camera", "0.35"},
         {OptionBlurStrength, 0, "blur-strength", required_argument, "value", "Blur strength for --background-effect blur", "15"},
         {OptionDisplayBackend, 0, "display-backend", required_argument, "backend", "Display backend: highgui or drm", "highgui"},
+        {OptionDisplaySecondScreen, 0, "display-second-screen", required_argument, "true|false", "Render the pause screen permanently on the second DRM display output", "false"},
         {OptionIpcSocket, 0, "ipc-socket", required_argument, "path", "Unix domain socket path, or 'none' to disable IPC", "/tmp/jonimageprocessor.sock"},
         {OptionFullscreen, 0, "fullscreen", no_argument, "", "Show fullscreen when display output is enabled", ""},
         {OptionBenchmark, 0, "benchmark", no_argument, "", "Enable benchmark mode", ""},
@@ -874,6 +876,9 @@ bool parseCommandLine(int argc, char** argv, CommandLineResult& result, std::str
             break;
         case OptionDisplayBackend:
             if (!parseDisplayBackend(optarg, result.config.displayBackend, error)) return false;
+            break;
+        case OptionDisplaySecondScreen:
+            if (!parseBooleanText(optarg, "--display-second-screen", result.config.displaySecondScreen, error)) return false;
             break;
         case OptionIpcSocket:
             result.config.ipcSocketPath = optarg;

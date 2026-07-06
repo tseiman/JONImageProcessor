@@ -49,7 +49,8 @@
   },
   "display": {
     "backend": "drm",
-    "mode": "fullscreen"
+    "mode": "fullscreen",
+    "secondScreen": false
   },
   "diagnostics": {
     "benchmark": false

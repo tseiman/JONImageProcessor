@@ -13,6 +13,7 @@ struct DisplayBackendConfig {
     bool fullscreen = false;
     bool forceCanvasFallbackSize = false;
     bool useScreenCanvasFallback = false;
+    int connectorIndex = 0;
 };
 
 class IDisplayBackend {

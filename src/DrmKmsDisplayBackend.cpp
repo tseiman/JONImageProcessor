@@ -8,6 +8,7 @@
 
 #include <opencv2/imgproc.hpp>
 
+#include <algorithm>
 #include <cerrno>
 #include <cstring>
 #include <fcntl.h>
@@ -407,11 +408,15 @@ bool DrmKmsDisplayBackend::initializeDrmMode()
     }
 
     drmModeConnector* selectedConnector = nullptr;
+    int connectedConnectorIndex = 0;
     for (int index = 0; index < resources->count_connectors; ++index) {
         drmModeConnector* connector = drmModeGetConnector(drmFd_, resources->connectors[index]);
         if (connector && connector->connection == DRM_MODE_CONNECTED && connector->count_modes > 0) {
-            selectedConnector = connector;
-            break;
+            if (connectedConnectorIndex == config_.connectorIndex) {
+                selectedConnector = connector;
+                break;
+            }
+            ++connectedConnectorIndex;
         }
         if (connector) {
             drmModeFreeConnector(connector);
@@ -420,7 +425,7 @@ bool DrmKmsDisplayBackend::initializeDrmMode()
 
     if (!selectedConnector) {
         drmModeFreeResources(resources);
-        LOG_ERROR("No connected DRM/KMS display connector with an active mode was found");
+        LOG_ERROR("No connected DRM/KMS display connector with index " << config_.connectorIndex << " was found");
         return false;
     }
 
@@ -453,15 +458,54 @@ bool DrmKmsDisplayBackend::initializeDrmMode()
         return false;
     }
 
-    crtcId_ = encoder->crtc_id != 0 ? encoder->crtc_id : resources->crtcs[0];
+    if (!chooseCrtcForConnector(resources, selectedConnector, encoder)) {
+        drmModeFreeEncoder(encoder);
+        drmModeFreeConnector(selectedConnector);
+        drmModeFreeResources(resources);
+        return false;
+    }
     originalCrtc_ = drmModeGetCrtc(drmFd_, crtcId_);
 
-    LOG_INFO("DRM/KMS display mode: " << mode_.hdisplay << "x" << mode_.vdisplay << " @ " << mode_.vrefresh << " Hz");
+    LOG_INFO("DRM/KMS display mode: connector-index=" << config_.connectorIndex
+        << " connector-id=" << connectorId_
+        << " " << mode_.hdisplay << "x" << mode_.vdisplay << " @ " << mode_.vrefresh << " Hz");
 
     drmModeFreeEncoder(encoder);
     drmModeFreeConnector(selectedConnector);
     drmModeFreeResources(resources);
     return true;
+}
+
+bool DrmKmsDisplayBackend::chooseCrtcForConnector(drmModeRes* resources, drmModeConnector* connector, drmModeEncoder* encoder)
+{
+    if (encoder && encoder->crtc_id != 0) {
+        crtcId_ = encoder->crtc_id;
+        return true;
+    }
+
+    for (int encoderIndex = 0; encoderIndex < connector->count_encoders; ++encoderIndex) {
+        drmModeEncoder* candidate = drmModeGetEncoder(drmFd_, connector->encoders[encoderIndex]);
+        if (!candidate) {
+            continue;
+        }
+        for (int crtcIndex = 0; crtcIndex < resources->count_crtcs; ++crtcIndex) {
+            if ((candidate->possible_crtcs & (1 << crtcIndex)) != 0) {
+                crtcId_ = resources->crtcs[crtcIndex];
+                drmModeFreeEncoder(candidate);
+                return true;
+            }
+        }
+        drmModeFreeEncoder(candidate);
+    }
+
+    if (resources->count_crtcs > 0) {
+        const int fallbackIndex = std::min(config_.connectorIndex, resources->count_crtcs - 1);
+        crtcId_ = resources->crtcs[fallbackIndex];
+        return true;
+    }
+
+    LOG_ERROR("No DRM/KMS CRTC available for connector " << connector->connector_id);
+    return false;
 }
 
 bool DrmKmsDisplayBackend::initializeEgl()

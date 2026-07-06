@@ -7,6 +7,12 @@
 #include <sstream>
 #include <string>
 
+#if defined(JON_ENABLE_DRM_DISPLAY)
+#include <fcntl.h>
+#include <unistd.h>
+#include <xf86drmMode.h>
+#endif
+
 #ifdef __APPLE__
 #include <CoreGraphics/CoreGraphics.h>
 #endif
@@ -55,6 +61,41 @@ ScreenInfo detectPrimaryScreenLinux()
 }
 #endif
 
+#if defined(__linux__) && defined(JON_ENABLE_DRM_DISPLAY)
+int detectConnectedDrmDisplayCountLinux()
+{
+    for (int index = 0; index < 8; ++index) {
+        const std::string path = "/dev/dri/card" + std::to_string(index);
+        const int fd = open(path.c_str(), O_RDWR | O_CLOEXEC);
+        if (fd < 0) {
+            continue;
+        }
+
+        int connected = 0;
+        drmModeRes* resources = drmModeGetResources(fd);
+        if (resources) {
+            for (int connectorIndex = 0; connectorIndex < resources->count_connectors; ++connectorIndex) {
+                drmModeConnector* connector = drmModeGetConnector(fd, resources->connectors[connectorIndex]);
+                if (connector && connector->connection == DRM_MODE_CONNECTED && connector->count_modes > 0) {
+                    ++connected;
+                }
+                if (connector) {
+                    drmModeFreeConnector(connector);
+                }
+            }
+            drmModeFreeResources(resources);
+        }
+
+        close(fd);
+        if (connected > 0) {
+            return connected;
+        }
+    }
+
+    return 0;
+}
+#endif
+
 } // namespace
 
 ScreenInfo detectPrimaryScreen()
@@ -71,5 +112,14 @@ ScreenInfo detectPrimaryScreen()
     return detectPrimaryScreenLinux();
 #else
     return ScreenInfo {};
+#endif
+}
+
+int detectConnectedDrmDisplayCount()
+{
+#if defined(__linux__) && defined(JON_ENABLE_DRM_DISPLAY)
+    return detectConnectedDrmDisplayCountLinux();
+#else
+    return 0;
 #endif
 }

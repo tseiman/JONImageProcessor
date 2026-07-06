@@ -1574,6 +1574,7 @@ struct StatusFrameBuffers {
 bool usesSecondaryCamera(const ProcessorConfig& config)
 {
     return (config.pauseImageEnabled && config.pauseSource == PauseSource::Camera)
+        || (config.displaySecondScreen && config.pauseImageEnabled && config.pauseSource == PauseSource::Camera)
         || (config.backgroundEffect == BackgroundEffect::Camera && !config.noOverlay && !config.noMask);
 }
 
@@ -2301,6 +2302,8 @@ void logStartupInfo(const ProcessorConfig& config, const ScreenInfo& screenInfo)
     LOG_VERBOSE("Input source: " << inputSource);
     LOG_VERBOSE("Display mode: " << displayModeToString(DisplayMode::Fill));
     LOG_VERBOSE("Display backend: " << displayBackendToString(config.displayBackend));
+    LOG_VERBOSE("Display second screen: " << (config.displaySecondScreen ? "true" : "false"));
+    LOG_VERBOSE("Display second screen available: " << (config.displaySecondScreenAvailable ? "true" : "false"));
     LOG_VERBOSE("Processing size: " << config.width << "x" << config.height);
     LOG_VERBOSE("Mask backend: tensorrt");
     LOG_VERBOSE("Segmentation size: " << config.segmentationWidth << "x" << config.segmentationHeight);
@@ -2382,6 +2385,8 @@ VideoProcessor::VideoProcessor(ProcessorConfig config)
 int VideoProcessor::run()
 {
     const ScreenInfo screenInfo = detectPrimaryScreen();
+    const int connectedDrmDisplays = detectConnectedDrmDisplayCount();
+    config_.displaySecondScreenAvailable = connectedDrmDisplays >= 2;
     logStartupInfo(config_, screenInfo);
     RuntimeState runtimeState(config_);
     IPCServer ipcServer(runtimeState, config_.ipcSocketPath);
@@ -2429,6 +2434,7 @@ int VideoProcessor::run()
     }
 
     std::unique_ptr<IDisplayBackend> displayBackend;
+    std::unique_ptr<IDisplayBackend> secondDisplayBackend;
     DisplayBackendConfig displayConfig;
     displayConfig.displayMode = DisplayMode::Fill;
     displayConfig.processingSize = outputSize;
@@ -2449,6 +2455,36 @@ int VideoProcessor::run()
             LOG_WARNING("Display backend is not available, waiting for display reconnect: "
                 << displayBackendToString(config_.displayBackend));
             displayBackend->shutdown();
+        }
+    }
+
+    DisplayBackendConfig secondDisplayConfig = displayConfig;
+    secondDisplayConfig.connectorIndex = 1;
+    bool secondDisplayRequested = showWindow
+        && config_.displaySecondScreen
+        && config_.displayBackend == DisplayBackendType::Drm;
+    bool secondDisplayReady = false;
+    if (config_.displaySecondScreen && config_.displayBackend != DisplayBackendType::Drm) {
+        LOG_WARNING("display.secondScreen requires the DRM display backend; second screen disabled");
+        secondDisplayRequested = false;
+    }
+    if (secondDisplayRequested && !config_.displaySecondScreenAvailable) {
+        LOG_WARNING("display.secondScreen requested but no second DRM display output is connected");
+        secondDisplayRequested = false;
+    }
+    if (secondDisplayRequested) {
+        secondDisplayBackend = DisplayBackendFactory::create(DisplayBackendType::Drm);
+        if (!secondDisplayBackend) {
+            LOG_WARNING("Cannot create second DRM display backend; second screen disabled");
+            secondDisplayRequested = false;
+        } else {
+            secondDisplayReady = secondDisplayBackend->initialize(secondDisplayConfig);
+            if (secondDisplayReady) {
+                LOG_INFO("Second DRM display output enabled for permanent pause screen");
+            } else {
+                LOG_WARNING("Second DRM display output is not available, waiting for reconnect");
+                secondDisplayBackend->shutdown();
+            }
         }
     }
 
@@ -2477,6 +2513,7 @@ int VideoProcessor::run()
     }
     auto nextReconnectAttempt = std::chrono::steady_clock::now();
     auto nextDisplayReconnectAttempt = std::chrono::steady_clock::now() + DisplayReconnectInterval;
+    auto nextSecondDisplayReconnectAttempt = std::chrono::steady_clock::now() + DisplayReconnectInterval;
     std::chrono::steady_clock::time_point cameraDevicePresentSince {};
     std::chrono::steady_clock::time_point cameraEnableStartedAt {};
     bool cameraWasDisabledByRuntime = !config_.cameraEnabled;
@@ -2527,6 +2564,19 @@ int VideoProcessor::run()
             }
             std::this_thread::sleep_for(std::chrono::milliseconds(100));
             continue;
+        }
+
+        if (secondDisplayRequested && !secondDisplayReady) {
+            const auto now = std::chrono::steady_clock::now();
+            if (now >= nextSecondDisplayReconnectAttempt && secondDisplayBackend) {
+                secondDisplayReady = secondDisplayBackend->initialize(secondDisplayConfig);
+                if (secondDisplayReady) {
+                    LOG_INFO("Second DRM display output connected");
+                } else {
+                    secondDisplayBackend->shutdown();
+                    nextSecondDisplayReconnectAttempt = now + DisplayReconnectInterval;
+                }
+            }
         }
 
         bool readOk = false;
@@ -2796,6 +2846,20 @@ int VideoProcessor::run()
             }
         }
 
+        if (secondDisplayRequested && secondDisplayReady && secondDisplayBackend) {
+            cv::Mat secondScreenFrame = makeStatusFrame(
+                outputSize,
+                runtimeConfig.pauseSource == PauseSource::Camera ? "Camera 2. DISCONNECTED" : "Pause",
+                &runtimeConfig,
+                &statusFrameBuffers);
+            if (!secondDisplayBackend->render(secondScreenFrame)) {
+                LOG_WARNING("Second DRM display render failed, waiting for display reconnect");
+                secondDisplayBackend->shutdown();
+                secondDisplayReady = false;
+                nextSecondDisplayReconnectAttempt = std::chrono::steady_clock::now() + DisplayReconnectInterval;
+            }
+        }
+
         ++frameIndex;
         ++intervalFrames;
         const auto frameEndedAt = std::chrono::steady_clock::now();
@@ -2851,6 +2915,9 @@ int VideoProcessor::run()
     ipcServer.stop();
     if (displayBackend) {
         displayBackend->shutdown();
+    }
+    if (secondDisplayBackend) {
+        secondDisplayBackend->shutdown();
     }
     captureBackend->close();
 
