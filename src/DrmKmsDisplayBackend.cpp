@@ -12,6 +12,7 @@
 #include <cerrno>
 #include <cstring>
 #include <fcntl.h>
+#include <mutex>
 #include <poll.h>
 #include <sstream>
 #include <sys/ioctl.h>
@@ -21,6 +22,10 @@
 #include <vector>
 
 namespace {
+
+std::mutex SharedDrmFdMutex;
+int SharedDrmFd = -1;
+std::string SharedDrmPath;
 
 constexpr const char* VertexShaderSource = R"(
 attribute vec2 aPosition;
@@ -298,6 +303,11 @@ void calculateRenderGeometry(
     vertices[15] = static_cast<GLfloat>(v1);
 }
 
+bool crtcIsPossibleForEncoder(drmModeEncoder* encoder, int crtcIndex)
+{
+    return encoder && crtcIndex >= 0 && (encoder->possible_crtcs & (1 << crtcIndex)) != 0;
+}
+
 void pageFlipHandler(int, unsigned int, unsigned int, unsigned int, void* data)
 {
     *static_cast<bool*>(data) = false;
@@ -361,6 +371,20 @@ bool DrmKmsDisplayBackend::initialize(const DisplayBackendConfig& config)
 
 bool DrmKmsDisplayBackend::openDrmDevice()
 {
+    if (config_.connectorIndex > 0) {
+        std::lock_guard<std::mutex> lock(SharedDrmFdMutex);
+        if (SharedDrmFd >= 0 && fcntl(SharedDrmFd, F_GETFD) != -1) {
+            drmFd_ = dup(SharedDrmFd);
+            if (drmFd_ >= 0) {
+                LOG_INFO("Opening DRM/KMS display device: " << SharedDrmPath
+                    << " (shared DRM master)");
+                return true;
+            }
+        }
+        SharedDrmFd = -1;
+        SharedDrmPath.clear();
+    }
+
     for (int index = 0; index < 8; ++index) {
         const std::string path = "/dev/dri/card" + std::to_string(index);
         drmFd_ = open(path.c_str(), O_RDWR | O_CLOEXEC);
@@ -388,6 +412,11 @@ bool DrmKmsDisplayBackend::openDrmDevice()
 
         if (hasConnectedDisplay) {
             LOG_INFO("Opening DRM/KMS display device: " << path);
+            if (config_.connectorIndex == 0) {
+                std::lock_guard<std::mutex> lock(SharedDrmFdMutex);
+                SharedDrmFd = drmFd_;
+                SharedDrmPath = path;
+            }
             return true;
         }
 
@@ -478,6 +507,21 @@ bool DrmKmsDisplayBackend::initializeDrmMode()
 
 bool DrmKmsDisplayBackend::chooseCrtcForConnector(drmModeRes* resources, drmModeConnector* connector, drmModeEncoder* encoder)
 {
+    if (config_.connectorIndex > 0 && config_.connectorIndex < resources->count_crtcs) {
+        for (int encoderIndex = 0; encoderIndex < connector->count_encoders; ++encoderIndex) {
+            drmModeEncoder* candidate = drmModeGetEncoder(drmFd_, connector->encoders[encoderIndex]);
+            if (!candidate) {
+                continue;
+            }
+            if (crtcIsPossibleForEncoder(candidate, config_.connectorIndex)) {
+                crtcId_ = resources->crtcs[config_.connectorIndex];
+                drmModeFreeEncoder(candidate);
+                return true;
+            }
+            drmModeFreeEncoder(candidate);
+        }
+    }
+
     if (encoder && encoder->crtc_id != 0) {
         crtcId_ = encoder->crtc_id;
         return true;
@@ -1028,6 +1072,13 @@ void DrmKmsDisplayBackend::shutdown()
         drmModeFreeCrtc(originalCrtc_);
     }
     if (drmFd_ >= 0) {
+        {
+            std::lock_guard<std::mutex> lock(SharedDrmFdMutex);
+            if (SharedDrmFd == drmFd_) {
+                SharedDrmFd = -1;
+                SharedDrmPath.clear();
+            }
+        }
         close(drmFd_);
     }
 
