@@ -551,6 +551,7 @@ The IPC `benchmark` snapshot includes:
 - `cpu_current_percent`: current process CPU use over the recent interval, approximately one second. This can also exceed `100`; UI clients should prefer it for live load and fall back to `cpu_percent` when it is unavailable.
 - `memory_rss_bytes`: current resident memory size.
 - `memory_peak_rss_bytes`: peak resident memory size reported by the OS.
+- `secondScreen`: `true` when the optional second DRM output is configured, detected, initialized, and currently active. It is `false` when `display.secondScreen` is disabled, no second output was detected, or second-screen rendering is currently disconnected.
 
 TensorRT segmentation preprocessing preserves the source aspect ratio with letterboxing instead of stretching the camera frame into the model input. The RGB input is normalized to `[-1..1]`, matching MODNet-style matting models. The padding is removed from the model output before the mask is composited back onto the processed frame. This keeps body proportions closer to the camera image at `384x384` model sizes.
 
@@ -613,7 +614,7 @@ Read-only key:
 - `system.version`: current binary version string.
 - `secondaryCamera.rtpPort`: read-only UDP RTP port used by the AirPlay RTP secondary camera mode for pause or background camera effects.
 - `display.secondScreenAvailable`: read-only second display detection status.
-- `benchmark`: current benchmark snapshot. This key is available only when benchmark mode is enabled with `--benchmark` or `diagnostics.benchmark`. It includes frame counters/timing, current interval values (`current_fps`, `cpu_current_percent`), accumulated process CPU (`cpu_total_seconds`, `cpu_percent`) and process RSS (`memory_rss_bytes`, `memory_peak_rss_bytes`).
+- `benchmark`: current benchmark snapshot. This key is available only when benchmark mode is enabled with `--benchmark` or `diagnostics.benchmark`. It includes frame counters/timing, current interval values (`current_fps`, `cpu_current_percent`), accumulated process CPU (`cpu_total_seconds`, `cpu_percent`), process RSS (`memory_rss_bytes`, `memory_peak_rss_bytes`), and the active second-screen state (`secondScreen`).
 
 Examples:
 
@@ -650,7 +651,8 @@ Example response:
     "cpu_percent": 156.7,
     "cpu_current_percent": 182.4,
     "memory_rss_bytes": 812345678,
-    "memory_peak_rss_bytes": 845678901
+    "memory_peak_rss_bytes": 845678901,
+    "secondScreen": true
   }
 }
 ```

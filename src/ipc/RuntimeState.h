@@ -16,6 +16,7 @@ struct BenchmarkSnapshot {
     double cpuCurrentPercent = 0.0;
     std::size_t memoryRssBytes = 0;
     std::size_t memoryPeakRssBytes = 0;
+    bool secondScreen = false;
 };
 
 class RuntimeState {

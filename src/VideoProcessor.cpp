@@ -2866,7 +2866,9 @@ int VideoProcessor::run()
         benchmark.add(BenchmarkStage::ProcessingTotal, frameEndedAt - processingStartedAt);
         benchmark.add(BenchmarkStage::PipelineTotal, frameEndedAt - pipelineStartedAt);
         benchmark.frameCompleted();
-        runtimeState.updateBenchmark(benchmark.snapshot());
+        BenchmarkSnapshot benchmarkSnapshot = benchmark.snapshot();
+        benchmarkSnapshot.secondScreen = secondDisplayRequested && secondDisplayReady;
+        runtimeState.updateBenchmark(benchmarkSnapshot);
         benchmark.maybeLogProgress();
 
         if (config_.verbose) {

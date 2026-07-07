@@ -364,6 +364,7 @@ std::string benchmarkJson(const BenchmarkSnapshot& b)
         << ",\"cpu_current_percent\":" << b.cpuCurrentPercent
         << ",\"memory_rss_bytes\":" << b.memoryRssBytes
         << ",\"memory_peak_rss_bytes\":" << b.memoryPeakRssBytes
+        << ",\"secondScreen\":" << (b.secondScreen ? "true" : "false")
         << "}";
     return out.str();
 }
